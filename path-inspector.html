@@ -1,76 +1,142 @@
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Haptic Test 2</title>
+<title>Gyro Test</title>
 <style>
 :root{color-scheme:dark;--bg:#0d0b14;--panel:#17131f;--line:#2c2639;--fg:#efeaf7;--muted:#9b93ad;--accent:#a24bff;--ok:#3ddc84;--bad:#ff5a6e}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,system-ui,sans-serif;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(28px + env(safe-area-inset-bottom,0px))}
+body{margin:0;background:radial-gradient(120% 80% at 50% 30%,#22103a,var(--bg) 60%);color:var(--fg);font:15px/1.45 -apple-system,system-ui,sans-serif;min-height:100vh;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(24px + env(safe-area-inset-bottom,0px));overflow-x:hidden}
 h1{font-size:22px;margin:0 0 4px}
 .lede{color:var(--muted);margin:0 0 12px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px;display:grid;gap:8px;margin-bottom:10px}
-.card h2{font-size:15px;margin:0}
-.card small{color:var(--muted);font-size:12.5px}
-.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.btn{position:relative;display:inline-flex;align-items:center;justify-content:center;font:600 15px system-ui;padding:12px 18px;border-radius:12px;border:0;background:var(--accent);color:#fff;overflow:hidden;user-select:none;-webkit-user-select:none}
-.btn:active{transform:scale(.96)}
-.vote{font:600 13px system-ui;padding:8px 12px;border-radius:12px;background:transparent;border:1px solid var(--line);color:var(--fg)}
-.vote.on.y{background:var(--ok);color:#062010;border-color:transparent}
-.vote.on.n{background:var(--bad);color:#2a0008;border-color:transparent}
-.count{font:600 13px ui-monospace,Menlo,monospace;color:var(--muted)}
-/* A: a real switch stretched over the whole button, almost invisible */
-.ov input[switch]{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:.011;-webkit-appearance:auto;appearance:auto;cursor:pointer}
-/* B: same, but fully see-through */
-.ov0 input[switch]{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
-/* C: whole button is a label wrapping a tiny on-screen switch */
-.lb input[switch]{position:absolute;right:6px;bottom:6px;width:20px;height:12px;margin:0;opacity:.011;pointer-events:none}
-/* D: label + switch clipped to 1px but still on screen */
-.clip input[switch]{position:absolute;left:50%;top:50%;width:1px;height:1px;margin:0;clip-path:inset(50%);pointer-events:none}
-/* E: scaled-up real switch, invisible, centered */
-.big input[switch]{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(4);margin:0;opacity:.011}
-pre{margin:0;font:12px ui-monospace,Menlo,monospace;white-space:pre-wrap;color:#d8d0ea}
+.stage{display:grid;place-items:center;perspective:900px;margin:18px 0 8px}
+.tilt{width:min(64vw,250px);transform-style:preserve-3d;will-change:transform;filter:drop-shadow(0 18px 40px rgba(0,0,0,.5));position:relative}
+.tilt svg{width:100%;height:auto;display:block;overflow:visible}
+.glare{position:absolute;inset:0 0 18% 0;border-radius:50%;pointer-events:none;mix-blend-mode:screen;opacity:.55;
+  background:radial-gradient(circle at var(--gx,50%) var(--gy,30%),rgba(255,255,255,.55),rgba(255,255,255,0) 45%)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center}
+button{font:600 15px system-ui;padding:12px 16px;border-radius:12px;border:0;background:var(--accent);color:#fff}
+button.ghost{background:var(--panel);border:1px solid var(--line);color:var(--fg)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;margin-top:12px;font:12.5px ui-monospace,Menlo,monospace;white-space:pre-wrap;color:#d8d0ea}
+.status{text-align:center;font-size:14px;margin:8px 0;color:var(--muted)}
+.status b.y{color:var(--ok)}.status b.n{color:var(--bad)}
+.rb-shine{animation:rbSweep 2.8s cubic-bezier(.45,0,.2,1) infinite}
+@keyframes rbSweep{0%{transform:translateX(-140px) skewX(-18deg)}55%,100%{transform:translateX(160px) skewX(-18deg)}}
+.rb-spark{transform-box:fill-box;transform-origin:center;animation:rbTwinkle 2.2s ease-in-out infinite}
+@keyframes rbTwinkle{0%,100%{opacity:0;transform:scale(.3)}50%{opacity:1;transform:scale(1)}}
+.rb-glow{animation:rbPulse 2.8s ease-in-out infinite}
+@keyframes rbPulse{50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){.rb-shine,.rb-spark,.rb-glow{animation:none}.rb-spark{opacity:.8}}
 </style></head><body>
-<h1>Haptic Test 2</h1>
-<p class="lede">Round one showed only a real finger tap on a switch makes a buzz. These hide a real switch exactly where you tap, in different ways. Tap each button a few times, then mark it.</p>
-
-<div id="list"></div>
-
-<div class="card">
-  <h2>Baseline: visible switch</h2>
-  <small>The one you already felt.</small>
-  <div class="row"><input type="checkbox" switch style="transform:scale(1.4);margin:6px 12px"></div>
-</div>
-
-<div class="card">
-  <button class="btn" id="copy" style="width:100%">Copy results</button>
-  <pre id="out"></pre>
-</div>
-
+<h1>Gyro Test</h1>
+<p class="lede">Tap Start gyro, allow motion access if asked, then tilt your phone. The badge should follow. Copy the results at the bottom and paste them to Claude.</p>
+<div class="row"><button id="go">Start gyro</button><button class="ghost" id="tier">Next badge</button><button class="ghost" id="zero">Re-center</button></div>
+<div class="status" id="status">Not started</div>
+<div class="stage"><div class="tilt" id="tilt"><div id="art"></div><div class="glare"></div></div></div>
+<div class="panel" id="out"></div>
+<div class="row" style="margin-top:10px"><button id="copy">Copy results</button></div>
 <script>
-const TESTS = [
-  { id:'overlay', cls:'ov', name:'A. Invisible switch over the button', desc:'A real switch stretched over the button at 1% opacity. Your finger flips it.', html:'<input type="checkbox" switch>' },
-  { id:'overlay0', cls:'ov0', name:'B. Fully see-through switch over the button', desc:'Same as A but 0% opacity.', html:'<input type="checkbox" switch>' },
-  { id:'labelWrap', cls:'lb', tag:'label', name:'C. Button is a label for a tiny switch', desc:'Tapping anywhere on the button flips a tiny real switch inside it.', html:'<input type="checkbox" switch tabindex="-1">' },
-  { id:'labelClip', cls:'clip', tag:'label', name:'D. Label + 1px clipped switch', desc:'Like C, but the switch is shrunk to one pixel.', html:'<input type="checkbox" switch tabindex="-1">' },
-  { id:'bigSwitch', cls:'big', name:'E. Huge invisible switch', desc:'A real switch scaled up 4x over the button.', html:'<input type="checkbox" switch>' }
+const RB_TIERS = [
+  { n:'Ember',    c:['#ffb08f','#ff6a3d','#a8321a'] },
+  { n:'Flame',    c:['#ffd08a','#ff9f0a','#b35f00'] },
+  { n:'Blaze',    c:['#fff2a0','#ffd60a','#a88a00'] },
+  { n:'Inferno',  c:['#ff9db3','#ff2d55','#9a0f2e'] },
+  { n:'Champion', c:['#fff4c9','#e9bb4f','#8a6115'], champ:true }
 ];
-const res = {}, list = document.getElementById('list');
-list.innerHTML = TESTS.map(t => `<div class="card" data-id="${t.id}"><h2>${t.name}</h2><small>${t.desc}</small>
-  <div class="row"><${t.tag || 'div'} class="btn ${t.cls}">Tap me${t.html}</${t.tag || 'div'}><span class="count">0 taps</span><span style="flex:1"></span><button class="vote y">Felt it</button><button class="vote n">Nothing</button></div></div>`).join('');
-TESTS.forEach(t => {
-  const card = list.querySelector(`[data-id="${t.id}"]`), b = card.querySelector('.btn'), c = card.querySelector('.count');
-  let n = 0;
-  b.addEventListener('click', ev => { if (t.tag === 'label' && ev.target.tagName === 'INPUT') return; n++; c.textContent = n + ' tap' + (n === 1 ? '' : 's'); res[t.id] = Object.assign(res[t.id] || {}, { taps: n }); show(); });
-  card.querySelectorAll('.vote').forEach(v => v.addEventListener('click', () => {
-    card.querySelectorAll('.vote').forEach(x => x.classList.remove('on')); v.classList.add('on');
-    res[t.id] = Object.assign(res[t.id] || {}, { felt: v.classList.contains('y') }); show();
-  }));
-});
-function show(){ document.getElementById('out').textContent = JSON.stringify({ ua: navigator.userAgent, results: res }, null, 2); }
+const RB_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+let rbUid = 0;
+const rbTierIdx = n => Math.max(0, RB_TIERS.findIndex(t => t.n === n));
+const RB_ICON = [
+  /* Jan snowflake */ g => `<g stroke="${g.s}" stroke-width="4" stroke-linecap="round" fill="none">${[0,60,120].map(a=>`<g transform="rotate(${a} 30 30)"><path d="M30 6 V54"/><path d="M23 12 L30 19 L37 12 M23 48 L30 41 L37 48"/></g>`).join('')}</g><circle cx="30" cy="30" r="5" fill="${g.f}"/>`,
+  /* Feb heart */ g => `<path d="M30 52 C10 38 4 28 6 18 C8 9 20 6 30 16 C40 6 52 9 54 18 C56 28 50 38 30 52Z" fill="${g.f}"/><path d="M16 17 C18 13 22 12 25 14" stroke="rgba(255,255,255,.6)" stroke-width="3" fill="none" stroke-linecap="round"/>`,
+  /* Mar clover */ g => `<g fill="${g.f}"><circle cx="30" cy="17" r="11"/><circle cx="18" cy="31" r="11"/><circle cx="42" cy="31" r="11"/></g><path d="M30 32 Q32 46 40 54" stroke="${g.s}" stroke-width="4" fill="none" stroke-linecap="round"/>`,
+  /* Apr raindrop */ g => `<path d="M30 4 C30 4 48 26 48 38 A18 18 0 0 1 12 38 C12 26 30 4 30 4Z" fill="${g.f}"/><path d="M21 38 A9 9 0 0 0 28 47" stroke="rgba(255,255,255,.6)" stroke-width="3" fill="none" stroke-linecap="round"/>`,
+  /* May flower */ g => `<g fill="${g.f}">${[0,72,144,216,288].map(a=>`<ellipse cx="30" cy="15" rx="8" ry="12" transform="rotate(${a} 30 30)"/>`).join('')}</g><circle cx="30" cy="30" r="8" fill="${g.s2}"/>`,
+  /* Jun sun */ g => `<g stroke="${g.s}" stroke-width="4" stroke-linecap="round">${[0,45,90,135,180,225,270,315].map(a=>`<path d="M30 3 V10" transform="rotate(${a} 30 30)"/>`).join('')}</g><circle cx="30" cy="30" r="14" fill="${g.f}"/>`,
+  /* Jul firework */ g => `<g stroke="${g.s}" stroke-width="3.5" stroke-linecap="round">${[0,30,60,90,120,150,180,210,240,270,300,330].map((a,i)=>`<path d="M30 ${i%2?12:6} V${i%2?19:15}" transform="rotate(${a} 30 30)"/>`).join('')}</g><path d="M30 20 L33 27 L40 30 L33 33 L30 40 L27 33 L20 30 L27 27Z" fill="${g.f}"/>`,
+  /* Aug wave */ g => `<path d="M4 40 C14 40 14 22 26 22 C36 22 38 32 32 34 C28 35 27 30 30 29 C40 26 46 40 56 40 V54 H4Z" fill="${g.f}"/><path d="M4 48 C12 44 18 50 26 46 C34 42 40 50 56 46" stroke="rgba(255,255,255,.45)" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
+  /* Sep leaf */ g => `<path d="M30 4 L35 16 L46 11 L43 23 L55 24 L46 33 L52 40 L38 39 L36 48 L30 42 L24 48 L22 39 L8 40 L14 33 L5 24 L17 23 L14 11 L25 16Z" fill="${g.f}"/><path d="M30 20 V58" stroke="${g.s}" stroke-width="3.5" stroke-linecap="round"/>`,
+  /* Oct pumpkin */ g => `<path d="M30 14 C31 9 33 6 37 4" stroke="#5b8c2a" stroke-width="4.5" fill="none" stroke-linecap="round"/><path d="M33 9 C40 6 46 9 46 13 C41 14 36 13 33 9Z" fill="#6fae34"/>
+     <g fill="${g.f}"><ellipse cx="17" cy="35" rx="13" ry="17"/><ellipse cx="43" cy="35" rx="13" ry="17"/><ellipse cx="30" cy="35" rx="13" ry="19"/></g>
+     <path d="M23 20 C20 28 20 42 23 52 M37 20 C40 28 40 42 37 52" stroke="${g.s2}" stroke-width="2.2" fill="none" opacity=".55"/>
+     <path d="M12 26 C10 30 10 36 12 40" stroke="rgba(255,255,255,.55)" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
+  /* Nov acorn */ g => `<path d="M30 6 V12" stroke="${g.s2}" stroke-width="4" stroke-linecap="round"/><path d="M12 24 C12 14 48 14 48 24 C48 28 12 28 12 24Z" fill="${g.s2}"/><path d="M15 27 H45 C45 42 38 52 30 56 C22 52 15 42 15 27Z" fill="${g.f}"/><path d="M21 32 C21 38 23 43 26 47" stroke="rgba(255,255,255,.55)" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
+  /* Dec tree */ g => `<path d="M30 6 L33 11 L38 12 L34 15 L35 20 L30 17 L25 20 L26 15 L22 12 L27 11Z" fill="#fff6c8"/><g fill="${g.f}"><path d="M30 16 L44 32 H16Z"/><path d="M30 24 L48 44 H12Z"/></g><rect x="26" y="44" width="8" height="10" rx="2" fill="${g.s2}"/>`
+];
+
+function rankBadge(m, t, size, year){
+  const T = RB_TIERS[t], id = 'rb' + (rbUid++), C = T.c; const YEAR = year || new Date().getFullYear();
+  const g = { f:`url(#${id}g)`, s:C[1], s2:C[2] };
+  const champ = !!T.champ;
+  return `<svg viewBox="-6 -8 152 178" role="img" aria-label="${RB_MONTHS[m]} ${YEAR}, ${T.n} badge"${size ? ` width="${size}"` : ''}>
+    <defs>
+      <linearGradient id="${id}g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${C[0]}"/><stop offset=".5" stop-color="${C[1]}"/><stop offset="1" stop-color="${C[2]}"/></linearGradient>
+      <linearGradient id="${id}r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${C[0]}"/><stop offset=".45" stop-color="${C[1]}"/><stop offset="1" stop-color="${C[2]}"/></linearGradient>
+      <radialGradient id="${id}bg" cx=".5" cy=".35" r=".7"><stop offset="0" stop-color="${C[1]}" stop-opacity=".28"/><stop offset="1" stop-color="#120e19"/></radialGradient>
+      <clipPath id="${id}c"><circle cx="70" cy="64" r="52"/></clipPath>
+      <linearGradient id="${id}sh" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".75"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    </defs>
+    ${champ ? `<circle class="rb-glow" cx="70" cy="64" r="66" fill="${C[1]}" opacity=".28"/>` : ''}
+    <!-- medallion -->
+    <circle cx="70" cy="64" r="60" fill="url(#${id}r)"/>
+    <circle cx="70" cy="64" r="55" fill="#120e19"/>
+    <circle cx="70" cy="64" r="52" fill="url(#${id}bg)" stroke="${C[1]}" stroke-opacity=".5" stroke-width="1.5"/>
+    ${champ ? [0,45,90,135,180,225,270,315].map(a=>`<circle cx="70" cy="8" r="2.4" fill="${C[0]}" transform="rotate(${a} 70 64)"/>`).join('') : ''}
+    <g transform="translate(29 23) scale(1.37)">${RB_ICON[m](g)}</g>
+    ${champ ? `<g clip-path="url(#${id}c)"><rect class="rb-shine" x="40" y="0" width="34" height="130" fill="url(#${id}sh)"/></g>
+      <path class="rb-spark" style="animation-delay:.2s" d="M112 18 l2 6 l6 2 l-6 2 l-2 6 l-2 -6 l-6 -2 l6 -2z" fill="#fff8dc"/>
+      <path class="rb-spark" style="animation-delay:1.1s" d="M24 98 l1.6 4.4 l4.4 1.6 l-4.4 1.6 l-1.6 4.4 l-1.6 -4.4 l-4.4 -1.6 l4.4 -1.6z" fill="#fff8dc"/>
+      <path class="rb-spark" style="animation-delay:1.7s" d="M30 26 l1.3 3.7 l3.7 1.3 l-3.7 1.3 l-1.3 3.7 l-1.3 -3.7 l-3.7 -1.3 l3.7 -1.3z" fill="#fff8dc"/>` : ''}
+    <!-- ribbon with the year -->
+    <path d="M22 122 H118 L110 136 L118 150 H22 L30 136Z" fill="url(#${id}r)"/>
+    <path d="M22 122 H118 L110 136 L118 150 H22 L30 136Z" fill="none" stroke="rgba(0,0,0,.25)"/>
+    <text x="70" y="141" text-anchor="middle" font-family="ui-rounded,'SF Pro Rounded',system-ui,sans-serif" font-weight="800" font-size="15" letter-spacing="2" fill="${t === 2 || champ ? '#2a1c05' : '#fff'}">${YEAR}</text>
+    ${champ ? `<g clip-path="url(#${id}c)"></g>` : ''}
+  </svg>`;
+}
+
+
+const R = { ua: navigator.userAgent, hasDOE: typeof DeviceOrientationEvent !== 'undefined', hasDME: typeof DeviceMotionEvent !== 'undefined',
+  needsPermission: typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function', permission: null, events: 0, motionEvents: 0, sample: null, error: null };
+let tier = 4; const art = document.getElementById('art'), tilt = document.getElementById('tilt');
+const drawBadge = () => art.innerHTML = rankBadge(new Date().getMonth(), tier);
+drawBadge();
+document.getElementById('tier').onclick = () => { tier = (tier + 1) % 5; drawBadge(); };
+const st = document.getElementById('status'), out = document.getElementById('out');
+const show = () => out.textContent = JSON.stringify(R, null, 2);
 show();
-document.getElementById('copy').addEventListener('click', async () => {
-  const t = document.getElementById('out').textContent, b = document.getElementById('copy');
+
+// smooth the motion so it glides instead of jittering
+let base = null, tx = 0, ty = 0, cx = 0, cy = 0, raf = 0;
+function frame(){ cx += (tx - cx) * .18; cy += (ty - cy) * .18;
+  tilt.style.transform = 'rotateY(' + cx.toFixed(2) + 'deg) rotateX(' + cy.toFixed(2) + 'deg)';
+  tilt.style.setProperty('--gx', (50 + cx * 2).toFixed(1) + '%'); tilt.style.setProperty('--gy', (30 - cy * 2).toFixed(1) + '%');
+  raf = requestAnimationFrame(frame); }
+function onOrient(e){
+  if (e.beta == null && e.gamma == null) return;
+  R.events++;
+  if (!base) base = { b: e.beta || 0, g: e.gamma || 0 };
+  const db = (e.beta || 0) - base.b, dg = (e.gamma || 0) - base.g;
+  tx = Math.max(-25, Math.min(25, dg * 1.2)); ty = Math.max(-25, Math.min(25, -db * 1.2));
+  if (R.events % 15 === 1){ R.sample = { alpha: e.alpha && +e.alpha.toFixed(1), beta: e.beta && +e.beta.toFixed(1), gamma: e.gamma && +e.gamma.toFixed(1), absolute: e.absolute }; show(); }
+  st.innerHTML = 'Gyro: <b class="y">working</b> · ' + R.events + ' readings';
+}
+function onMotion(){ R.motionEvents++; }
+document.getElementById('zero').onclick = () => { base = null; };
+document.getElementById('go').onclick = async () => {
+  try {
+    if (R.needsPermission){
+      R.permission = await DeviceOrientationEvent.requestPermission();
+      try { if (DeviceMotionEvent.requestPermission) R.motionPermission = await DeviceMotionEvent.requestPermission(); } catch(e){ R.motionPermission = 'error: ' + e.message; }
+      if (R.permission !== 'granted'){ st.innerHTML = 'Gyro: <b class="n">permission ' + R.permission + '</b>'; show(); return; }
+    } else R.permission = 'not required';
+    addEventListener('deviceorientation', onOrient); addEventListener('devicemotion', onMotion);
+    if (!raf) frame();
+    st.textContent = 'Listening… tilt your phone';
+    setTimeout(() => { if (!R.events){ st.innerHTML = 'Gyro: <b class="n">no readings</b> · Path may be blocking motion'; } show(); }, 2500);
+  } catch(e){ R.error = e.name + ': ' + e.message; st.innerHTML = 'Gyro: <b class="n">' + R.error + '</b>'; show(); }
+};
+document.getElementById('copy').onclick = async () => {
+  show(); const t = out.textContent, b = document.getElementById('copy');
   try { await navigator.clipboard.writeText(t); b.textContent = 'Copied'; }
-  catch(e){ const r = document.createRange(); r.selectNodeContents(document.getElementById('out')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); b.textContent = 'Selected, use Copy'; }
+  catch(e){ const r = document.createRange(); r.selectNodeContents(out); const s = getSelection(); s.removeAllRanges(); s.addRange(r); b.textContent = 'Selected, use Copy'; }
   setTimeout(() => b.textContent = 'Copy results', 1600);
-});
-</script>
-</body></html>
+};
+</script></body></html>
