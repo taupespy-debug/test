@@ -875,6 +875,49 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:non
 .soc-follow{min-width:104px;transition:background .25s ease,color .25s ease,box-shadow .25s ease}
 .soc-counts b[data-cnt]{display:inline-block;min-width:1.2ch;text-align:right}
 #socResults,#socFollowing .soc-list{transition:opacity .15s}
+/* ===== badge book ===== */
+.bb{display:grid;gap:12px}
+.bb-bar{height:6px;border-radius:99px;background:var(--track);overflow:hidden}
+.bb-bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent),var(--tint2))}
+.bb-cat{display:grid;gap:6px}
+.bb-cat-n{font:700 11px var(--f-round);letter-spacing:.16em;text-transform:uppercase}
+.bb-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.bb-item{border:0;background:transparent;padding:2px;display:grid;justify-items:center;gap:2px;color:inherit;position:relative;overflow:hidden;border-radius:14px}
+.bb-art{position:relative;width:100%;max-width:72px;display:block}
+.bb-art svg{width:100%;height:auto;display:block;overflow:visible}
+.bb-item.locked .bb-art svg{filter:grayscale(1) brightness(.55);opacity:.55}
+.bb-lock{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.6);display:grid;place-items:center}
+.bb-lock svg{width:13px;height:13px;fill:none;stroke:#fff;stroke-width:2.2;stroke-linecap:round;filter:none!important;opacity:1!important}
+.bb-name{font:600 10.5px var(--f-round);color:var(--muted);text-align:center;line-height:1.2;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bb-item.got .bb-name{color:var(--fg)}
+.bv-locked svg{filter:grayscale(1) brightness(.6)}
+.bv-how{margin:8px 0 0;max-width:300px;color:#ddd5ea;font-size:15px;line-height:1.4;opacity:0;transition:opacity .4s ease .25s}
+.bv.on .bv-how{opacity:1}
+.bv-state{margin-top:6px;font:700 12px var(--f-round);letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;border-radius:99px;background:rgba(255,255,255,.08);color:#bdb4cc}
+.bv-state.ok{background:color-mix(in srgb,var(--good) 25%,transparent);color:var(--good)}
+.spb-shine{animation:spbShine 3.2s ease-in-out infinite}
+@keyframes spbShine{0%{transform:translateX(-70px)}55%,100%{transform:translateX(90px)}}
+.spb-spark{animation:spbTwinkle 2.2s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+@keyframes spbTwinkle{0%,100%{opacity:0;transform:scale(.4)}50%{opacity:1;transform:scale(1)}}
+.spb-glitch{animation:spbGlitch 2.6s steps(1) infinite}
+@keyframes spbGlitch{0%,92%,100%{transform:none}93%{transform:translate(2px,-1px)}95%{transform:translate(-2px,1px)}97%{transform:translate(1px,2px)}}
+.spb-holo{animation:spbHolo 6s linear infinite}
+@keyframes spbHolo{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spb-shine,.spb-spark,.spb-glitch,.spb-holo{animation:none}}
+/* app feel: no blue text selection or long-press copy menu (text boxes still work normally) */
+html,body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+input,textarea,select,[contenteditable="true"]{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
+img,svg{-webkit-user-drag:none;-webkit-touch-callout:none}
+.bb-recent{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.bb-item.big .bb-art{max-width:96px}
+.bb-item.big .bb-name{font-size:12px}
+.bb-all summary{list-style:none;display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 12px;border-radius:14px;background:var(--fill);font-weight:600;font-size:15px}
+.bb-all summary::-webkit-details-marker{display:none}
+.bb-all summary span:first-child{flex:1}
+.bb-all summary .mt-chev{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;transition:transform .3s var(--spring)}
+.bb-all[open] summary .mt-chev{transform:rotate(180deg)}
+.bb-body{display:grid;gap:12px;padding-top:12px}
+.bb-all[open] .bb-body{animation:fadeIn .3s ease}
 /* ===== celebrations ===== */
 .cel{position:fixed;inset:0;z-index:70;display:grid;place-items:center;overflow:hidden;background:rgba(6,4,10,0);transition:background .45s ease;--cc:#ff9f0a;cursor:pointer}
 .cel.on{background:rgba(6,4,10,.78);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
@@ -1338,6 +1381,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
   <section class="view" id="v-stats" hidden>
     <div class="row between"><h1 class="largetitle">Stats</h1><span class="tag" id="sampleTag">Sample data</span></div>
     <div class="card rank" id="rankCard"></div>
+    <div class="card bb" id="badgeBook"></div>
     <div class="tiles" id="statTiles"></div>
     <details class="card metrics" id="metrics">
       <summary><span class="label">Metrics</span><span class="muted mt-sub">History, charts and account stats</span><svg class="mt-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
@@ -2640,7 +2684,7 @@ function markCleaned(){
   const now = Date.now();
   if (demo){ demo.since = 0; demo.lastClean = now; }
   else {
-    store.localSince = 0; store.lastClean = now; store.cleanLog.push({t:now, odo:S.odo});
+    store.localSince = 0; store.lastClean = now; store.cleanLog.push({t:now, odo:S.odo, onTime: sinceClean() <= store.cleanEvery});
     if (S.odo != null) store.cleanBaseOdo = S.odo;
     save();
   }
@@ -2671,6 +2715,7 @@ async function saveProfile(i){
       p.lightDirty = false;
     }
     if (S.active === i) await ble.write('/p/app/hcs', new Uint8Array([i]));
+    store.profSaved = store.profSaved || []; store.profSaved[i] = true; save();
     toast(`Saved "${p.name}" to your Peak`);
   } catch(e){ toast('Save failed: ' + e.message); }
 }
@@ -3393,12 +3438,14 @@ const LB_ERRS = { puffco_required:'Sign in to Puffco in Settings to join ranked.
 /* ---- badge showcase: up to 3 badges on your profile ---- */
 function showBadge(key, size, row){
   if (key === 'dev') return devBadge(size);
+  if (key && key.startsWith('sp:')){ const b = spbById(key.slice(3)); return b ? SPB.badge(b, size) : ''; }
   const m = /^(\d{4})-(\d{2}):(now|[0-4])$/.exec(key || ''); if (!m) return '';
   const t = m[3] === 'now' ? rbTierIdx(row && row.tier) : +m[3];
   return rankBadge(+m[2] - 1, t, size, +m[1]);
 }
 function showName(key, row){
   if (key === 'dev') return 'Developer';
+  if (key && key.startsWith('sp:')){ const b = spbById(key.slice(3)); return b ? b.name : ''; }
   const m = /^(\d{4})-(\d{2}):(now|[0-4])$/.exec(key || ''); if (!m) return '';
   const t = m[3] === 'now' ? rbTierIdx(row && row.tier) : +m[3];
   return RB_MONTHS[+m[2] - 1].slice(0, 3) + ' · ' + RB_TIERS[t].n + (m[3] === 'now' ? ' (now)' : '');
@@ -3409,6 +3456,7 @@ function earnedBadges(){
   const now = new Date(), cur = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
   out.push(cur + ':now');
   badgeHistory().forEach(b => out.push(b.y + '-' + String(b.m + 1).padStart(2, '0') + ':' + b.t));
+  const st = spbStatus(); SPB_ALL.forEach(b => { if (st[b.id] && st[b.id].got) out.push('sp:' + b.id); });
   return out;
 }
 function showcaseEditor(){
@@ -3442,10 +3490,18 @@ function openPlayer(r){
 
 /* ===== badge viewer: tap a badge to see it big ===== */
 function bvKeyNow(t){ const n = new Date(); return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + ':' + t; }
-function bvResolve(k, row){ return k === 'dev' ? 'dev' : k.replace(':now', ':' + rbTierIdx(row && row.tier)); }
+function bvResolve(k, row){ return k === 'dev' || k.startsWith('sp:') ? k : k.replace(':now', ':' + rbTierIdx(row && row.tier)); }
 function openBadge(key){
-  let art, title, sub;
+  let art, title, sub, extra = '';
   if (key === 'dev'){ art = devBadge(240); title = 'Developer'; sub = 'Made Emberline'; }
+  else if (key.startsWith('sp:')){
+    const b = spbById(key.slice(3)); if (!b) return;
+    const theirs = !!arguments[1], st = theirs ? { got: true } : (spbStatus()[b.id] || {}), ok = st.got;
+    art = `<div class="${ok ? '' : 'bv-locked'}">${SPB.badge(b)}</div>`; title = b.secret && !ok ? '???' : b.name;
+    sub = `${b.rar[0].toUpperCase() + b.rar.slice(1)} · ${b.cat}`;
+    const how = b.secret && ok ? b.hint : b.req;
+    extra = `<p class="bv-how">${esc(how)}</p>${theirs ? '' : `<span class="bv-state ${ok ? 'ok' : ''}">${ok ? 'Unlocked' : 'Locked'}${!ok && st.prog ? ' · ' + esc(st.prog) : ''}</span>`}`;
+  }
   else {
     const m = /^(\d{4})-(\d{2}):([0-4])$/.exec(key || ''); if (!m) return;
     const y = +m[1], mo = +m[2] - 1, t = +m[3], now = new Date(), live = y === now.getFullYear() && mo === now.getMonth();
@@ -3453,7 +3509,7 @@ function openBadge(key){
     sub = `${RB_MONTHS[mo]} ${y}${live ? ' · this month' : ''}`;
   }
   const el = document.createElement('div'); el.className = 'bv';
-  el.innerHTML = `<div class="bv-in"><div class="bv-art"><div class="bv-tilt">${art}</div></div><h3 class="bv-title">${esc(title)}</h3><span class="bv-sub">${esc(sub)}</span><button class="btn small ghost bv-close">Close</button></div>`;
+  el.innerHTML = `<div class="bv-in"><div class="bv-art"><div class="bv-tilt">${art}</div></div><h3 class="bv-title">${esc(title)}</h3><span class="bv-sub">${esc(sub)}</span>${extra}<button class="btn small ghost bv-close">Close</button></div>`;
   document.body.appendChild(el); applyHaptics();
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
   const tilt = el.querySelector('.bv-tilt'), artEl = el.querySelector('.bv-art');
@@ -3470,7 +3526,7 @@ function openBadge(key){
 }
 document.addEventListener('click', e => {
   const b = e.target.closest && e.target.closest('[data-bv]'); if (!b || e.target.closest('.sc-pick, .sc-slots')) return;
-  e.stopPropagation(); openBadge(b.dataset.bv);
+  e.stopPropagation(); openBadge(b.dataset.bv, !!b.closest('#lbProfile'));
 }, true);
 
 /* ===== round photo cropper: drag with momentum, pinch around your fingers, rubber-band edges, double-tap to zoom ===== */
@@ -3631,6 +3687,163 @@ document.addEventListener('pointerdown', e => {
   document.addEventListener('pointermove', move, true); document.addEventListener('pointerup', up, true); document.addEventListener('pointercancel', cc, true);
 }, true);
 
+
+/* ===================== SPECIAL BADGES (hexagon) ===================== */
+const SPB = (() => {
+
+// ---------- icons (drawn in a 60x60 box, centered at 30,30) ----------
+const I = {
+  lungs: c => `<path d="M30 10v18" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/><path d="M30 26c-3 0-5 2-7 5" stroke="${c}" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M30 26c3 0 5 2 7 5" stroke="${c}" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M24 18c-7 1-12 10-12 22 0 6 4 8 9 6 4-2 5-6 5-12V20c0-1-1-2-2-2z" fill="${c}"/><path d="M36 18c7 1 12 10 12 22 0 6-4 8-9 6-4-2-5-6-5-12V20c0-1 1-2 2-2z" fill="${c}"/>`,
+  threeFlames: c => [[-13, .78], [13, .78], [0, 1]].map(([dx, s]) => `<path transform="translate(${30 + dx} ${s === 1 ? 31 : 36}) scale(${s * 1.55}) translate(-12 -11)" d="M12 3c2 3 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.2.3 1.8 1 2.7 2 3.2C11 8.5 11.3 5.6 12 3z" fill="${c}"/>`).join(''),
+  crosshair: c => `<circle cx="30" cy="30" r="16" stroke="${c}" stroke-width="3.5" fill="none"/><circle cx="30" cy="30" r="5" fill="${c}"/><path d="M30 6v10M30 44v10M6 30h10M44 30h10" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/>`,
+  sparkle: c => `<path d="M30 8l4.5 13.5L48 26l-13.5 4.5L30 44l-4.5-13.5L12 26l13.5-4.5z" fill="${c}"/><path d="M46 38l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="${c}" opacity=".8"/><circle cx="15" cy="44" r="3" fill="${c}" opacity=".7"/>`,
+  calendar: c => `<rect x="12" y="15" width="36" height="32" rx="6" fill="none" stroke="${c}" stroke-width="3.5"/><path d="M12 24h36M21 10v9M39 10v9" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/><text x="30" y="43" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="800" font-size="16" fill="${c}">7</text>`,
+  moon: c => `<path d="M38 12a19 19 0 1 0 10 30A16 16 0 0 1 38 12z" fill="${c}"/><path d="M46 14l1.4 3.6L51 19l-3.6 1.4L46 24l-1.4-3.6L41 19l3.6-1.4z" fill="${c}"/><circle cx="51" cy="31" r="1.8" fill="${c}"/>`,
+  sunrise: c => `<path d="M14 40a16 16 0 0 1 32 0z" fill="${c}"/><path d="M8 46h44" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/><path d="M30 12v6M15 18l4 4M45 18l-4 4M8 31h5M47 31h5" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/>`,
+  prism: c => `<path d="M30 10l16 30H14z" fill="none" stroke="${c}" stroke-width="3.5" stroke-linejoin="round"/><path d="M4 30l18 2" stroke="${c}" stroke-width="3" stroke-linecap="round"/><path d="M38 30l18-6M39 33l17 1M38 36l16 7" stroke-width="3" stroke-linecap="round" stroke="url(#spbRainbow)"/>`,
+  compass: c => `<circle cx="30" cy="30" r="20" fill="none" stroke="${c}" stroke-width="3.5"/><path d="M38 22l-5 11-11 5 5-11z" fill="${c}"/><circle cx="30" cy="30" r="2.5" fill="#120e19"/>`,
+  sliders: c => `<path d="M14 18h32M14 30h32M14 42h32" stroke="${c}" stroke-width="3.5" stroke-linecap="round" opacity=".45"/><circle cx="36" cy="18" r="5.5" fill="${c}"/><circle cx="22" cy="30" r="5.5" fill="${c}"/><circle cx="40" cy="42" r="5.5" fill="${c}"/>`,
+  podium: c => `<rect x="23" y="20" width="14" height="28" rx="2" fill="${c}"/><rect x="9" y="30" width="14" height="18" rx="2" fill="${c}" opacity=".7"/><rect x="37" y="35" width="14" height="13" rx="2" fill="${c}" opacity=".55"/><text x="30" y="34" text-anchor="middle" font-family="ui-rounded,system-ui" font-weight="800" font-size="11" fill="#2a1c05">1</text><path d="M30 6l2 4 4.5.6-3.3 3.1.8 4.5L30 16l-4 2.2.8-4.5-3.3-3.1L28 10z" fill="${c}"/>`,
+  arrowUp: c => `<path d="M30 9l17 18H37v22H23V27H13z" fill="${c}"/><path d="M14 52h32" stroke="${c}" stroke-width="3" stroke-linecap="round" opacity=".5"/>`,
+  crowns: c => [[-9, 0], [9, 7]].map(([dx, dy]) => `<path transform="translate(${dx} ${dy})" d="M14 38l-3-18 9 7 10-12 10 12 9-7-3 18z" fill="${c}" stroke="#120e19" stroke-width="2" stroke-linejoin="round"/>`).join(''),
+  founder: c => `<path transform="translate(30 31) scale(1.9) translate(-12 -11)" d="M12 3c2 3 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.2.3 1.8 1 2.7 2 3.2C11 8.5 11.3 5.6 12 3z" fill="${c}"/><path d="M30 31l1.6 3.4 3.7.4-2.8 2.5.8 3.6L30 39l-3.3 1.9.8-3.6-2.8-2.5 3.7-.4z" fill="#120e19"/>`,
+  leaf: c => { const L = (a, len, w) => `<path transform="rotate(${a} 30 44)" d="M30 44 C${30 - w} ${44 - len * .45} ${30 - w * .6} ${44 - len * .85} 30 ${44 - len} C${30 + w * .6} ${44 - len * .85} ${30 + w} ${44 - len * .45} 30 44z" fill="${c}"/>`;
+    return L(0, 34, 6) + L(-32, 29, 5.5) + L(32, 29, 5.5) + L(-64, 22, 4.5) + L(64, 22, 4.5) + L(-100, 13, 3.5) + L(100, 13, 3.5) + `<path d="M30 44v10" stroke="${c}" stroke-width="3" stroke-linecap="round"/>`; },
+  discord: c => `<path d="M14 18c4-3 8-4 12-4l1 2c-3 0-6 1-9 3 8-4 16-4 24 0-3-2-6-3-9-3l1-2c4 0 8 1 12 4 4 6 6 13 5 21-4 3-8 5-12 5l-2-4c2-1 4-2 5-3-7 3-15 3-22 0 1 1 3 2 5 3l-2 4c-4 0-8-2-12-5-1-8 1-15 5-21z" fill="${c}"/><ellipse cx="23" cy="31" rx="3.4" ry="3.8" fill="#120e19"/><ellipse cx="37" cy="31" rx="3.4" ry="3.8" fill="#120e19"/>`,
+  bug: c => `<ellipse cx="30" cy="34" rx="11" ry="14" fill="${c}"/><circle cx="30" cy="17" r="6" fill="${c}"/><path d="M30 21v26" stroke="#120e19" stroke-width="2"/><path d="M19 28l-8-4M19 36H9M20 43l-8 5M41 28l8-4M41 36h10M40 43l8 5M27 12l-4-5M33 12l4-5" stroke="${c}" stroke-width="3" stroke-linecap="round"/>`,
+  secret: c => `<text x="30" y="41" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="900" font-size="32" fill="${c}">???</text>`
+};
+
+// ---------- the badges ----------
+const CATS = [
+  { n:'Skill', c:'#ff6a3d', badges:[
+    { id:'ironlungs', name:'Iron Lungs', req:'Take a single hit of 12 seconds or longer.', icon:'lungs', col:['#ffc2a8','#ff6a3d','#8a2410'], rar:'epic' },
+    { id:'triple', name:'Triple Threat', req:'Hit 3 blinkers in one session.', icon:'threeFlames', col:['#ffd3a0','#ff8a1f','#9a3b00'], rar:'rare' },
+    { id:'sniper', name:'Sniper', req:'5 sessions in a row with your best hit within 1 second of each other.', icon:'crosshair', col:['#ffb3b3','#ff3b4e','#7a0b18'], rar:'epic' } ]},
+  { n:'Habits', c:'#30d1a0', badges:[
+    { id:'clean', name:'Squeaky Clean', req:'Clean your Peak on time 10 times, before the clean meter turns red.', icon:'sparkle', col:['#c8fff0','#2fd3a7','#0b6b55'], rar:'rare' },
+    { id:'regular', name:'Regular', req:'Have a session 7 days in a row.', icon:'calendar', col:['#c9f7ff','#34c6e0','#0b5b6e'], rar:'common' },
+    { id:'owl', name:'Night Owl', req:'A session between 2am and 5am.', icon:'moon', col:['#d9d2ff','#7d6bff','#2a1f80'], rar:'common' },
+    { id:'bird', name:'Early Bird', req:'A session between 5am and 7am.', icon:'sunrise', col:['#fff3c4','#ffc93c','#9a6b00'], rar:'common' } ]},
+  { n:'Explorer', c:'#4aa8ff', badges:[
+    { id:'lightsmith', name:'Lightsmith', req:'Make and save 5 custom zone designs.', icon:'prism', col:['#d6ecff','#4aa8ff','#123f80'], rar:'rare' },
+    { id:'explorer', name:'Explorer', req:'Use all 4 vapor levels.', icon:'compass', col:['#cdf5ff','#29b6f6','#0b4a6b'], rar:'common' },
+    { id:'master', name:'Profile Master', req:'Customize all 4 heat profiles.', icon:'sliders', col:['#dcd6ff','#6b7bff','#1d2580'], rar:'common' } ]},
+  { n:'Ranked', c:'#e9bb4f', badges:[
+    { id:'podium', name:'Podium', req:'Finish a month in the top 3 on the leaderboard. Handed out at the start of the next month.', icon:'podium', col:['#fff4c9','#e9bb4f','#8a6115'], rar:'epic' },
+    { id:'comeback', name:'Comeback', req:'Finish a month at Ember, then reach Blaze or higher the next month.', icon:'arrowUp', col:['#d6ffd9','#3ddc84','#0e6b34'], rar:'rare' },
+    { id:'b2b', name:'Back to Back', req:'Reach Champion two months in a row.', icon:'crowns', col:['#fff4c9','#f3cf6b','#7a5414'], rar:'legendary' } ]},
+  { n:'Limited', c:'#c06bff', badges:[
+    { id:'founder', name:'Founder', req:'Joined Emberline in its first month. Can never be earned again.', icon:'founder', col:['#f0d9ff','#a24bff','#3a0070'], rar:'legendary' },
+    { id:'420', name:'4/20', req:'Have a session on April 20th.', icon:'leaf', col:['#d8ffc9','#4cd964','#145c1c'], rar:'rare' },
+    { id:'discord', name:'Discord Member', req:'Join the Emberline Discord and ask a mod for it.', icon:'discord', col:['#dfe3ff','#5865f2','#232a8a'], rar:'common' },
+    { id:'bughunter', name:'Bug Hunter', req:'Handed out by the dev for reporting real bugs.', icon:'bug', col:['#ffe9b8','#ffb020','#7a4a00'], rar:'epic' } ]},
+  { n:'Secret', c:'#ff6f91', badges:[
+    { id:'secret', name:'???', req:'Nobody knows how to get this one. Yet.', hint:'Started a session at exactly 4:20.', icon:'secret', col:['#5a4a6e','#2a2236','#120e19'], rar:'mystery', secret:true } ]}
+];
+
+// ---------- badge drawing: hexagon shield, gradient rim, icon, name ribbon ----------
+let uid = 0;
+function badge(b, size){
+  const id = 'sb' + (uid++), [c0, c1, c2] = b.col, leg = b.rar === 'legendary', sec = b.secret;
+  const hex = (r, cx = 70, cy = 66) => Array.from({ length: 6 }, (_, i) => { const a = Math.PI / 180 * (60 * i - 90); return `${(cx + r * Math.cos(a)).toFixed(2)},${(cy + r * Math.sin(a)).toFixed(2)}`; }).join(' ');
+  const ink = sec ? '#ff6f91' : c0;
+  return `<svg viewBox="-6 -6 152 172" ${size ? `width="${size}"` : ''} role="img" aria-label="${b.name} badge">
+    <defs>
+      <linearGradient id="${id}r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c0}"/><stop offset=".5" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient>
+      <radialGradient id="${id}bg" cx=".5" cy=".3" r=".75"><stop offset="0" stop-color="${c1}" stop-opacity=".35"/><stop offset="1" stop-color="#120e19"/></radialGradient>
+      <linearGradient id="${id}sh" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".7"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+      <linearGradient id="spbRainbow" x1="0" x2="1"><stop offset="0" stop-color="#ff5a5a"/><stop offset=".33" stop-color="#ffd60a"/><stop offset=".66" stop-color="#30d158"/><stop offset="1" stop-color="#4aa8ff"/></linearGradient>
+      <clipPath id="${id}c"><polygon points="${hex(52)}"/></clipPath>
+      ${leg ? `<linearGradient id="${id}holo" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7ad9" stop-opacity=".0"/><stop offset=".3" stop-color="#ff7ad9" stop-opacity=".25"/><stop offset=".5" stop-color="#7afcff" stop-opacity=".3"/><stop offset=".7" stop-color="#fff07a" stop-opacity=".25"/><stop offset="1" stop-color="#fff07a" stop-opacity="0"/></linearGradient>` : ''}
+    </defs>
+    ${leg ? `<polygon points="${hex(66)}" fill="${c1}" opacity=".22"/>` : ''}
+    <polygon points="${hex(62)}" fill="url(#${id}r)" ${sec ? 'stroke="#ff6f91" stroke-width="1.5" stroke-dasharray="4 4"' : ''}/>
+    <polygon points="${hex(56)}" fill="#120e19"/>
+    <polygon points="${hex(52)}" fill="url(#${id}bg)" stroke="${c1}" stroke-opacity=".55" stroke-width="1.5"/>
+    <g clip-path="url(#${id}c)">
+      ${leg ? `<g class="spb-holo" style="transform-origin:70px 66px"><rect x="0" y="0" width="140" height="140" fill="url(#${id}holo)"/></g>` : ''}
+      <g transform="translate(32 28) scale(1.27)"><g ${sec ? 'class="spb-glitch"' : ''}>${I[b.icon](ink)}</g></g>
+      ${leg || b.rar === 'epic' ? `<rect class="spb-shine" x="40" y="0" width="30" height="140" fill="url(#${id}sh)" opacity="${leg ? .9 : .5}"/>` : ''}
+    </g>
+    ${leg ? `<path class="spb-spark" style="animation-delay:.3s" d="M118 18l2 6 6 2-6 2-2 6-2-6-6-2 6-2z" fill="#fff8dc"/><path class="spb-spark" style="animation-delay:1.3s" d="M22 104l1.6 4.4 4.4 1.6-4.4 1.6-1.6 4.4-1.6-4.4-4.4-1.6 4.4-1.6z" fill="#fff8dc"/>` : ''}
+    <path d="M18 122 H122 L114 137 L122 152 H18 L26 137Z" fill="url(#${id}r)"/>
+    <text x="70" y="142" text-anchor="middle" font-family="ui-rounded,'SF Pro Rounded',system-ui,sans-serif" font-weight="800" font-size="${b.name.length <= 8 ? 13 : b.name.length <= 11 ? 10.5 : 9}" letter-spacing="${b.name.length <= 8 ? 1.2 : .5}" textLength="${b.name.length > 11 ? 84 : ""}" lengthAdjust="spacingAndGlyphs" fill="${lum(c1) > .62 ? '#1d1404' : '#fff'}">${b.name.toUpperCase()}</text>
+  </svg>`;
+}
+function lum(hex){ const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 16 & 255) + 0.587 * (n >> 8 & 255) + 0.114 * (n & 255)) / 255; }
+
+
+  return { CATS, badge };
+})();
+const SPB_ALL = SPB.CATS.flatMap(c => c.badges.map(b => Object.assign({ cat: c.n, catColor: c.c }, b)));
+const spbById = id => SPB_ALL.find(b => b.id === id);
+// which special badges you've earned, worked out from your own history (plus server awards for the hand-given ones)
+function spbStatus(){
+  const ss = (store.sessions || []).slice().sort((a, b) => a.t - b.t), out = {};
+  const hitsOf = s => s.hits || [], best = s => Math.max(0, ...hitsOf(s));
+  const bestHit = ss.reduce((m, s) => Math.max(m, best(s)), 0);
+  out.ironlungs = { got: bestHit >= 12, prog: bestHit ? 'Best ' + bestHit.toFixed(1) + 's / 12s' : '' };
+  const mostBl = ss.reduce((m, s) => Math.max(m, hitsOf(s).filter(h => h >= 8).length), 0);
+  out.triple = { got: mostBl >= 3, prog: 'Most in one session: ' + mostBl + ' / 3' };
+  const withHits = ss.filter(s => hitsOf(s).length); let sn = false;
+  for (let i = 0; i + 5 <= withHits.length && !sn; i++){ const b = withHits.slice(i, i + 5).map(best); if (Math.max(...b) - Math.min(...b) <= 1) sn = true; }
+  out.sniper = { got: sn };
+  const log = store.cleanLog || []; let onTime = 0;
+  log.forEach(c => { if (c.onTime != null){ if (c.onTime) onTime++; return; } const prev = ss.filter(x => x.t < c.t).pop(); if (prev && prev.sc != null && prev.sc <= (store.cleanEvery || 150)) onTime++; });
+  out.clean = { got: onTime >= 10, prog: Math.min(onTime, 10) + ' / 10 on-time cleans' };
+  const days = [...new Set(ss.map(x => startOfDay(x.t)))].sort((a, b) => a - b); let run = 0, bestRun = 0, last = null;
+  days.forEach(d => { run = last != null && Math.round((d - last) / DAY) === 1 ? run + 1 : 1; bestRun = Math.max(bestRun, run); last = d; });
+  out.regular = { got: bestRun >= 7, prog: 'Best streak: ' + Math.min(bestRun, 7) + ' / 7 days' };
+  const hr = x => new Date(x.t).getHours();
+  out.owl = { got: ss.some(x => hr(x) >= 2 && hr(x) < 5) };
+  out.bird = { got: ss.some(x => hr(x) >= 5 && hr(x) < 7) };
+  const zones = (store.myMoods || []).filter(m => m.tag === ZONE_TAG).length;
+  out.lightsmith = { got: zones >= 5, prog: Math.min(zones, 5) + ' / 5 zone designs' };
+  const vap = new Set(ss.map(x => x.vapor).filter(v => typeof v === 'number').map(v => vaporName(v)));
+  out.explorer = { got: vap.size >= 4, prog: vap.size + ' / 4 vapor levels' };
+  const ps = (store.profSaved || []).filter(Boolean).length;
+  out.master = { got: ps >= 4, prog: ps + ' / 4 profiles saved' };
+  // ranked: from your finished months plus this one
+  const seq = badgeHistory().slice().reverse().map(b => b.t).concat([rbTierIdx(rankFor(ss).tier.n)]);
+  let cb = false, b2b = false;
+  for (let i = 1; i < seq.length; i++){ if (seq[i - 1] === 0 && seq[i] >= 2) cb = true; if (seq[i - 1] === 4 && seq[i] === 4) b2b = true; }
+  const aw = (LB.me && LB.me.awards) || [];
+  out.podium = { got: aw.includes('podium') };
+  out.comeback = { got: cb };
+  out.b2b = { got: b2b };
+  const made = LB.me && LB.me.created_at ? new Date(LB.me.created_at) : null;
+  out.founder = { got: !!(made && made < new Date('2026-11-01T00:00:00')), prog: made ? '' : 'Make your profile in October 2026 to claim it' };
+  out['420'] = { got: ss.some(x => { const d = new Date(x.t); return d.getMonth() === 3 && d.getDate() === 20; }) };
+  out.discord = { got: aw.includes('discord') };
+  out.bughunter = { got: aw.includes('bughunter') };
+  out.secret = { got: ss.some(x => { const d = new Date(x.t); return (d.getHours() % 12) === 4 && d.getMinutes() === 20; }) };
+  return out;
+}
+function drawBadgeBook(){
+  const el = $('#badgeBook'); if (!el) return;
+  const st = spbStatus(), first = !store.spbUnlocked; store.spbUnlocked = store.spbUnlocked || {};
+  // remember when each badge was first earned, so we can show your newest ones
+  let fresh = [];
+  SPB_ALL.forEach(b => { if (st[b.id] && st[b.id].got && !store.spbUnlocked[b.id]){ store.spbUnlocked[b.id] = Date.now(); if (!first) fresh.push(b); } });
+  if (fresh.length || first) save();
+  if (fresh.length) setTimeout(() => toast(fresh.length === 1 ? `Badge unlocked: ${fresh[0].name}` : `${fresh.length} new badges unlocked`), 400);
+  const got = SPB_ALL.filter(b => st[b.id] && st[b.id].got);
+  const RAR = { mystery:5, legendary:4, epic:3, rare:2, common:1 }, sec = id => Math.floor((store.spbUnlocked[id] || 0) / 1000);
+  const recent = got.slice().sort((a, b) => (sec(b.id) - sec(a.id)) || (RAR[b.rar] - RAR[a.rar])).slice(0, 3); // newest first; same moment: rarest first
+  const item = (b, big) => { const ok = st[b.id] && st[b.id].got;
+    return `<button class="bb-item ${ok ? 'got' : 'locked'}${big ? ' big' : ''}" data-bv="sp:${b.id}"><span class="bb-art">${SPB.badge(b)}${ok ? '' : '<span class="bb-lock"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span>'}</span><span class="bb-name">${b.secret && !ok ? '???' : b.name}</span></button>`; };
+  const open = el.querySelector('details') && el.querySelector('details').open;
+  setHTML(el, `<span class="label">Badges</span>
+    ${recent.length ? `<div class="bb-recent">${recent.map(b => item(b, true)).join('')}</div>` : '<p class="muted" style="margin:0;font-size:14px">No badges yet. Open the list to see what you can earn.</p>'}
+    <details class="bb-all"${open ? ' open' : ''}><summary><span>All badges</span><span class="muted"><b style="color:var(--fg)">${got.length}</b> / ${SPB_ALL.length}</span><svg class="mt-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+      <div class="bb-body"><div class="bb-bar"><i style="width:${Math.round(got.length / SPB_ALL.length * 100)}%"></i></div>
+      <p class="muted" style="margin:0;font-size:13px">Tap any badge to see how to earn it. Unlocked ones can go in your showcase.</p>
+      ${SPB.CATS.map(c => `<div class="bb-cat"><span class="bb-cat-n" style="color:${c.c}">${c.n}</span><div class="bb-grid">${c.badges.map(b => item(b)).join('')}</div></div>`).join('')}</div>
+    </details>`);
+  applyHaptics();
+}
 /* ===================== SOCIAL: profiles, bios, follows, search ===================== */
 const SOC = { following: new Set(), followers: [], followingRows: [], results: null, q: '', loaded: false };
 async function socCounts(pid){
@@ -3653,7 +3866,7 @@ async function socLoad(){
   if (!me || !me.id){ if (lbUsesPuffco() && !LB.me) { const p = await lbRestore(); if (p) return socLoad(); } return; }
   const c = await socCounts(me.id);
   SOC.myCounts = c; SOC.following = new Set(c.followingIds); SOC.loaded = true;
-  socSetMyCounts();
+  socSetMyCounts(); drawBadgeBook();
   SOC.followingRows = await socPlayers(c.followingIds);
   socDrawFollowing(); socPaintAllFollow();
 }
@@ -3918,7 +4131,7 @@ function show(v){
   if (v === 'lights'){ drawLights(); drawMoods(); ltEnter(); }
   if (v === 'set'){ drawSettings(); drawDevice(); drawAccount(); wireAcctForm('ac'); drawTestTools(); }
   if (v === 'shop'){ closeShopForm(); drawShops(); }
-  if (v === 'stats'){ drawStats.sig = null; autoSync(); lbStart(); }
+  if (v === 'stats'){ drawStats.sig = null; autoSync(); lbStart(); drawBadgeBook(); }
   if (v === 'social'){ lbStart(); socLoad(); }
   draw(); syncRanges(); window.scrollTo(0,0);
   sec.querySelectorAll('.pcard, .shop').forEach((c,j) => c.style.setProperty('--j', j));
