@@ -1,0 +1,119 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Path Inspector</title>
+<style>
+:root{color-scheme:dark;--bg:#0d0b14;--panel:#17131f;--line:#2c2639;--fg:#efeaf7;--muted:#9b93ad;--accent:#a24bff;--ok:#3ddc84;--bad:#ff5a6e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,system-ui,sans-serif;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(24px + env(safe-area-inset-bottom,0px))}
+h1{font-size:22px;margin:0 0 4px}
+p{color:var(--muted);margin:0 0 14px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+button{font:600 15px system-ui;padding:11px 16px;border-radius:12px;border:0;background:var(--accent);color:#fff}
+button.ghost{background:var(--panel);border:1px solid var(--line);color:var(--fg)}
+.sec{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:12px;min-width:0}
+.sec h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 8px}
+.row{display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px solid var(--line);font-size:13px}
+.row:last-child{border:0}
+.row b{font-weight:500;word-break:break-all}
+.y{color:var(--ok)}.n{color:var(--bad)}
+pre{margin:0;white-space:pre-wrap;word-break:break-word;font:11px/1.45 ui-monospace,Menlo,monospace;color:#d8d0ea;max-height:260px;overflow:auto}
+#status{font-size:13px;color:var(--muted);margin-bottom:10px}
+</style></head><body>
+<h1>Path Inspector</h1>
+<p>Open this in Path. It lists what Path adds to web pages (Bluetooth, fullscreen, notifications and anything custom) so Emberline can use it. Nothing leaves your phone. Tap Copy and paste the result to Claude.</p>
+<div class="bar"><button id="copy">Copy report</button><button class="ghost" id="bt">Test Bluetooth picker</button><button class="ghost" id="scan">Test background scan</button></div>
+<div id="status">Collecting…</div>
+<div id="out"></div>
+<script>
+const R = { when: new Date().toISOString() };
+const yes = v => v ? '<span class="y">yes</span>' : '<span class="n">no</span>';
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function src(fn){ try { const s = Function.prototype.toString.call(fn); return s.length > 4000 ? s.slice(0, 4000) + '…' : s; } catch(e){ return '(hidden)'; } }
+function isNative(fn){ try { return /\[native code\]/.test(Function.prototype.toString.call(fn)); } catch(e){ return null; } }
+function protoKeys(o){ const out = new Set(); let p = o; let d = 0; while (p && p !== Object.prototype && d < 6){ Object.getOwnPropertyNames(p).forEach(k => out.add(k)); p = Object.getPrototypeOf(p); d++; } return [...out].sort(); }
+
+// standard window globals in a plain WebKit page, so anything extra stands out
+const iframe = document.createElement('iframe'); iframe.style.display = 'none'; document.body.appendChild(iframe);
+const baseline = new Set(Object.getOwnPropertyNames(iframe.contentWindow));
+
+function collect(){
+  const nav = navigator;
+  R.userAgent = nav.userAgent; R.platform = nav.platform; R.vendor = nav.vendor; R.language = nav.language;
+  R.screen = { w: screen.width, h: screen.height, dpr: devicePixelRatio, inner: innerWidth + 'x' + innerHeight };
+  R.standalone = !!nav.standalone; R.displayMode = ['fullscreen','standalone','minimal-ui','browser'].find(m => matchMedia('(display-mode: ' + m + ')').matches) || null;
+
+  const bt = nav.bluetooth;
+  R.bluetooth = { present: !!bt };
+  if (bt){
+    const keys = protoKeys(bt);
+    R.bluetooth.methods = keys;
+    R.bluetooth.native = {};
+    R.bluetooth.source = {};
+    keys.forEach(k => { let v; try { v = bt[k]; } catch(e){ return; } if (typeof v === 'function'){ R.bluetooth.native[k] = isNative(v); if (!isNative(v)) R.bluetooth.source[k] = src(v); } });
+    R.bluetooth.has = {
+      requestDevice: typeof bt.requestDevice === 'function', getDevices: typeof bt.getDevices === 'function', getAvailability: typeof bt.getAvailability === 'function',
+      requestLEScan: typeof bt.requestLEScan === 'function', addEventListener: typeof bt.addEventListener === 'function', referringDevice: 'referringDevice' in bt
+    };
+  }
+  const el = document.documentElement;
+  R.fullscreen = { windowRequest: typeof window.requestFullscreen === 'function', windowRequestNative: typeof window.requestFullscreen === 'function' ? isNative(window.requestFullscreen) : null,
+    windowRequestSource: typeof window.requestFullscreen === 'function' && !isNative(window.requestFullscreen) ? src(window.requestFullscreen) : null,
+    elementRequest: typeof el.requestFullscreen === 'function', webkitRequest: typeof el.webkitRequestFullscreen === 'function', enabled: !!(document.fullscreenEnabled || document.webkitFullscreenEnabled) };
+  R.notifications = { navNotifications: !!nav.notifications, winNotifications: !!window.notifications, Notification: typeof window.Notification, permission: window.Notification ? Notification.permission : null };
+  R.apis = { vibrate: typeof nav.vibrate === 'function', wakeLock: !!nav.wakeLock, share: typeof nav.share === 'function', clipboard: !!nav.clipboard, serviceWorker: !!nav.serviceWorker,
+    usb: !!nav.usb, serial: !!nav.serial, hid: !!nav.hid, nfc: 'NDEFReader' in window, geolocation: !!nav.geolocation, storageEstimate: !!(nav.storage && nav.storage.estimate) };
+
+  // WebKit message handlers = the native bridge Path injects
+  R.webkit = { present: !!window.webkit, handlers: [] };
+  try { if (window.webkit && window.webkit.messageHandlers){ R.webkit.handlers = Object.getOwnPropertyNames(window.webkit.messageHandlers); for (const k in window.webkit.messageHandlers) if (!R.webkit.handlers.includes(k)) R.webkit.handlers.push(k); } } catch(e){ R.webkit.err = String(e); }
+
+  // non-standard globals Path added
+  const extra = Object.getOwnPropertyNames(window).filter(k => !baseline.has(k) && !/^(R|yes|esc|src|isNative|protoKeys|iframe|baseline|collect|draw|log)$/.test(k));
+  R.extraGlobals = {};
+  extra.forEach(k => { let v; try { v = window[k]; } catch(e){ R.extraGlobals[k] = '(error)'; return; } const t = typeof v;
+    R.extraGlobals[k] = t === 'function' ? { type: t, native: isNative(v), source: isNative(v) ? undefined : src(v) } : t === 'object' && v ? { type: t, keys: protoKeys(v).slice(0, 60) } : { type: t, value: String(v).slice(0, 200) }; });
+  const extraNav = protoKeys(nav).filter(k => !protoKeys(iframe.contentWindow.navigator).includes(k));
+  R.extraNavigator = extraNav;
+  R.injectedScripts = [...document.scripts].filter(s => s.src && !s.src.startsWith(location.origin)).map(s => s.src);
+}
+function draw(){
+  const s = [];
+  const sec = (t, rows) => s.push(`<div class="sec"><h2>${t}</h2>${rows}</div>`);
+  const row = (k, v) => `<div class="row"><span>${esc(k)}</span><b>${v}</b></div>`;
+  sec('Browser', row('User agent', esc(R.userAgent)) + row('Platform', esc(R.platform)) + row('Screen', esc(JSON.stringify(R.screen))) + row('Display mode', esc(R.displayMode)));
+  sec('Bluetooth', R.bluetooth.present ? Object.entries(R.bluetooth.has).map(([k, v]) => row(k, yes(v))).join('') + row('All methods', esc(R.bluetooth.methods.join(', '))) : row('navigator.bluetooth', yes(false)));
+  sec('Fullscreen', row('window.requestFullscreen (Path)', yes(R.fullscreen.windowRequest)) + row('element.requestFullscreen', yes(R.fullscreen.elementRequest)) + row('webkitRequestFullscreen', yes(R.fullscreen.webkitRequest)) + row('fullscreenEnabled', yes(R.fullscreen.enabled)));
+  sec('Notifications', row('navigator.notifications', yes(R.notifications.navNotifications)) + row('window.notifications', yes(R.notifications.winNotifications)) + row('Notification', esc(R.notifications.Notification)));
+  sec('Other APIs', Object.entries(R.apis).map(([k, v]) => row(k, yes(v))).join(''));
+  sec('Native bridge', row('webkit.messageHandlers', esc(R.webkit.handlers.join(', ') || 'none')));
+  sec('Extra globals Path added', row('window', esc(Object.keys(R.extraGlobals).join(', ') || 'none')) + row('navigator', esc(R.extraNavigator.join(', ') || 'none')));
+  sec('Full report', `<pre>${esc(JSON.stringify(R, null, 2))}</pre>`);
+  document.getElementById('out').innerHTML = s.join('');
+}
+function log(m){ document.getElementById('status').textContent = m; }
+try { collect(); log('Done. Tap Copy report and paste it to Claude.'); } catch(e){ R.error = String(e); log('Partly collected: ' + e); }
+draw();
+
+document.getElementById('copy').onclick = async () => {
+  const t = JSON.stringify(R, null, 2);
+  try { await navigator.clipboard.writeText(t); log('Copied. Paste it to Claude.'); }
+  catch(e){ const pre = document.querySelector('pre'); const r = document.createRange(); r.selectNodeContents(pre); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); log('Copy blocked, the report is selected. Use Copy from the menu.'); }
+};
+document.getElementById('bt').onclick = async () => {
+  if (!navigator.bluetooth) return log('No Bluetooth here.');
+  try {
+    const d = await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
+    R.pickedDevice = { id: d.id, name: d.name, keys: protoKeys(d), gattKeys: d.gatt ? protoKeys(d.gatt) : null };
+    log('Picked ' + (d.name || d.id) + '. Added to the report.'); draw();
+  } catch(e){ R.pickError = e.name + ': ' + e.message; log('Picker: ' + R.pickError); draw(); }
+};
+document.getElementById('scan').onclick = async () => {
+  const bt = navigator.bluetooth; if (!bt || !bt.requestLEScan) return log('requestLEScan is not available.');
+  const seen = {};
+  const on = ev => { const e = ev.data && ev.data.device ? ev.data : ev; const n = (e.device && e.device.name) || e.name || '?'; seen[n] = { rssi: e.rssi, uuids: e.uuids, keys: Object.keys(e) }; };
+  try {
+    const scan = await bt.requestLEScan({ acceptAllAdvertisements: true });
+    bt.addEventListener('advertisementreceived', on); log('Scanning for 6 seconds…');
+    setTimeout(() => { bt.removeEventListener('advertisementreceived', on); try { scan.stop && scan.stop(); } catch(e){} R.scan = seen; log('Scan saw ' + Object.keys(seen).length + ' devices. Added to the report.'); draw(); }, 6000);
+  } catch(e){ R.scanError = e.name + ': ' + e.message; log('Scan: ' + R.scanError); draw(); }
+};
+</script></body></html>
