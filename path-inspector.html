@@ -101,7 +101,12 @@ document.getElementById('copy').onclick = async () => {
 document.getElementById('bt').onclick = async () => {
   if (!navigator.bluetooth) return log('No Bluetooth here.');
   try {
-    const d = await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
+    // Path doesn't allow "show everything", so ask for Puffco devices the same way Emberline does
+    const SVC = 'e276967f-ea8a-478a-a92e-d78f5dd15dd5', PIKACHU = '06caf9c0-74d3-454f-9be9-e30cd999c17a';
+    const filters = [{ services:[SVC] }, { services:[PIKACHU] }, { manufacturerData:[{ companyIdentifier:3075 }] }, { namePrefix:'Peak' }, { namePrefix:'PEAK' }, { namePrefix:'Puffco' }, { namePrefix:'Proxy' }];
+    let d;
+    try { d = await navigator.bluetooth.requestDevice({ filters, optionalServices:[SVC, PIKACHU] }); }
+    catch(e1){ R.pickTry1 = e1.name + ': ' + e1.message; d = await navigator.bluetooth.requestDevice({ filters: filters.filter(f => !f.manufacturerData), optionalServices:[SVC, PIKACHU] }); }
     R.pickedDevice = { id: d.id, name: d.name, keys: protoKeys(d), gattKeys: d.gatt ? protoKeys(d.gatt) : null };
     log('Picked ' + (d.name || d.id) + '. Added to the report.'); draw();
   } catch(e){ R.pickError = e.name + ': ' + e.message; log('Picker: ' + R.pickError); draw(); }
@@ -111,7 +116,9 @@ document.getElementById('scan').onclick = async () => {
   const seen = {};
   const on = ev => { const e = ev.data && ev.data.device ? ev.data : ev; const n = (e.device && e.device.name) || e.name || '?'; seen[n] = { rssi: e.rssi, uuids: e.uuids, keys: Object.keys(e) }; };
   try {
-    const scan = await bt.requestLEScan({ acceptAllAdvertisements: true });
+    let scan;
+    try { scan = await bt.requestLEScan({ acceptAllAdvertisements: true }); }
+    catch(e1){ R.scanTry1 = e1.name + ': ' + e1.message; scan = await bt.requestLEScan({ filters:[{ services:['e276967f-ea8a-478a-a92e-d78f5dd15dd5'] }, { namePrefix:'Peak' }, { namePrefix:'PEAK' }, { namePrefix:'Puffco' }] }); }
     bt.addEventListener('advertisementreceived', on); log('Scanning for 6 seconds…');
     setTimeout(() => { bt.removeEventListener('advertisementreceived', on); try { scan.stop && scan.stop(); } catch(e){} R.scan = seen; log('Scan saw ' + Object.keys(seen).length + ' devices. Added to the report.'); draw(); }, 6000);
   } catch(e){ R.scanError = e.name + ': ' + e.message; log('Scan: ' + R.scanError); draw(); }
