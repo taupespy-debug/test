@@ -872,6 +872,9 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:non
 .soc-follow{flex:none}
 .lb-bio{width:100%;background:var(--fill);border:0;border-radius:14px;padding:11px 12px;color:var(--fg);font:inherit;font-size:16px;line-height:1.4;resize:none}
 #socFollowing{display:grid;gap:8px}
+.soc-follow{min-width:104px;transition:background .25s ease,color .25s ease,box-shadow .25s ease}
+.soc-counts b[data-cnt]{display:inline-block;min-width:1.2ch;text-align:right}
+#socResults,#socFollowing .soc-list{transition:opacity .15s}
 /* ===== celebrations ===== */
 .cel{position:fixed;inset:0;z-index:70;display:grid;place-items:center;overflow:hidden;background:rgba(6,4,10,0);transition:background .45s ease;--cc:#ff9f0a;cursor:pointer}
 .cel.on{background:rgba(6,4,10,.78);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
@@ -1015,6 +1018,9 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:non
 .lb-form{display:flex;align-items:center;gap:12px}
 .lb-form input[type=text]{flex:1;min-width:0;background:var(--fill);border:0;border-radius:14px;padding:12px 14px;font-weight:600}
 .lb-pic{display:grid;justify-items:center;gap:4px;font-size:12px;color:var(--muted);cursor:pointer}
+.lb-pic-av{position:relative;display:inline-grid}
+.lb-pic-pen{right:-3px;bottom:-3px;width:24px;height:24px}
+.lb-pic-pen svg{width:12px;height:12px}
 .acct-err{margin:0;color:var(--bad);font-size:14px}
 /* rank */
 .rank{display:grid;gap:12px;--tc:#ff7a3d}
@@ -2114,6 +2120,8 @@ async function afterConnect(quick){
   }
   S.mode = 'live'; S.name = ble.dev.name || 'Peak Pro'; failStreak = 0;
   await detectLedApi();
+  try { S.state = await ble.u8('/p/app/stat/id'); } catch(e){}
+  connectIntro(); // the logo lights up now while the rest loads
   await readProfiles();
   await applyProfileBright(S.active);
   await slowPoll();
@@ -3414,22 +3422,21 @@ function showcaseEditor(){
 function openPlayer(r){
   let el = $('#lbProfile'); if (!el){ el = document.createElement('div'); el.id = 'lbProfile'; el.className = 'welcome'; document.body.appendChild(el); }
   const sc = r.showcase || [], meId = LB.me && LB.me.id, isMe = r.id === meId;
-  const paint = (counts) => {
-    const following = SOC.following.has(r.id);
-    el.innerHTML = `<div class="wl-card lbp"><div class="row between"><span class="label">Profile</span><button class="btn small ghost" id="lbpClose">Close</button></div>
-      <div class="lbp-head">${lbAvatar(r.avatar_url, r.username, 96)}<b>${esc(r.username)}${r.dev ? devBadge(26) : ''}</b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
-        <div class="soc-counts"><span><b>${counts ? counts.followers : '…'}</b> followers</span><span><b>${counts ? counts.following : '…'}</b> following</span></div></div>
-      ${r.bio ? `<p class="soc-bio">${esc(r.bio)}</p>` : ''}
-      ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, r)}">${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}
-      ${isMe ? '' : meId ? `<button class="btn ${following ? '' : 'primary'} soc-follow" data-follow="${r.id}" style="width:100%">${following ? 'Following' : 'Follow'}</button>`
-        : '<p class="muted" style="margin:0;text-align:center;font-size:13px">Make your profile in Social to follow people.</p>'}</div>`;
-    applyHaptics();
-  };
-  paint(null); el.hidden = false;
-  socCounts(r.id).then(c => { if (!el.hidden) paint(c); });
+  el.innerHTML = `<div class="wl-card lbp"><div class="row between"><span class="label">Profile</span><button class="btn small ghost" id="lbpClose">Close</button></div>
+    <div class="lbp-head">${lbAvatar(r.avatar_url, r.username, 96)}<b>${esc(r.username)}${r.dev ? devBadge(26) : ''}</b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
+      <div class="soc-counts"><span><b data-cnt="followers">–</b> followers</span><span><b data-cnt="following">–</b> following</span></div></div>
+    ${r.bio ? `<p class="soc-bio">${esc(r.bio)}</p>` : ''}
+    ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, r)}">${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}
+    ${isMe ? '' : meId ? `<button class="btn soc-follow" data-follow="${r.id}" style="width:100%">Follow</button>`
+      : '<p class="muted" style="margin:0;text-align:center;font-size:13px">Make your profile in Social to follow people.</p>'}</div>`;
+  socPaintFollow(r.id); el.hidden = false; applyHaptics();
+  const fillCounts = () => socCounts(r.id).then(c => { if (el.hidden) return; el.querySelectorAll('[data-cnt]').forEach(b => { b.textContent = c[b.dataset.cnt]; }); });
+  fillCounts();
   el.onclick = async e => {
     if (e.target === el || e.target.id === 'lbpClose'){ el.hidden = true; return; }
-    const f = e.target.closest('[data-follow]'); if (f){ await socToggleFollow(r); socCounts(r.id).then(c => { if (!el.hidden) paint(c); }); }
+    const f = e.target.closest('[data-follow]'); if (f){ e.stopPropagation(); const was = SOC.following.has(r.id);
+      const n = el.querySelector('[data-cnt="followers"]'); if (n && !isNaN(+n.textContent)) n.textContent = Math.max(0, +n.textContent + (was ? -1 : 1));
+      await socToggleFollow(r); }
   };
 }
 
@@ -3646,60 +3653,76 @@ async function socLoad(){
   if (!me || !me.id){ if (lbUsesPuffco() && !LB.me) { const p = await lbRestore(); if (p) return socLoad(); } return; }
   const c = await socCounts(me.id);
   SOC.myCounts = c; SOC.following = new Set(c.followingIds); SOC.loaded = true;
+  socSetMyCounts();
   SOC.followingRows = await socPlayers(c.followingIds);
-  drawSocial();
+  socDrawFollowing(); socPaintAllFollow();
+}
+// flip every Follow button for this person in place (no redraw, so nothing jumps)
+function socPaintFollow(id){
+  const on = SOC.following.has(id);
+  document.querySelectorAll(`[data-follow="${id}"]`).forEach(btn => {
+    const sw = btn.querySelector(':scope > .hz');
+    btn.classList.toggle('primary', !on); btn.classList.toggle('on', on);
+    [...btn.childNodes].forEach(n => { if (n.nodeType === 3) n.remove(); });
+    btn.insertBefore(document.createTextNode(on ? 'Following' : 'Follow'), sw || null);
+  });
+}
+function socPaintAllFollow(){ new Set([...document.querySelectorAll('[data-follow]')].map(b => b.dataset.follow)).forEach(socPaintFollow); }
+function socSetMyCounts(){
+  const c = SOC.myCounts; if (!c) return;
+  document.querySelectorAll('#socMe [data-cnt]').forEach(b => { const v = c[b.dataset.cnt]; if (v != null && b.textContent !== String(v)) b.textContent = v; });
 }
 async function socToggleFollow(r){
   if (!LB.me || !LB.me.id || r.id === LB.me.id) return;
   const was = SOC.following.has(r.id);
-  if (was) SOC.following.delete(r.id); else SOC.following.add(r.id); // update right away, undo if the server says no
-  drawSocial();
+  if (was) SOC.following.delete(r.id); else SOC.following.add(r.id); // flip right away, undo if the server says no
+  socPaintFollow(r.id);
+  if (SOC.myCounts){ SOC.myCounts.following = SOC.following.size; socSetMyCounts(); }
   try {
     await lbCall({ action: was ? 'unfollow' : 'follow', target: r.id });
-    if (!was){ SOC.followingRows = SOC.followingRows.filter(x => x.id !== r.id).concat([r]); toast('Following ' + r.username); }
+    if (!was) SOC.followingRows = SOC.followingRows.filter(x => x.id !== r.id).concat([r]);
     else SOC.followingRows = SOC.followingRows.filter(x => x.id !== r.id);
-    if (SOC.myCounts) SOC.myCounts.following = SOC.following.size;
+    socDrawFollowing();
   } catch(e){
     if (was) SOC.following.add(r.id); else SOC.following.delete(r.id);
+    socPaintFollow(r.id); if (SOC.myCounts){ SOC.myCounts.following = SOC.following.size; socSetMyCounts(); }
     toast(e.code === 'username_required' ? 'Make your profile first' : 'Couldn’t update. Try again.');
   }
-  drawSocial();
 }
 function socRow(r){
   const meId = LB.me && LB.me.id, on = SOC.following.has(r.id);
   return `<div class="soc-row" data-soc="${r.id}" role="button" tabindex="0">${lbAvatar(r.avatar_url, r.username, 42)}
     <span class="soc-name"><b>${esc(r.username)}${r.dev ? devBadge(18) : ''}</b><small style="color:${lbTierColor(r.tier)}">${esc(r.tier || 'Ember')}${r.bio ? ` <span class="muted">· ${esc(r.bio.slice(0, 40))}${r.bio.length > 40 ? '…' : ''}</span>` : ''}</small></span>
-    ${meId && r.id !== meId ? `<button class="btn small ${on ? '' : 'primary'} soc-follow" data-follow="${r.id}">${on ? 'Following' : 'Follow'}</button>` : ''}</div>`;
+    ${meId && r.id !== meId ? `<button class="btn small ${on ? 'on' : 'primary'} soc-follow" data-follow="${r.id}">${on ? 'Following' : 'Follow'}</button>` : ''}</div>`;
 }
 function drawSocial(){
   const meEl = $('#socMe'); if (!meEl) return;
   const puff = lbUsesPuffco(), me = LB.me;
   if (!puff){
-    meEl.innerHTML = `<span class="label">Your profile</span><div class="banner" style="padding:12px 14px"><div class="grow"><b>Sign in to join Social</b>Your Emberline profile uses your Puffco login. Sign in to make a profile, follow people and show your badges.</div><button class="btn small primary" id="lbGoSign">Sign in</button></div>`;
+    setHTML(meEl, `<span class="label">Your profile</span><div class="banner" style="padding:12px 14px"><div class="grow"><b>Sign in to join Social</b>Your Emberline profile uses your Puffco login. Sign in to make a profile, follow people and show your badges.</div><button class="btn small primary" id="lbGoSign">Sign in</button></div>`);
   } else if (!me || !me.username){
-    meEl.innerHTML = `<span class="label">Your profile</span><p class="muted" style="margin:0">Make a profile with a username, photo and bio. People can find you, follow you and see your badges.</p><button class="btn primary" id="socCreate">Create your profile</button>`;
+    setHTML(meEl, `<span class="label">Your profile</span><p class="muted" style="margin:0">Make a profile with a username, photo and bio. People can find you, follow you and see your badges.</p><button class="btn primary" id="socCreate">Create your profile</button>`);
   } else {
     const c = SOC.myCounts, sc = me.showcase || [];
-    meEl.innerHTML = `<div class="soc-head">${lbAvatar(me.avatar_url, me.username, 72)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}</b>
+    setHTML(meEl, `<div class="soc-head">${lbAvatar(me.avatar_url, me.username, 72)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}</b>
         <span class="muted"><span style="color:${lbTierColor(rankFor(data().sessions).tier.n)};font-weight:700">${rankFor(data().sessions).tier.n}</span> · ${rankFor(data().sessions).rp} RP</span>
-        <div class="soc-counts"><span><b>${c ? c.followers : '…'}</b> followers</span><span><b>${c ? c.following : '…'}</b> following</span></div></div></div>
+        <div class="soc-counts"><span><b data-cnt="followers">${c ? c.followers : '–'}</b> followers</span><span><b data-cnt="following">${c ? c.following : '–'}</b> following</span></div></div></div>
       ${me.bio ? `<p class="soc-bio">${esc(me.bio)}</p>` : '<p class="muted" style="margin:0;font-size:14px">No bio yet.</p>'}
       ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, { tier: rankFor(data().sessions).tier.n })}">${showBadge(k, undefined, { tier: rankFor(data().sessions).tier.n })}<span>${esc(showName(k, { tier: rankFor(data().sessions).tier.n }))}</span></div>`).join('')}</div>` : ''}
-      <button class="btn" id="socEdit">Edit profile</button>`;
+      <button class="btn" id="socEdit">Edit profile</button>`);
   }
   // search results
   const res = $('#socResults');
   if (res){
-    if (!SOC.q) res.innerHTML = '';
-    else if (SOC.results == null) res.innerHTML = '<p class="muted" style="margin:0">Searching…</p>';
-    else res.innerHTML = SOC.results.length ? SOC.results.map(socRow).join('') : '<p class="muted" style="margin:0">Nobody by that name yet.</p>';
+    setHTML(res, !SOC.q ? '' : SOC.results == null ? (res._h && res._h.includes('soc-row') ? res._h : '<p class="muted" style="margin:0">Searching…</p>') : SOC.results.length ? SOC.results.map(socRow).join('') : '<p class="muted" style="margin:0">Nobody by that name yet.</p>');
   }
-  // following list
-  const fl = $('#socFollowing');
-  if (fl){
-    fl.hidden = !(me && me.username);
-    fl.innerHTML = `<span class="label">Following</span>${SOC.followingRows.length ? `<div class="soc-list">${SOC.followingRows.slice().sort((a, b) => (b.rp || 0) - (a.rp || 0)).map(socRow).join('')}</div>` : '<p class="muted" style="margin:0">You aren’t following anyone yet. Search for friends above or tap someone on the leaderboard.</p>'}`;
-  }
+  socDrawFollowing();
+  applyHaptics();
+}
+function socDrawFollowing(){
+  const fl = $('#socFollowing'), me = LB.me; if (!fl) return;
+  fl.hidden = !(me && me.username);
+  setHTML(fl, `<span class="label">Following</span>${SOC.followingRows.length ? `<div class="soc-list">${SOC.followingRows.slice().sort((a, b) => (b.rp || 0) - (a.rp || 0)).map(socRow).join('')}</div>` : '<p class="muted" style="margin:0">You aren’t following anyone yet. Search for friends above or tap someone on the leaderboard.</p>'}`);
   applyHaptics();
 }
 // search as you type
@@ -3744,7 +3767,7 @@ function drawLeaderboard(){
     el.innerHTML = `<div class="row between"><span class="label">Leaderboard</span>${L.joined ? '<button class="btn small ghost" id="lbCancel">Cancel</button>' : ''}</div>
       <p class="muted" style="margin:0;font-size:14px">${L.joined ? 'Edit your profile.' : 'Show your rank to everyone using Emberline. Pick a username and a picture.'}</p>
       <div class="lb-form">
-        <label class="lb-pic" for="lbPicFile">${LB.avatar ? `<img class="lb-av" src="${LB.avatar}" alt="" style="width:64px;height:64px">` : lbAvatar(me.avatar_url, me.username || L.username, 64)}<span>Photo</span></label>
+        <label class="lb-pic" for="lbPicFile"><span class="lb-pic-av">${LB.avatar ? `<img class="lb-av" src="${LB.avatar}" alt="" style="width:64px;height:64px">` : lbAvatar(me.avatar_url, me.username || L.username, 64)}<span class="pdot-pen lb-pic-pen" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></span></span><span>Photo</span></label>
         <input type="text" id="lbName" maxlength="20" placeholder="Username" autocomplete="nickname" value="${esc(me.username || L.username || '')}">
       </div>
       <textarea id="lbBio" class="lb-bio" maxlength="160" rows="3" placeholder="Bio (optional): your setup, favorite temp, anything">${esc(LB.bioDraft != null ? LB.bioDraft : (me.bio || ''))}</textarea>
@@ -4405,8 +4428,13 @@ function zoneLiveStart(meta, quiet){
   zoneLive.timer = setInterval(() => {
     if (!zoneLive.on || zoneLive.busy || S.mode !== 'live') return;
     if (S.state >= 7 && S.state <= 9) return; // the Peak owns the lights while heating
-    const m = zoneLive.meta, anim = m.zones.some(z => ZFX_ANIM.includes(z.fx));
-    const cols = zoneFrame(m, (performance.now() - zoneLive.t0) / 1000), key = cols.join();
+    const m = zoneLive.meta, el = performance.now() - zoneLive.t0;
+    let cols = zoneFrame(m, el / 1000);
+    // optional fade envelope (boot intro): ease up from dark, and ease back down before it ends
+    let k = 1; const env = m.env;
+    if (env){ if (el < env.in) k = ease(Math.min(1, el / env.in)); else if (env.out != null && el > env.out) k = 1 - ease(Math.min(1, (el - env.out) / env.outMs)); }
+    if (k < 1) cols = cols.map(c => mixL('#000000', c, k));
+    const anim = k < 1 || m.zones.some(z => ZFX_ANIM.includes(z.fx)), key = cols.join();
     if (!anim && key === zoneLive.lastKey) return;   // nothing changed, don't spam the Peak
     zoneLive.lastKey = key; zoneLive.busy = true;
     ledJob(() => ble.writeBlob('/p/app/led/pclr', cbor({ lamp: zoneLampFromColors(cols) })).then(() => { zoneLive.fails = 0; }, () => { if (++zoneLive.fails > 8) zoneLiveStop(true); })).finally(() => { zoneLive.busy = false; });
@@ -4496,9 +4524,10 @@ function connectIntro(){
   if (introDone || S.mode !== 'live' || S.api === 2 || (S.state >= 7 && S.state <= 9) || zoneLive.on) return;
   introDone = true;
   const meta = JSON.parse(JSON.stringify(INTRO_ZONES));
+  meta.env = { in: 650, out: 9300, outMs: 700 }; // glide on fast, glide off at the end
   zPh.length = 0; zClock.last = 0;
   if (!zoneLiveStart(meta, true)) return;
-  setTimeout(() => { if (zoneLive.on && zoneLive.meta === meta) zoneLiveStop(true); }, 10000); // leave it alone if the zone editor took over
+  setTimeout(() => { if (zoneLive.on && zoneLive.meta === meta) zoneLiveStop(true); }, 10050); // leave it alone if the zone editor took over
 }
 
 function moodLamp(ref){
