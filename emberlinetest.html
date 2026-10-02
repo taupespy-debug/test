@@ -1,4 +1,4 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="theme-color" content="#0b0a10"><style>:root{color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#0b0a10;color:#f5f4f8}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="theme-color" content="#0b0a10"><style>:root{color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#0b0a10;color:#f5f4f8}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}
 /* ===== splash ===== */
 .spl{position:fixed;inset:0;z-index:100;display:grid;place-items:center;background:#0b0a10;transition:opacity .5s ease,visibility .5s}
 .spl::before{content:"";position:absolute;left:50%;top:44%;width:340px;height:340px;margin:-170px 0 0 -170px;border-radius:50%;
@@ -829,6 +829,12 @@ html.scrolling .ambient{animation-play-state:paused}
 .crop-row .btn{flex:1}
 .crop h3{margin:0;font-size:17px;color:#fff}
 .crop small{color:#bdb4cc}
+.sc-slot.filled{touch-action:pan-y;transition:transform .32s cubic-bezier(.2,.9,.25,1.08),box-shadow .2s}
+.sc-slot.sc-drag{z-index:5;transition:box-shadow .2s;box-shadow:0 14px 34px rgba(0,0,0,.45);cursor:grabbing}
+.sc-slot.sc-drag svg{transform:scale(1.08)}
+.sc-slots.sc-moving .sc-slot:not(.filled){border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+html,body{touch-action:pan-x pan-y}
+.crop-stage{touch-action:none}
 /* ===== celebrations ===== */
 .cel{position:fixed;inset:0;z-index:70;display:grid;place-items:center;overflow:hidden;background:rgba(6,4,10,0);transition:background .45s ease;--cc:#ff9f0a;cursor:pointer}
 .cel.on{background:rgba(6,4,10,.78);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
@@ -3347,7 +3353,7 @@ function showcaseEditor(){
   const row = { tier: rankFor(data().sessions).tier.n }, earned = earnedBadges(), P = LB.pick;
   return `<div class="row between"><span class="label">Showcase badges</span><span class="muted" style="font-size:13px">${P.length} / 3</span></div>
     <div class="sc-slots">${[0,1,2].map(i => P[i] ? `<button class="sc-slot filled" data-scrm="${i}" aria-label="Remove ${esc(showName(P[i], row))}"><span class="sc-n">${i+1}</span><span class="sc-x">✕</span>${showBadge(P[i], undefined, row)}</button>` : `<div class="sc-slot"><span class="sc-n">${i+1}</span><span class="sc-plus">+</span></div>`).join('')}</div>
-    <p class="muted" style="margin:0;font-size:13px">Tap badges you’ve earned to add them. Tap a slot to remove one.</p>
+    <p class="muted" style="margin:0;font-size:13px">Tap badges you’ve earned to add them. Tap a slot to remove one, or swipe it sideways to change the order.</p>
     <div class="sc-pick">${earned.map(k => { const i = P.indexOf(k); return `<button class="sc-pk" data-sck="${k}" aria-pressed="${i >= 0}" ${i < 0 && P.length >= 3 ? 'disabled' : ''}>${i >= 0 ? `<span class="sc-num">${i+1}</span>` : ''}${showBadge(k, undefined, row)}<span>${esc(showName(k, row))}</span></button>`; }).join('')}</div>`;
 }
 function openPlayer(r){
@@ -3441,6 +3447,48 @@ function cropAvatar(file){
     img.src = url;
   });
 }
+
+/* showcase: swipe a badge sideways to move it to another slot */
+let scDragged = 0;
+document.addEventListener('click', e => { if (Date.now() - scDragged < 400 && e.target.closest && e.target.closest('.sc-slots')){ e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+document.addEventListener('pointerdown', e => {
+  const slot = e.target.closest && e.target.closest('.sc-slots .sc-slot.filled'); if (!slot || !LB.pick || e.button > 0) return;
+  const wrap = slot.parentElement, slots = [...wrap.children], from = slots.indexOf(slot), n = LB.pick.length;
+  const rects = slots.map(el => el.getBoundingClientRect()), step = rects[1].left - rects[0].left;
+  const x0 = e.clientX, y0 = e.clientY, pid = e.pointerId;
+  let drag = false, to = from, gone = false;
+  const move = ev => {
+    if (ev.pointerId !== pid || gone) return;
+    const dx = ev.clientX - x0, dy = ev.clientY - y0;
+    if (!drag){
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) return end(null, true);
+      if (Math.abs(dx) < 8) return;
+      drag = true; slot.classList.add('sc-drag'); wrap.classList.add('sc-moving'); try { slot.setPointerCapture(pid); } catch(_){}
+    }
+    const lim = [rects[0].left - rects[from].left, rects[n - 1].left - rects[from].left]; // only between filled slots
+    const x = Math.max(lim[0] - 12, Math.min(lim[1] + 12, dx));
+    slot.style.transform = `translateX(${x}px) scale(1.04)`;
+    to = Math.max(0, Math.min(n - 1, Math.round(from + x / step)));
+    slots.forEach((el, i) => { if (el === slot || i >= n) return;
+      const shift = from < to && i > from && i <= to ? -step : from > to && i < from && i >= to ? step : 0;
+      el.style.transform = shift ? `translateX(${shift}px)` : ''; });
+  };
+  const end = (ev, cancel) => {
+    if (gone) return; gone = true;
+    document.removeEventListener('pointermove', move, true); document.removeEventListener('pointerup', up, true); document.removeEventListener('pointercancel', cc, true);
+    if (!drag) return;
+    scDragged = Date.now();
+    if (cancel || to === from){ slots.forEach(el => el.style.transform = ''); slot.classList.remove('sc-drag'); wrap.classList.remove('sc-moving'); return; }
+    // glide into the new slot, then save the new order
+    slot.style.transform = `translateX(${rects[to].left - rects[from].left}px)`; slot.classList.remove('sc-drag');
+    setTimeout(() => {
+      const k = LB.pick.splice(from, 1)[0]; LB.pick.splice(to, 0, k);
+      const v = $('#lbName') && $('#lbName').value; drawLeaderboard(); if (v != null && $('#lbName')) $('#lbName').value = v;
+    }, 230);
+  };
+  const up = ev => end(ev, false), cc = ev => end(ev, true);
+  document.addEventListener('pointermove', move, true); document.addEventListener('pointerup', up, true); document.addEventListener('pointercancel', cc, true);
+}, true);
 function lbRowHtml(r, i, meId){ return `<div class="lb-row${r.id === meId ? ' me' : ''}" data-lbi="${i}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier)}</small>${(r.showcase || []).length ? `<span class="lb-show">${r.showcase.map(k => showBadge(k, undefined, r)).join('')}</span>` : ''}</span><span class="lb-medal">${rankBadge(new Date().getMonth(), rbTierIdx(r.tier), 34)}</span><b>${r.rp}<small> RP</small></b></div>`; }
 function drawLeaderboard(){
   const el = $('#lbCard'); if (!el) return;
@@ -5209,6 +5257,11 @@ bootConnection();
 // pause the background drift while scrolling or dragging so the glass doesn't have to re-blur every frame
 { let st = 0; const on = () => { document.documentElement.classList.add('scrolling'); clearTimeout(st); st = setTimeout(() => document.documentElement.classList.remove('scrolling'), 180); };
   addEventListener('scroll', on, { passive: true }); addEventListener('touchmove', on, { passive: true }); }
+
+// app feel: no pinch zoom or double-tap zoom (the photo cropper keeps its own pinch)
+['gesturestart','gesturechange','gestureend'].forEach(t => document.addEventListener(t, e => { if (!(e.target.closest && e.target.closest('.crop-stage'))) e.preventDefault(); }, { passive: false }));
+document.addEventListener('touchmove', e => { if (e.touches.length > 1 && !(e.target.closest && e.target.closest('.crop-stage'))) e.preventDefault(); }, { passive: false });
+// double-tap zoom is already off through touch-action (blocking taps here would eat fast double taps on Boost)
 
 armFullscreen();
 setTimeout(() => { if (lbUsesPuffco()) lbRestore(); }, 1500); // bring back your Emberline profile on a new phone or link
