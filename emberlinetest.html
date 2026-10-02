@@ -803,6 +803,32 @@ html.scrolling .ambient{animation-play-state:paused}
 .hz{position:absolute;inset:0;width:100%;height:100%;margin:0;padding:0;border:0;opacity:0;z-index:4;cursor:pointer;-webkit-appearance:auto;appearance:auto}
 .hz:disabled{pointer-events:none}
 #homeChips .hz,.seg.vap .hz,#nav .hz{touch-action:pan-y}
+/* ===== badge viewer ===== */
+[data-bv]{cursor:pointer}
+.bv{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:rgba(6,4,10,0);-webkit-backdrop-filter:blur(0);backdrop-filter:blur(0);transition:background .35s ease,backdrop-filter .35s ease,-webkit-backdrop-filter .35s ease;touch-action:none}
+.bv.on{background:rgba(6,4,10,.72);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+.bv-in{display:grid;justify-items:center;gap:6px;text-align:center;padding:0 24px;perspective:900px}
+.bv-art{width:min(68vw,280px);transform:scale(.4);opacity:0;transition:transform .55s cubic-bezier(.2,1.4,.35,1),opacity .3s ease;filter:drop-shadow(0 18px 40px rgba(0,0,0,.5))}
+.bv.on .bv-art{transform:scale(1);opacity:1}
+.bv-tilt{transition:transform .5s cubic-bezier(.2,1,.3,1);transform-style:preserve-3d}
+.bv-tilt.drag{transition:none}
+.bv-art svg{width:100%;height:auto;display:block;overflow:visible}
+.bv-title{margin:14px 0 0;font:800 26px var(--f-display,system-ui);color:#fff;opacity:0;transform:translateY(10px);transition:opacity .4s ease .15s,transform .4s ease .15s}
+.bv-sub{font-size:14px;color:#cfc6de;opacity:0;transform:translateY(10px);transition:opacity .4s ease .22s,transform .4s ease .22s}
+.bv.on .bv-title,.bv.on .bv-sub{opacity:1;transform:none}
+.bv-close{margin-top:18px;position:relative;overflow:hidden}
+.bv.off{opacity:0;transition:opacity .25s ease}
+/* ===== round photo cropper ===== */
+.crop{position:fixed;inset:0;z-index:61;display:grid;place-items:center;background:rgba(6,4,10,.86);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.crop-in{width:min(92vw,380px);display:grid;gap:14px;justify-items:center}
+.crop-stage{position:relative;width:min(82vw,320px);aspect-ratio:1;overflow:hidden;border-radius:20px;background:#000;touch-action:none;cursor:grab}
+.crop-stage img{position:absolute;left:0;top:0;transform-origin:0 0;user-select:none;-webkit-user-select:none;pointer-events:none;max-width:none}
+.crop-ring{position:absolute;inset:6%;border-radius:50%;box-shadow:0 0 0 999px rgba(0,0,0,.6);outline:2px solid rgba(255,255,255,.85);pointer-events:none}
+.crop-zoom{width:100%}
+.crop-row{display:flex;gap:10px;width:100%}
+.crop-row .btn{flex:1}
+.crop h3{margin:0;font-size:17px;color:#fff}
+.crop small{color:#bdb4cc}
 /* ===== celebrations ===== */
 .cel{position:fixed;inset:0;z-index:70;display:grid;place-items:center;overflow:hidden;background:rgba(6,4,10,0);transition:background .45s ease;--cc:#ff9f0a;cursor:pointer}
 .cel.on{background:rgba(6,4,10,.78);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
@@ -2809,7 +2835,7 @@ let view = 'home', raf = 0;
 function setHTML(el, html){ if (el && el._h !== html){ el._h = html; el.innerHTML = html; } }
 
 /* haptics: only on the moments that matter (start/stop/boost, picking a profile or vapor level, saving lights, marking cleaned) */
-const HZ_SEL = '#bStart, #bStop, #bBoost, #bCleaned, #ltSave, #homeChips .pchip, .seg.vap button, #nav > button';
+const HZ_SEL = '#bStart, #bStop, #bBoost, #bCleaned, #ltSave, #homeChips .pchip, .seg.vap button, #nav > button, [data-bv], .bv-close, .crop [data-c="ok"]';
 function applyHaptics(){
   if (document.documentElement.dataset.ui === 'cockpit') return;
   document.querySelectorAll(HZ_SEL).forEach(el => {
@@ -3196,7 +3222,8 @@ function rankFor(sessions, when){
   r.reset = new Date(m1);
   return r;
 }
-function drawRank(){
+function drawRank(){ drawRankInner(); applyHaptics(); }
+function drawRankInner(){
   const el = $('#rankCard'); if (!el) return;
   const r = rankFor(data().sessions), t = r.tier, nx = r.next;
   const pct = nx ? Math.round((r.rp - t.min) / (nx.min - t.min) * 100) : 100;
@@ -3204,7 +3231,7 @@ function drawRank(){
   el.style.setProperty('--tc', t.c);
   el.innerHTML = `
     <div class="row between"><span class="label">Rank this month</span><span class="muted" style="font-size:12px">Resets ${r.reset.toLocaleDateString([], { month:'short', day:'numeric' })}</span></div>
-    <div class="rank-top"><div class="rank-medal">${rankBadge(new Date().getMonth(), rbTierIdx(t.n), 84)}</div>
+    <div class="rank-top"><div class="rank-medal" data-bv="${bvKeyNow(rbTierIdx(t.n))}">${rankBadge(new Date().getMonth(), rbTierIdx(t.n), 84)}</div>
       <div><div class="rank-name">${t.n}</div><div class="rank-rp"><b>${r.rp}</b> RP</div></div></div>
     <div class="rank-bar"><i style="width:${pct}%"></i></div>
     <div class="rank-next"><span>${nx ? `${nx.min - r.rp} RP to ${nx.n}` : 'Top tier reached'}</span><span>${t.n}${nx ? ' → ' + nx.n : ''}</span></div>
@@ -3217,7 +3244,7 @@ function drawRank(){
     </div>
     ${dirtyNow ? `<div class="banner warn" style="padding:10px 14px;font-size:14px"><div class="grow"><b>Losing points</b>Every dab costs 1 RP until you clean.</div></div>` : ''}
     ${(() => { const h = badgeHistory(), dev = LB.me && LB.me.dev; if (!h.length && !dev) return '';
-        return `<div class="rb-shelf-wrap"><span class="label">Your badges</span><div class="rb-shelf">${dev ? `<div class="rb-item">${devBadge(54)}<span>Developer</span></div>` : ''}${h.map(b => `<div class="rb-item">${rankBadge(b.m, b.t, 58, b.y)}<span>${RB_MONTHS[b.m].slice(0, 3)} · ${RB_TIERS[b.t].n}</span></div>`).join('')}</div></div>`; })()}
+        return `<div class="rb-shelf-wrap"><span class="label">Your badges</span><div class="rb-shelf">${dev ? `<div class="rb-item" data-bv="dev">${devBadge(54)}<span>Developer</span></div>` : ''}${h.map(b => `<div class="rb-item" data-bv="${b.y}-${String(b.m + 1).padStart(2, '0')}:${b.t}">${rankBadge(b.m, b.t, 58, b.y)}<span>${RB_MONTHS[b.m].slice(0, 3)} · ${RB_TIERS[b.t].n}</span></div>`).join('')}</div></div>`; })()}
     <details class="rank-how"><summary>How points work</summary>
       <div class="how-list">
         <div><span>Blinker <small>a single hit of 8s or longer</small></span><b class="pos">+5</b></div>
@@ -3328,9 +3355,91 @@ function openPlayer(r){
   const sc = r.showcase || [];
   el.innerHTML = `<div class="wl-card lbp"><div class="row between"><span class="label">Profile</span><button class="btn small ghost" id="lbpClose">Close</button></div>
     <div class="lbp-head">${lbAvatar(r.avatar_url, r.username, 96)}<b>${esc(r.username)}${r.dev ? devBadge(26) : ''}</b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span></div>
-    ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div>${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}</div>`;
-  el.hidden = false;
+    ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, r)}">${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}</div>`;
+  el.hidden = false; applyHaptics();
   el.onclick = e => { if (e.target === el || e.target.id === 'lbpClose') el.hidden = true; };
+}
+
+/* ===== badge viewer: tap a badge to see it big ===== */
+function bvKeyNow(t){ const n = new Date(); return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + ':' + t; }
+function bvResolve(k, row){ return k === 'dev' ? 'dev' : k.replace(':now', ':' + rbTierIdx(row && row.tier)); }
+function openBadge(key){
+  let art, title, sub;
+  if (key === 'dev'){ art = devBadge(240); title = 'Developer'; sub = 'Made Emberline'; }
+  else {
+    const m = /^(\d{4})-(\d{2}):([0-4])$/.exec(key || ''); if (!m) return;
+    const y = +m[1], mo = +m[2] - 1, t = +m[3], now = new Date(), live = y === now.getFullYear() && mo === now.getMonth();
+    art = rankBadge(mo, t, undefined, y); title = RB_TIERS[t].n;
+    sub = `${RB_MONTHS[mo]} ${y}${live ? ' · this month' : ''}`;
+  }
+  const el = document.createElement('div'); el.className = 'bv';
+  el.innerHTML = `<div class="bv-in"><div class="bv-art"><div class="bv-tilt">${art}</div></div><h3 class="bv-title">${esc(title)}</h3><span class="bv-sub">${esc(sub)}</span><button class="btn small ghost bv-close">Close</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const tilt = el.querySelector('.bv-tilt'), artEl = el.querySelector('.bv-art');
+  let down = false;
+  const tiltTo = (x, y) => { const r = artEl.getBoundingClientRect(), dx = (x - (r.left + r.width / 2)) / (r.width / 2), dy = (y - (r.top + r.height / 2)) / (r.height / 2);
+    tilt.style.transform = `rotateY(${clamp(dx, -1, 1) * 22}deg) rotateX(${clamp(-dy, -1, 1) * 22}deg) scale(1.04)`; };
+  el.addEventListener('pointerdown', e => { if (e.target.closest('.bv-close')) return; down = true; tilt.classList.add('drag'); tiltTo(e.clientX, e.clientY); });
+  el.addEventListener('pointermove', e => { if (down) tiltTo(e.clientX, e.clientY); });
+  const release = () => { down = false; tilt.classList.remove('drag'); tilt.style.transform = ''; };
+  el.addEventListener('pointerup', release); el.addEventListener('pointercancel', release);
+  const close = () => { el.classList.remove('on'); el.classList.add('off'); setTimeout(() => el.remove(), 260); };
+  el.querySelector('.bv-close').addEventListener('click', close);
+  el.addEventListener('click', e => { if (e.target === el) close(); });
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('[data-bv]'); if (!b || e.target.closest('.sc-pick, .sc-slots')) return;
+  e.stopPropagation(); openBadge(b.dataset.bv);
+}, true);
+
+/* ===== round photo cropper: drag to move, pinch or slide to zoom ===== */
+function cropAvatar(file){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That picture couldn’t be opened.')); };
+    img.onload = () => {
+      const el = document.createElement('div'); el.className = 'crop';
+      el.innerHTML = `<div class="crop-in"><h3>Move and zoom</h3><small>Drag to position. Pinch or use the slider to zoom.</small>
+        <div class="crop-stage"><img alt=""><div class="crop-ring"></div></div>
+        <input type="range" class="crop-zoom" min="1" max="4" step="0.01" value="1" aria-label="Zoom">
+        <div class="crop-row"><button class="btn ghost" data-c="cancel">Cancel</button><button class="btn primary" data-c="ok">Use photo</button></div></div>`;
+      document.body.appendChild(el); applyHaptics();
+      const stage = el.querySelector('.crop-stage'), im = el.querySelector('img'), zoom = el.querySelector('.crop-zoom');
+      im.src = url;
+      const W = stage.clientWidth, ring = W * .88, ringOff = W * .06;
+      const base = ring / Math.min(img.width, img.height); // smallest scale that still fills the circle
+      let z = 1, x = (W - img.width * base) / 2, y = (W - img.height * base) / 2;
+      const clampPos = () => { const sc = base * z, w = img.width * sc, h = img.height * sc;
+        x = Math.min(ringOff, Math.max(ringOff + ring - w, x)); y = Math.min(ringOff, Math.max(ringOff + ring - h, y)); };
+      const paint = () => { clampPos(); im.style.transform = `translate(${x}px,${y}px) scale(${base * z})`; };
+      const zoomAt = (nz, cx, cy) => { nz = Math.max(1, Math.min(4, nz)); const k = nz / z; x = cx - (cx - x) * k; y = cy - (cy - y) * k; z = nz; zoom.value = z; paint(); };
+      paint();
+      const pts = new Map(); let pinch0 = 0, z0 = 1;
+      stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pts.size === 2){ const [a, b] = [...pts.values()]; pinch0 = Math.hypot(a.x - b.x, a.y - b.y); z0 = z; } });
+      stage.addEventListener('pointermove', e => {
+        const p = pts.get(e.pointerId); if (!p) return;
+        const r = stage.getBoundingClientRect();
+        if (pts.size === 1){ x += e.clientX - p.x; y += e.clientY - p.y; pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); paint(); return; }
+        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinch0) zoomAt(z0 * d / pinch0, (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top);
+      });
+      const up = e => { pts.delete(e.pointerId); if (pts.size < 2) pinch0 = 0; };
+      stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
+      zoom.addEventListener('input', () => zoomAt(+zoom.value, W / 2, W / 2));
+      const done = v => { el.remove(); URL.revokeObjectURL(url); resolve(v); };
+      el.addEventListener('click', e => {
+        const c = e.target.closest('[data-c]'); if (!c) return;
+        if (c.dataset.c === 'cancel') return done(null);
+        const sc = base * z, out = document.createElement('canvas'); out.width = out.height = 256;
+        const sx = (ringOff - x) / sc, sy = (ringOff - y) / sc, sw = ring / sc;
+        out.getContext('2d').drawImage(img, sx, sy, sw, sw, 0, 0, 256, 256);
+        done(out.toDataURL('image/jpeg', .85));
+      });
+    };
+    img.src = url;
+  });
 }
 function lbRowHtml(r, i, meId){ return `<div class="lb-row${r.id === meId ? ' me' : ''}" data-lbi="${i}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier)}</small>${(r.showcase || []).length ? `<span class="lb-show">${r.showcase.map(k => showBadge(k, undefined, r)).join('')}</span>` : ''}</span><span class="lb-medal">${rankBadge(new Date().getMonth(), rbTierIdx(r.tier), 34)}</span><b>${r.rp}<small> RP</small></b></div>`; }
 function drawLeaderboard(){
@@ -3392,7 +3501,8 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('change', async e => {
   if (e.target.id !== 'lbPic') return; const f = e.target.files[0]; if (!f) return;
-  try { LB.avatar = await lbResize(f); LB.err = ''; } catch(err){ LB.err = err.message; }
+  e.target.value = ''; // let the same photo be picked again
+  try { const v = await cropAvatar(f); if (!v) return; LB.avatar = v; LB.err = ''; } catch(err){ LB.err = err.message; }
   const keep = $('#lbName') && $('#lbName').value; drawLeaderboard(); if (keep != null && $('#lbName')) $('#lbName').value = keep;
 });
 // your Emberline profile lives on the server, keyed to your Puffco account: sign in on any phone or link and it comes back
