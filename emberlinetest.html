@@ -918,6 +918,14 @@ img,svg{-webkit-user-drag:none;-webkit-touch-callout:none}
 .bb-all[open] summary .mt-chev{transform:rotate(180deg)}
 .bb-body{display:grid;gap:12px;padding-top:12px}
 .bb-all[open] .bb-body{animation:fadeIn .3s ease}
+.bv-sub:has(.bv-rar){display:flex;gap:8px;align-items:center;justify-content:center}
+.bv-rar{font:800 11px var(--f-round);letter-spacing:.14em;text-transform:uppercase;padding:4px 10px;border-radius:99px;border:1px solid currentColor;background:color-mix(in srgb,currentColor 16%,transparent)}
+.bv-rar.r-common{color:#c4bdd2}
+.bv-rar.r-rare{color:#4fb4ff}
+.bv-rar.r-epic{color:#c77dff}
+.bv-rar.r-legendary{color:#ffcf4a;text-shadow:0 0 10px rgba(255,207,74,.6)}
+.bv-rar.r-mystery{color:#ff6f91}
+.bv-cat{font-size:14px;color:#cfc6de}
 /* ===== celebrations ===== */
 .cel{position:fixed;inset:0;z-index:70;display:grid;place-items:center;overflow:hidden;background:rgba(6,4,10,0);transition:background .45s ease;--cc:#ff9f0a;cursor:pointer}
 .cel.on{background:rgba(6,4,10,.78);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
@@ -3492,13 +3500,14 @@ function openPlayer(r){
 function bvKeyNow(t){ const n = new Date(); return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + ':' + t; }
 function bvResolve(k, row){ return k === 'dev' || k.startsWith('sp:') ? k : k.replace(':now', ':' + rbTierIdx(row && row.tier)); }
 function openBadge(key){
-  let art, title, sub, extra = '';
+  let art, title, sub, extra = '', subHtml = null;
   if (key === 'dev'){ art = devBadge(240); title = 'Developer'; sub = 'Made Emberline'; }
   else if (key.startsWith('sp:')){
     const b = spbById(key.slice(3)); if (!b) return;
     const theirs = !!arguments[1], st = theirs ? { got: true } : (spbStatus()[b.id] || {}), ok = st.got;
     art = `<div class="${ok ? '' : 'bv-locked'}">${SPB.badge(b)}</div>`; title = b.secret && !ok ? '???' : b.name;
     sub = `${b.rar[0].toUpperCase() + b.rar.slice(1)} · ${b.cat}`;
+    subHtml = `<span class="bv-rar r-${b.rar}">${b.rar}</span><span class="bv-cat">${esc(b.cat)}</span>`;
     const how = b.secret && ok ? b.hint : b.req;
     extra = `<p class="bv-how">${esc(how)}</p>${theirs ? '' : `<span class="bv-state ${ok ? 'ok' : ''}">${ok ? 'Unlocked' : 'Locked'}${!ok && st.prog ? ' · ' + esc(st.prog) : ''}</span>`}`;
   }
@@ -3509,7 +3518,7 @@ function openBadge(key){
     sub = `${RB_MONTHS[mo]} ${y}${live ? ' · this month' : ''}`;
   }
   const el = document.createElement('div'); el.className = 'bv';
-  el.innerHTML = `<div class="bv-in"><div class="bv-art"><div class="bv-tilt">${art}</div></div><h3 class="bv-title">${esc(title)}</h3><span class="bv-sub">${esc(sub)}</span>${extra}<button class="btn small ghost bv-close">Close</button></div>`;
+  el.innerHTML = `<div class="bv-in"><div class="bv-art"><div class="bv-tilt">${art}</div></div><h3 class="bv-title">${esc(title)}</h3><span class="bv-sub">${subHtml || esc(sub)}</span>${extra}<button class="btn small ghost bv-close">Close</button></div>`;
   document.body.appendChild(el); applyHaptics();
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
   const tilt = el.querySelector('.bv-tilt'), artEl = el.querySelector('.bv-art');
@@ -3524,8 +3533,14 @@ function openBadge(key){
   el.querySelector('.bv-close').addEventListener('click', close);
   el.addEventListener('click', e => { if (e.target === el) close(); });
 }
+// a finger that moved (a scroll) shouldn't count as tapping a badge
+const tapTrack = { x:0, y:0, moved:0 };
+document.addEventListener('pointerdown', e => { tapTrack.x = e.clientX; tapTrack.y = e.clientY; tapTrack.moved = 0; }, true);
+document.addEventListener('pointermove', e => { tapTrack.moved = Math.max(tapTrack.moved, Math.hypot(e.clientX - tapTrack.x, e.clientY - tapTrack.y)); }, { capture: true, passive: true });
+addEventListener('scroll', () => { tapTrack.moved = 99; }, { capture: true, passive: true });
 document.addEventListener('click', e => {
   const b = e.target.closest && e.target.closest('[data-bv]'); if (!b || e.target.closest('.sc-pick, .sc-slots')) return;
+  if (tapTrack.moved > 10){ e.preventDefault(); e.stopPropagation(); return; } // was a scroll
   e.stopPropagation(); openBadge(b.dataset.bv, !!b.closest('#lbProfile'));
 }, true);
 
@@ -4007,7 +4022,16 @@ async function lbSave(){
   try {
     const body = Object.assign({ username: name, bio: (($('#lbBio') && $('#lbBio').value) || '').slice(0, 160) }, lbPayload()); if (LB.avatar) body.avatar = LB.avatar; if (LB.pick) body.showcase = LB.pick.slice(0, 3);
     const r = await lbCall(body);
+    // the server drops badges it doesn't know; if that happened, say why instead of failing silently
+    const sent = body.showcase || [], kept = (r.player && r.player.showcase) || [], lost = sent.filter(k => !kept.includes(k));
+    const bioLost = body.bio && r.player && r.player.bio == null;
     LB.me = r.player; LB.pick = null; LB.bioDraft = null; try { drawRank(); drawSocial(); } catch(_){} L.joined = true; L.username = name; LB.avatar = null; LB.edit = false; save();
+    if (lost.length || bioLost){
+      LB.err = (lost.some(k => k.startsWith('sp:')) || bioLost)
+        ? 'Saved, but the server didn’t keep ' + (lost.length ? 'your new badges' : 'your bio') + '. Update the player function in Supabase (paste the newest player-function.ts and Deploy), and run add-social.sql.'
+        : 'Saved, but the server didn’t keep some badges. Try again.';
+      LB.edit = true; LB.pick = sent.slice(); LB.busy = false; drawLeaderboard(); return;
+    }
     toast(wasJoined ? 'Profile saved' : 'You’re on the leaderboard');
     LB.busy = false; lbLoad();
   } catch(e){ LB.busy = false; LB.err = e.code === 'puffco_blocked' ? e.message : (LB_ERRS[e.code] || (/load failed|failed to fetch|network/i.test(e.message) ? 'Couldn’t reach the leaderboard server.' : 'Couldn’t save: ' + e.message)); drawLeaderboard(); }
