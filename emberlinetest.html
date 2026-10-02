@@ -1066,7 +1066,7 @@ img,svg{-webkit-user-drag:none;-webkit-touch-callout:none}
 @keyframes rbPulse{50%{opacity:.55}}
 @media (prefers-reduced-motion:reduce){.rb-shine,.rb-spark,.rb-glow{animation:none}.rb-spark{opacity:.8}}
 /* leaderboard */
-.lb{display:grid;gap:12px}
+.lb{display:grid;gap:12px;grid-template-columns:minmax(0,1fr)}
 .lb-list{display:grid;gap:4px}
 .lb-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:16px}
 .lb-row.me{background:color-mix(in srgb,var(--accent) 16%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 45%,transparent)}
@@ -1665,6 +1665,11 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
   <!-- SETTINGS -->
   <section class="view" id="v-set" hidden>
     <h1 class="largetitle" id="setTitle">Settings</h1>
+    <div class="card" style="display:grid;gap:10px;border:1px dashed var(--accent)">
+      <span class="label">Test build tools</span>
+      <button class="btn small" id="tbKeepOpen">Show "Keep Emberline open" popup</button>
+      <button class="btn small" id="tbInspect">Device inspector (connect first)</button>
+    </div>
     <div class="card" id="looksCard" style="display:grid;gap:10px" hidden>
       <span class="label">Secret looks</span>
       <div class="looks" id="uiLooks"></div>
@@ -2026,7 +2031,7 @@ let demo = null; // demo dataset: {sessions, since, lastClean}
 const CHAMBERS = { 0:'No chamber', 1:'Classic', 2:'3DXL', 3:'3D' };
 const VAPOR = [ {v:0, n:'Smooth'}, {v:0.5, n:'Bold'}, {v:1, n:'Intense'}, {v:1.5, n:'Extreme', xl:true} ];
 const vaporName = v => (VAPOR.reduce((a,b) => Math.abs(b.v - v) < Math.abs(a.v - v) ? b : a)).n;
-const is3DXL = () => S.chamber === 2;
+const is3DXL = () => !isProxy() && S.chamber === 2;
 const fmtDelta = f => store.unit === 'F' ? `+${Math.round(f)}°F` : `+${Math.round(f * 5 / 9)}°C`;
 
 /* ================= Lorax BLE protocol ================= */
@@ -2039,7 +2044,7 @@ const enc = new TextEncoder(), dec = new TextDecoder();
 const MAX_MSG = 128; // Peak Pro ATT MTU is 131 (minus 3 byte header)
 
 class Lorax {
-  constructor(){ this.seq=1; this.pending=new Map(); this.queue=Promise.resolve(); this.dev=null; }
+  constructor(){ this.seq=1; this.pending=new Map(); this.queue=Promise.resolve(); this.dev=null; this.ints={}; }
   async request(showAll, name, id){
     const opt = { optionalServices:[SVC, PIKACHU, PUP, OTA], optionalManufacturerData:[PUFFCO_CO] };
     const base = [{ services:[SVC] }, { services:[PIKACHU] }, { manufacturerData:[{ companyIdentifier:PUFFCO_CO }] }];
@@ -2077,7 +2082,7 @@ class Lorax {
     this._onRep = e => this._onReply(e.target.value);
     rep.addEventListener('characteristicvaluechanged', this._onRep);
     await withTimeout(rep.startNotifications(), 8000, 'gatt');
-    this.rep = rep; this.cmd = cmd; this.seq = 1; this.pending.clear(); this.queue = Promise.resolve();
+    this.rep = rep; this.cmd = cmd; this.seq = 1; this.ints = {}; this.pending.clear(); this.queue = Promise.resolve();
     st('auth'); await this._auth();
   }
   disconnect(silent){
@@ -2133,11 +2138,29 @@ class Lorax {
     b[0]=offset&0xff; b[1]=offset>>8; b[2]=flags; b.set(p,3); b[3+p.length]=0; b.set(bytes, 4+p.length);
     return this.run(OP.WRITE, b, 3000);
   }
-  async f32(path, size = 4){ const r = await this.read(path, size); return new DataView(r.buffer).getFloat32(0, true); }
+  // Peak Pro stores numbers as 32-bit floats. The Proxy stores some as whole numbers, which read as ~0 if treated
+  // as floats (that's the 0% battery / 32°F bug). Spot that, read them as integers, and remember it for writes.
+  async f32(path, size = 4){
+    const r = await this.read(path, size);
+    if (r.length < 4){ const dv0 = new DataView(r.buffer, r.byteOffset, r.length); const v = r.length >= 2 ? dv0.getUint16(0, true) : r.length ? r[0] : 0; this.ints[path] = { scale: 1 }; return v; }
+    const dv = new DataView(r.buffer, r.byteOffset, r.length), f = dv.getFloat32(0, true), bits = dv.getUint32(0, true);
+    if (bits !== 0 && (!isFinite(f) || Math.abs(f) < 1e-20)){
+      const v = dv.getInt32(0, true), scale = this.intScale(path, v);
+      this.ints[path] = { scale }; return v / scale;
+    }
+    return f;
+  }
+  intScale(path, v){
+    const a = Math.abs(v);
+    if (/temp|btmp/.test(path)) return a > 20000 ? 100 : a > 1000 ? 10 : 1;   // °C, tenths or hundredths
+    if (/bat\/soc/.test(path)) return a > 1000 ? 100 : a > 100 ? 10 : 1;      // percent
+    if (/elap|tott|time|btim/.test(path)) return a > 6000 ? 1000 : 1;          // seconds or ms
+    return 1;
+  }
   async u8(path){ return (await this.read(path, 1))[0]; }
   async u32(path){ const r = await this.read(path, 4); return new DataView(r.buffer).getUint32(0, true); }
   async str(path){ const r = await this.read(path, 64); return dec.decode(r).split('\0')[0].trim(); }
-  wf32(path, v){ const b = new Uint8Array(4); new DataView(b.buffer).setFloat32(0, v, true); return this.write(path, b); }
+  wf32(path, v){ const b = new Uint8Array(4), t = this.ints[path]; if (t) new DataView(b.buffer).setInt32(0, Math.round(v * t.scale), true); else new DataView(b.buffer).setFloat32(0, v, true); return this.write(path, b); }
   async readAll(path){
     const out = []; let off = 0;
     while (off < 4096){
@@ -2882,7 +2905,7 @@ function odoSync(){
 }
 async function slowPoll(){
   if (++slowPoll.n % 4 === 0) await readBatteryDetail();
-  try { S.chamber = await ble.u8('/p/htr/chmt'); } catch(e){}
+  if (!isProxy()){ try { S.chamber = await ble.u8('/p/htr/chmt'); } catch(e){} } else S.chamber = null; // Proxy has no swappable chamber
   try { S.battery = clamp(Math.round(await ble.f32('/p/bat/soc')),0,100); } catch(e){}
   try { const c = await ble.u8('/p/bat/chg/stat'); S.charging = c === 0 || c === 1; } catch(e){}
   if (S.charging){
@@ -2939,16 +2962,45 @@ function trackSession(prev, st){
     if ((st === 9 || st === 5 || st < 5) && prev >= 7 && prev <= 8){
       const ranFor = cur.readyAt ? (Date.now() - cur.readyAt) / 1000 : 0;
       S.cyclesSinceOdo = (S.cyclesSinceOdo || 0) + 1;
-      if (cur.hit && ranFor >= 20){ logSession({ t:cur.t, p:cur.p, name:cur.name, target:cur.target, peak:Math.round(cur.peak), dur:Math.round((Date.now()-cur.t)/1000), batt:cur.batt, hits:(cur.hits || HIT.hits).slice(0, 20), vapor:(S.profiles[cur.p] || {}).vapor, sc:sinceClean() + 1, run: cur.readyAt ? Math.round((Date.now() - cur.readyAt) / 1000) : null }); }
+      const gotHit = (cur.hits || HIT.hits || []).some(h => h >= 1);
+      if (cur.hit && (ranFor >= 20 || gotHit)){ logSession({ t:cur.t, p:cur.p, name:cur.name, target:cur.target, peak:Math.round(cur.peak), dur:Math.round((Date.now()-cur.t)/1000), batt:cur.batt, hits:(cur.hits || HIT.hits).slice(0, 20), vapor:(S.profiles[cur.p] || {}).vapor, sc:sinceClean() + 1, run: cur.readyAt ? Math.round((Date.now() - cur.readyAt) / 1000) : null }); }
       cur = null;
     }
   }
 }
 function data(){ return demo || { sessions:store.sessions, lastClean:store.lastClean }; }
+// ranked counts only this Puffco account's sessions (several accounts can share one phone)
+function acctId(){ const a = store.account, id = a && a.data && a.data.user && a.data.user.id; return id != null ? String(id) : (a && a.email ? 'e:' + a.email.toLowerCase() : null); }
+function rankSessions(){
+  if (demo) return demo.sessions;
+  const id = acctId(), all = store.sessions || [];
+  if (!id) return all; // not signed in: just this phone's history (nothing goes to the leaderboard)
+  return all.filter(s => s.acct ? s.acct === id : store.sessOwner === id);
+}
+// sessions saved before accounts were tracked: ask once who they belong to
+function claimPrompt(){
+  const id = acctId(); if (!id || demo || store.sessOwner || document.querySelector('.egg')) return;
+  store.claimAsked = store.claimAsked || {}; if (store.claimAsked[id]) return;
+  const n = (store.sessions || []).filter(s => !s.acct).length; if (!n) return;
+  const who = (store.account && store.account.email) || 'this Puffco account';
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Whose sessions are these">
+    <h2>Are these your sessions?</h2>
+    <p>This phone has <b style="color:var(--fg)">${n} session${n > 1 ? 's' : ''}</b> saved from before. Should they count for ranked on <b style="color:var(--fg)">${esc(who)}</b>?</p>
+    <p style="font-size:14px">Pick no if this is a second account. Only one account can claim them.</p>
+    <button class="btn primary" id="clYes" style="width:100%">Yes, they’re mine</button>
+    <button class="btn" id="clNo" style="width:100%">No, start fresh</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const done = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); try { drawRank(); drawBadgeBook(); drawSocial(); } catch(e){} lbPush(true); };
+  el.querySelector('#clYes').onclick = () => { store.sessOwner = id; save(); done(); toast('Sessions added to your rank'); };
+  el.querySelector('#clNo').onclick = () => { store.claimAsked[id] = true; save(); done(); };
+}
 function logSession(s){
   if (ble.dev && S.mode === 'live'){ s.dev = ble.dev.id; s.series = S.series || 'peach'; }
+  if (!demo && acctId()) s.acct = acctId();
   const d = data();
-  let rankBefore = null; try { rankBefore = rankFor(d.sessions); } catch(e){}
+  let rankBefore = null; try { rankBefore = myRank(); } catch(e){}
   d.sessions.push(s);
   try { skinCelebrate(s); } catch(e){}
   if (demo){ demo.since++; }
@@ -3393,7 +3445,7 @@ function chargeLine(){
 function draw(){
   // header
   $('#devName').firstChild.textContent = S.mode === 'live' ? (S.devName || S.name) : 'Emberline';
-    $('#devSub').textContent = S.mode === 'live' ? (isProxy() ? `Proxy${S.charging ? ' · charging' : ''}` : `${S.edition ? S.edition + ' ' : ''}Peak Pro · ${CHAMBERS[S.chamber] ?? 'Chamber ?'}${S.charging ? ' · charging' : ''}`) : S.mode === 'demo' ? `Demo mode · ${CHAMBERS[S.chamber]}` : 'Not connected';
+    $('#devSub').textContent = S.mode === 'live' ? (isProxy() ? `Proxy${S.charging ? ' · charging' : ''}` : `${S.edition ? S.edition + ' ' : ''}Peak Pro · ${CHAMBERS[S.chamber] ?? 'Chamber ?'}${S.charging ? ' · charging' : ''}`) : S.mode === 'demo' ? `Demo mode · ${isProxy() ? 'Proxy' : CHAMBERS[S.chamber] ?? '3D Chamber'}` : 'Not connected';
   const bt = $('#batt'); bt.style.visibility = 'visible'; bt.hidden = !(S.mode === 'live' && S.battery != null); // hidden takes no space, so the device name gets the room
   bt.querySelector('b').style.width = (S.battery || 0) + '%';
   bt.querySelector('b').style.background = S.battery < 20 ? 'var(--bad)' : S.battery < 40 ? 'var(--warn)' : 'var(--good)';
@@ -3433,7 +3485,7 @@ function drawHome(){
   $('#gTarget').textContent = `Target ${fmtT(shownTarget)}${U()} · ${p.time}s · ${vaporName(p.vapor)}`;
   $('#adjustRow').hidden = !heatingNow;
   setHTML($('#bBoost'), `<span class="bst"><span>Boost</span><small>+${store.unit === 'F' ? Math.round(p.boostF) : Math.round(p.boostF * 5 / 9)}° +${p.boostT}s</small></span>`);
-  const noCh = S.mode === 'live' && S.chamber === 0, cb = $('#chamberBanner');
+  const noCh = S.mode === 'live' && !isProxy() && S.chamber === 0, cb = $('#chamberBanner');
   cb.hidden = !noCh;
   if (noCh) cb.innerHTML = '<div class="grow"><b>No chamber detected</b>Seat the chamber firmly to heat up.</div>';
   const live = S.mode === 'live';
@@ -3444,7 +3496,7 @@ function drawHome(){
   setHTML($('#gTimer'), S.state === 8 ? `${left}s left` : S.state === 7 ? 'Heating up…' : live && S.charging ? chargeLine() : '&nbsp;');
   { const h = hitText(), g = $('#gHit'); if (g.innerHTML !== h) g.innerHTML = h; }
   const heating = S.state >= 7 && S.state <= 9;
-  $('#bStart').disabled = (live && heating) || (live && S.chamber === 0) || (!live && (C.state === 'connecting' || C.state === 'reconnecting'));
+  $('#bStart').disabled = (live && heating) || (live && !isProxy() && S.chamber === 0) || (!live && (C.state === 'connecting' || C.state === 'reconnecting'));
   if (live && heating) holdWake(); else releaseWake(); $('#bStop').disabled = !heating; $('#bBoost').disabled = !heating;
   { const act = $('#bStart').parentElement, run = live && heating; if (act.classList.contains('run') !== run){ act.classList.toggle('run', run); act.classList.remove('morph'); void act.offsetWidth; act.classList.add('morph'); } }
 
@@ -3667,7 +3719,7 @@ function devBadge(size){
 }
 // past months you've played, newest first, with the tier you finished on
 function badgeHistory(){
-  const ss = data().sessions; if (!ss.length) return [];
+  const ss = rankSessions(); if (!ss.length) return [];
   const now = new Date(), out = [], seen = new Set();
   for (const s of ss){ const d = new Date(s.t); const k = d.getFullYear() * 12 + d.getMonth(); if (k >= now.getFullYear() * 12 + now.getMonth()) continue; seen.add(k); }
   [...seen].sort((a, b) => b - a).slice(0, 24).forEach(k => { const y = Math.floor(k / 12), m = k % 12; const r = rankFor(ss, new Date(y, m, 15)); out.push({ y, m, t: rbTierIdx(r.tier.n), rp: r.rp }); });
@@ -3733,7 +3785,7 @@ function sessionPop(s, gained){
 }
 function afterSessionLogged(s, before){
   try {
-    const after = rankFor(data().sessions);
+    const after = myRank();
     const gained = after.rp - before.rp;
     if (view === 'home') sessionPop(s, gained); else toast(`Session done · ${gained > 0 ? '+' : ''}${gained} RP`);
     const bi = RANK_TIERS.findIndex(t => t.n === before.tier.n), ai = RANK_TIERS.findIndex(t => t.n === after.tier.n);
@@ -3768,10 +3820,20 @@ function rankFor(sessions, when){
   r.reset = new Date(m1);
   return r;
 }
+// your rank this month: from this phone's sessions, but never below what the leaderboard already has for you
+// (sessions from another phone or site still count)
+function myRank(){
+  const r = rankFor(rankSessions()), me = demo ? null : (LB.me || lbStore().meCache);
+  if (me && me.month === lbMonth() && (me.rp || 0) > r.rp){
+    const rp = me.rp;
+    return Object.assign({}, r, { rp, blinkers: Math.max(r.blinkers, me.blinkers || 0), tier: RANK_TIERS.slice().reverse().find(t => rp >= t.min), next: RANK_TIERS.find(t => t.min > rp) || null, synced: true });
+  }
+  return r;
+}
 function drawRank(){ drawRankInner(); applyHaptics(); }
 function drawRankInner(){
   const el = $('#rankCard'); if (!el) return;
-  const r = rankFor(data().sessions), t = r.tier, nx = r.next;
+  const r = myRank(), t = r.tier, nx = r.next;
   const pct = nx ? Math.round((r.rp - t.min) / (nx.min - t.min) * 100) : 100;
   const dirtyNow = sinceClean() > RANK_DIRTY;
   el.style.setProperty('--tc', t.c);
@@ -3862,7 +3924,11 @@ async function lbCall(body){
     throw e;
   }
 }
-function lbPayload(){ const r = rankFor(data().sessions); return { rp: r.rp, tier: r.tier.n, blinkers: r.blinkers, month: lbMonth() }; }
+function lbPayload(){
+  const r = myRank(), m = lbMonth(), me = LB.me && LB.me.month === m ? LB.me : null;
+  const rp = Math.max(r.rp, me ? me.rp || 0 : 0), bl = Math.max(r.blinkers, me ? me.blinkers || 0 : 0);
+  return { rp, tier: rp > r.rp && me ? me.tier : r.tier.n, blinkers: bl, month: m };
+}
 async function lbPush(force){
   const L = lbStore(); if (!L.joined || !lbUsesPuffco()) return;
   if (!force && Date.now() - LB.lastPush < 60000) return;
@@ -3891,7 +3957,7 @@ function lbResize(file){
     img.src = url;
   });
 }
-const LB_ERRS = { banned:'This account is banned from ranked and social. Ask in the Emberline Discord if you think this is a mistake.', puffco_required:'Sign in to Puffco in Settings to join ranked.', username_invalid:'Usernames are 3 to 20 letters, numbers, _ or .', username_taken:'That username is taken.', username_required:'Pick a username first.', avatar_too_big:'That picture is too big.', puffco_auth:'Your Puffco sign-in expired. Sign in again in Settings.', auth:'Couldn’t sign you in. Try again.' };
+const LB_ERRS = { name_cooldown:'You can only change your username once every 3 days.', banned:'This account is banned from ranked and social. Ask in the Emberline Discord if you think this is a mistake.', puffco_required:'Sign in to Puffco in Settings to join ranked.', username_invalid:'Usernames are 3 to 20 letters, numbers, _ or .', username_taken:'That username is taken.', username_required:'Pick a username first.', avatar_too_big:'That picture is too big.', puffco_auth:'Your Puffco sign-in expired. Sign in again in Settings.', auth:'Couldn’t sign you in. Try again.' };
 
 /* ---- badge showcase: up to 3 badges on your profile ---- */
 function showBadge(key, size, row){
@@ -3919,7 +3985,7 @@ function earnedBadges(){
 }
 function showcaseEditor(){
   if (!LB.pick) LB.pick = ((LB.me && LB.me.showcase) || []).slice(0, 3);
-  const row = { tier: rankFor(data().sessions).tier.n }, earned = earnedBadges(), P = LB.pick;
+  const row = { tier: myRank().tier.n }, earned = earnedBadges(), P = LB.pick;
   return `<div class="row between"><span class="label">Showcase badges</span><span class="muted" style="font-size:13px">${P.length} / 3</span></div>
     <div class="sc-slots">${[0,1,2].map(i => P[i] ? `<button class="sc-slot filled" data-scrm="${i}" aria-label="Remove ${esc(showName(P[i], row))}"><span class="sc-n">${i+1}</span><span class="sc-x">✕</span>${showBadge(P[i], undefined, row)}</button>` : `<div class="sc-slot"><span class="sc-n">${i+1}</span><span class="sc-plus">+</span></div>`).join('')}</div>
     <p class="muted" style="margin:0;font-size:13px">Tap badges you’ve earned to add them. Tap a slot to remove one, or swipe it sideways to change the order.</p>
@@ -4246,7 +4312,7 @@ const SPB_ALL = SPB.CATS.flatMap(c => c.badges.map(b => Object.assign({ cat: c.n
 const spbById = id => SPB_ALL.find(b => b.id === id);
 // which special badges you've earned, worked out from your own history (plus server awards for the hand-given ones)
 function spbStatus(){
-  const ss = (store.sessions || []).slice().sort((a, b) => a.t - b.t), out = {};
+  const ss = rankSessions().slice().sort((a, b) => a.t - b.t), out = {};
   const hitsOf = s => s.hits || [], best = s => Math.max(0, ...hitsOf(s));
   const bestHit = ss.reduce((m, s) => Math.max(m, best(s)), 0);
   out.ironlungs = { got: bestHit >= 12, prog: bestHit ? 'Best ' + bestHit.toFixed(1) + 's / 12s' : '' };
@@ -4378,15 +4444,18 @@ function drawSocial(){
   const puff = lbUsesPuffco(), me = LB.me || (lbStore().joined ? lbStore().meCache : null); // last known profile shows instantly while it reloads
   if (!puff){
     setHTML(meEl, `<span class="label">Your profile</span><div class="banner" style="padding:12px 14px"><div class="grow"><b>Sign in to join Social</b>Your Emberline profile uses your Puffco login. Sign in to make a profile, follow people and show your badges.</div><button class="btn small primary" id="lbGoSign">Sign in</button></div>`);
+  } else if ((!me || !me.username) && lbStore().joined){
+    setHTML(meEl, `<span class="label">Your profile</span><p class="muted" style="margin:0">${LB.meErr ? 'Couldn’t load your profile: ' + esc(LB.meErr) : 'Loading your profile…'}</p><button class="btn" id="socRetry">Try again</button>`);
+    const rb = $('#socRetry'); if (rb) rb.onclick = () => { LB.meErr = ''; drawSocial(); lbRestore(); };
   } else if (!me || !me.username){
     setHTML(meEl, `<span class="label">Your profile</span><p class="muted" style="margin:0">Make a profile with a username, photo and bio. People can find you, follow you and see your badges.</p><button class="btn primary" id="socCreate">Create your profile</button>`);
   } else {
     const c = SOC.myCounts, sc = me.showcase || [];
     setHTML(meEl, `<div class="soc-head">${lbAvatar(me.avatar_url, me.username, 72)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}</b>
-        <span class="muted"><span style="color:${lbTierColor(rankFor(data().sessions).tier.n)};font-weight:700">${rankFor(data().sessions).tier.n}</span> · ${rankFor(data().sessions).rp} RP</span>
+        <span class="muted"><span style="color:${lbTierColor(myRank().tier.n)};font-weight:700">${myRank().tier.n}</span> · ${myRank().rp} RP</span>
         <div class="soc-counts"><span><b data-cnt="followers">${c ? c.followers : '–'}</b> followers</span><span><b data-cnt="following">${c ? c.following : '–'}</b> following</span></div></div></div>
       ${me.bio ? `<p class="soc-bio">${esc(me.bio)}</p>` : '<p class="muted" style="margin:0;font-size:14px">No bio yet.</p>'}
-      ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, { tier: rankFor(data().sessions).tier.n })}">${showBadge(k, undefined, { tier: rankFor(data().sessions).tier.n })}<span>${esc(showName(k, { tier: rankFor(data().sessions).tier.n }))}</span></div>`).join('')}</div>` : ''}
+      ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, { tier: myRank().tier.n })}">${showBadge(k, undefined, { tier: myRank().tier.n })}<span>${esc(showName(k, { tier: myRank().tier.n }))}</span></div>`).join('')}</div>` : ''}
       <button class="btn" id="socEdit">Edit profile</button>`);
   }
   // search results
@@ -4446,10 +4515,12 @@ function drawLeaderboard(){
       <p class="muted" style="margin:0;font-size:14px">${L.joined ? 'Edit your profile.' : 'Show your rank to everyone using Emberline. Pick a username and a picture.'}</p>
       <div class="lb-form">
         <label class="lb-pic" for="lbPicFile"><span class="lb-pic-av">${LB.avatar ? `<img class="lb-av" src="${LB.avatar}" alt="" style="width:64px;height:64px">` : lbAvatar(me.avatar_url, me.username || L.username, 64)}<span class="pdot-pen lb-pic-pen" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></span></span><span>Photo</span></label>
-        <input type="text" id="lbName" maxlength="20" placeholder="Username" autocomplete="nickname" value="${esc(me.username || L.username || '')}">
+        <input type="text" id="lbName" maxlength="20" placeholder="Username" autocomplete="nickname" value="${esc(me.username || L.username || '')}" ${nameLockedUntil() ? 'readonly' : ''}>
       </div>
+      ${nameLockedUntil() ? `<p class="muted" style="margin:-4px 0 0;font-size:13px">You can change your username again ${nameWait()}.</p>` : (L.joined && me.username ? `<p class="muted" style="margin:-4px 0 0;font-size:13px">${(me.name_changes || 0) >= 1 ? 'After a change, you’ll have to wait 3 days to change it again.' : 'Your first name change is free. After that, once every 3 days.'}</p>` : '')}
       <textarea id="lbBio" class="lb-bio" maxlength="160" rows="3" placeholder="Bio (optional): your setup, favorite temp, anything">${esc(LB.bioDraft != null ? LB.bioDraft : (me.bio || ''))}</textarea>
       <p class="muted" style="margin:0;font-size:13px">Tied to your Puffco login${acct() && acct().email ? ` (${esc(acct().email)})` : ''}. Sign in with it on any phone and your profile comes back. Usernames are one per person.</p>
+      ${L.joined ? '' : '<p class="muted" style="margin:0;font-size:13px"><b style="color:var(--fg)">Heads up:</b> keep Emberline open during sessions or they won’t count. Path pauses the app in the background.</p>'}
       ${showcaseEditor()}
       <p class="acct-err" id="lbErr" ${LB.err ? '' : 'hidden'}>${esc(LB.err)}</p>
       <button class="btn primary" id="lbJoin" ${LB.busy ? 'disabled' : ''}>${LB.busy ? 'Saving…' : (L.joined ? 'Save profile' : 'Join the leaderboard')}</button>`;
@@ -4464,6 +4535,59 @@ function drawLeaderboard(){
     <p class="muted" style="margin:0;font-size:12px">Updates live. Resets on the 1st.</p>
     ${acct() && acct().email ? `<p class="muted lb-linked">@${esc((LB.me && LB.me.username) || L.username || '')} is linked to ${esc(acct().email)}</p>` : ''}`;
 }
+// usernames: first change is free, then once every 3 days (the server checks this too)
+function nameLockedUntil(){
+  const me = LB.me; if (!me || !me.username || (me.name_changes || 0) < 1 || !me.name_changed_at) return 0;
+  const until = new Date(me.name_changed_at).getTime() + 3 * 86400000;
+  return until > Date.now() ? until : 0;
+}
+function nameWait(){
+  const ms = nameLockedUntil() - Date.now(); if (ms <= 0) return 'now';
+  const h = Math.ceil(ms / 3600000);
+  return h > 36 ? 'in ' + Math.ceil(h / 24) + ' days' : h > 1 ? 'in ' + h + ' hours' : 'in under an hour';
+}
+// ranked only counts what the app sees live, and Path pauses the app when it isn't on screen
+function keepOpenNotice(){
+  if (document.querySelector('.egg')) return;
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Keep Emberline open">
+    <svg viewBox="0 0 24 24" style="width:54px;height:54px;fill:none;stroke:var(--accent);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10.5 18.5h3M12 7v5l3 2"/></svg>
+    <h2>Keep Emberline open</h2>
+    <p>Sessions only count for ranked if Emberline is open on your screen while you use your Peak. Path, Puffco’s browser, pauses the app as soon as you leave it, so hits and blinkers can’t be tracked in the background.</p>
+    <p style="font-size:14px">Tip: the screen stays awake on its own while you heat up, so just leave it open.</p>
+    <button class="btn primary" id="koOk" style="width:100%">Got it</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  el.querySelector('#koOk').onclick = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+}
+setTimeout(() => { const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; }, 0);
+// test build: read a bunch of device values raw so we can see how this device stores them
+async function devInspector(){
+  if (S.mode !== 'live'){ toast('Connect your device first'); return; }
+  const P = ['/p/bat/soc','/p/bat/chg/stat','/p/bat/volt','/p/bat/chg/etf','/p/app/htr/temp','/p/htr/temp','/p/htr/tcmd','/p/app/htr/tcmd','/p/app/stat/id','/p/app/stat/elap','/p/app/stat/tott','/p/app/hcs','/p/htr/chmt',
+    '/u/app/hc/0/name','/u/app/hc/0/temp','/u/app/hc/0/time','/u/app/hc/0/btmp','/u/app/hc/0/btim','/u/app/hc/0/intn','/u/app/hc/1/temp','/u/app/hc/1/time',
+    '/p/app/odom/0/nc','/p/app/info/dtot','/p/app/odom/0/tm','/p/app/led/dif','/p/sys/fw/ver','/p/sys/fw/api','/p/sys/hw/mdcd','/u/sys/name','/u/app/ui/lbrt','/p/app/ltrn/time'];
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:86vh;overflow:auto;text-align:left;justify-items:stretch"><h2>Device inspector</h2><p id="diStat">Reading…</p><pre id="diOut" style="margin:0;font:11px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;color:var(--fg)"></pre><button class="btn primary" id="diCopy">Copy results</button><button class="btn" id="diClose">Close</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
+  el.querySelector('#diClose').onclick = () => el.remove();
+  const lines = [`series=${S.series} api=${S.api} name=${S.devName || S.name}`];
+  for (const path of P){
+    try {
+      const r = await ble.read(path, 32), dv = new DataView(r.buffer, r.byteOffset, r.length), hex = [...r].map(b => b.toString(16).padStart(2, '0')).join(' ');
+      const parts = [`len=${r.length}`, `hex=${hex}`];
+      if (r.length >= 1) parts.push(`u8=${r[0]}`);
+      if (r.length >= 2) parts.push(`u16=${dv.getUint16(0, true)}`);
+      if (r.length >= 4) parts.push(`i32=${dv.getInt32(0, true)}`, `f32=${+dv.getFloat32(0, true).toPrecision(6)}`);
+      const txt = new TextDecoder().decode(r).split('\0')[0]; if (/^[\x20-\x7e]{2,}$/.test(txt)) parts.push(`str="${txt}"`);
+      lines.push(path + '  ' + parts.join('  '));
+    } catch(e){ lines.push(path + '  ERR ' + (e.message || e)); }
+    el.querySelector('#diOut').textContent = lines.join('\n');
+  }
+  el.querySelector('#diStat').textContent = 'Done. Tap Copy and paste it to Claude.';
+  el.querySelector('#diCopy').onclick = async () => { try { await navigator.clipboard.writeText(lines.join('\n')); toast('Copied'); } catch(e){ const r = document.createRange(); r.selectNodeContents(el.querySelector('#diOut')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected, tap Copy'); } };
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-zdev]'); if (!b || S.mode === 'live') return; S.series = b.dataset.zdev; ed = null; openMoodEditor('zones'); draw(); }); // test build: flip the zone editor between Peak and Proxy
 async function lbSave(){
   const L = lbStore(), name = ($('#lbName').value || '').trim();
   if (!/^[A-Za-z0-9_.]{3,20}$/.test(name)){ LB.err = LB_ERRS.username_invalid; drawLeaderboard(); return; }
@@ -4483,6 +4607,7 @@ async function lbSave(){
       LB.edit = true; LB.pick = sent.slice(); LB.busy = false; drawLeaderboard(); return;
     }
     toast(wasJoined ? 'Profile saved' : 'You’re on the leaderboard');
+    if (!wasJoined) setTimeout(keepOpenNotice, 700);
     LB.busy = false; lbLoad();
   } catch(e){ LB.busy = false; LB.err = e.code === 'puffco_blocked' ? e.message : (LB_ERRS[e.code] || (/load failed|failed to fetch|network/i.test(e.message) ? 'Couldn’t reach the leaderboard server.' : 'Couldn’t save: ' + e.message)); drawLeaderboard(); }
 }
@@ -4520,9 +4645,9 @@ function lbRestore(){
       L.email = (acct() && acct().email) || L.email; save();
       try { drawLeaderboard(); drawRank(); drawSocial(); } catch(e){}
       try { if (view === 'set') drawSettings(); } catch(e){}
-    }
+    } else if (r && 'player' in r){ L.joined = false; L.meCache = null; save(); try { drawSocial(); drawLeaderboard(); } catch(e){} } // the server says there's no profile for this login
     return p;
-  }).catch(() => null).finally(() => { lbRestoring = null; });
+  }).catch(e => { LB.meErr = (e && (LB_ERRS[e.code] || e.message)) || 'unknown error'; try { drawSocial(); } catch(_){} return null; }).finally(() => { lbRestoring = null; });
   return lbRestoring;
 }
 function lbStart(){ // called when Stats opens: load now, refresh every 30s while open
@@ -4961,7 +5086,7 @@ function updateCluster(){
   set('#ckTarget', String(fmtT(p.tempC)));
   set('#ckGear', GEAR[S.state] || 'P');
   set('#ckMode', (p.name || 'Profile').toUpperCase().slice(0, 12));
-  set('#ckModeSub', `${(CHAMBERS[S.chamber] || '').toUpperCase()} · ${vaporName(p.vapor).toUpperCase()} · ${p.time}s`);
+  set('#ckModeSub', `${isProxy() ? 'PROXY' : (CHAMBERS[S.chamber] || '').toUpperCase()} · ${vaporName(p.vapor).toUpperCase()} · ${p.time}s`);
   const left = Math.max(0, Math.round(S.total - S.elapsed));
   set('#ckStatus', S.state === 8 && HIT.on ? `HIT ${HIT.live.toFixed(1)}` : S.state === 8 ? `${left}s` : (STATE_NAMES[S.state] || 'Idle').toUpperCase());
   const lerp = (a, b, k) => a + (b - a) * k;
@@ -5102,7 +5227,7 @@ function zoneFrame(meta, t){
     switch (z.fx){
       case 'off': return '#000000';
       case 'pulse': return mixL('#000000', z.c, .06 + .94 * ease(wave));
-      case 'fade': return mixL(z.c, z.c2 || '#000000', ease(wave));
+      case 'fade': return mixL(z.c, z.c2 || '#000000', z.bias ? Math.pow(ease(wave), z.bias) : ease(wave)); // bias < 1 = stays on the 2nd color longer
       case 'rainbow': return hsv(((ph * .5) + i / 6) % 1);
       case 'strobe': return (ph * 2) % 1 < .5 ? z.c : '#000000';
       case 'flicker': { flick[i] = (flick[i] ?? .8) * .7 + (0.55 + Math.random() * 0.45) * .3; return mixL('#000000', z.c, flick[i]); }
@@ -5167,7 +5292,7 @@ function ltBar(){
   const el = $('#ltBar'); if (!el) return;
   const editing = LT.on && !!ed, show = LT.on && (editing || LT.pending || LT.brDirty);
   el.hidden = !show; document.body.classList.toggle('lt-open', !!show); if (!show) return;
-  if (editing){ $('#ltBarTxt').innerHTML = `${esc(ed.name || (ed.tag === ZONE_TAG ? 'My zones' : 'My mood'))}<small>Live on your Peak · not saved</small>`; return; }
+  if (editing){ $('#ltBarTxt').innerHTML = `${esc(ed.name || (ed.tag === ZONE_TAG ? 'My zones' : 'My mood'))}<small>Live on your ${isProxy() ? 'Proxy' : 'Peak'} · not saved</small>`; return; }
   const what = [LT.pending && LT.pending.name, LT.brDirty && 'brightness'].filter(Boolean).join(' + ');
   $('#ltBarTxt').innerHTML = `${esc(what)}<small>Not saved to ${esc(ltTargetName())} yet</small>`;
 }
@@ -5209,18 +5334,19 @@ const INTRO_ZONES = { motion:'still', tempoFrac:.5, zones:[
   { c:'#000000', fx:'off' },                            // base left: off
   { c:'#000000', fx:'off' },                            // glass right: off
   { c:'#5b009c', c2:'#0a84ff', fx:'pulse', sp:.07 },    // logo top
-  { c:'#ffffff', c2:'#64007d', fx:'fade',  sp:.14 },    // logo bottom
+  { c:'#ffffff', c2:'#64007d', fx:'fade',  sp:.25, bias:.25 },    // logo bottom: mostly purple, a quick flash of white
   { c:'#000000', fx:'off' },                            // base right: off
   { c:'#000000', fx:'off' } ] };                        // glass left: off  (only the logo lights up)
+const INTRO_PROXY = { motion:'still', tempoFrac:.5, zones: Array.from({ length: 6 }, () => ({ c:'#ffffff', c2:'#64007d', fx:'fade', sp:.25, bias:.25 })) }; // Proxy ring: purple, with a white sweep going around
 let introDone = false;
 function connectIntro(){
   if (introDone || S.mode !== 'live' || S.api === 2 || (S.state >= 7 && S.state <= 9) || zoneLive.on) return;
   introDone = true;
-  const meta = JSON.parse(JSON.stringify(INTRO_ZONES));
-  meta.env = { in: 650, out: 9300, outMs: 700 }; // glide on fast, glide off at the end
-  zPh.length = 0; zClock.last = 0;
+  const meta = JSON.parse(JSON.stringify(isProxy() ? INTRO_PROXY : INTRO_ZONES));
+  meta.env = { in: 500, out: 4300, outMs: 650 }; // 5 seconds: glide on fast, glide off at the end
+  zPh.length = 0; zClock.last = 0; if (isProxy()) meta.zones.forEach((z, i) => { zPh[i] = .5 + i / 12; }); else zPh[3] = .5; // start on purple
   if (!zoneLiveStart(meta, true)) return;
-  setTimeout(() => { if (zoneLive.on && zoneLive.meta === meta) zoneLiveStop(true); }, 10050); // leave it alone if the zone editor took over
+  setTimeout(() => { if (zoneLive.on && zoneLive.meta === meta) zoneLiveStop(true); }, 5050); // leave it alone if the zone editor took over
 }
 
 function moodLamp(ref){
@@ -5328,21 +5454,28 @@ function defaultsForTpl(tpl){
   const m = {}; for (const u of tpl.ui || []) m[u.key] = u.type === 'colors' ? String(u.default).split(',') : u.default; return m;
 }
 function proxySVG(){
-  // Proxy: slim battery body with the glass on top; 12 lights in a ring, shown as 6 arcs
-  const cx = 100, cy = 252, rx = 52, ry = 13, arcs = [];
-  for (let i = 0; i < 6; i++){
-    const a0 = Math.PI * (i / 3) + .06, a1 = Math.PI * ((i + 1) / 3) - .06, p = a => [cx + rx * Math.cos(a), cy + ry * Math.sin(a)];
-    const [x0, y0] = p(a0), [x1, y1] = p(a1);
-    arcs.push(`<g data-z="${i}"><path class="zl zarc" d="M${x0.toFixed(1)} ${y0.toFixed(1)} A${rx} ${ry} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}" fill="none" stroke-width="7" stroke-linecap="round"/></g>`);
-  }
+  // Proxy, front view: angled mouthpiece, rubber cone, the glowing glass light band (12 lights, shown as 6 zones), round black battery body
+  const L = 44, R = 156, T = 150, B = 178, w = (R - L) / 6, slices = [];
+  for (let i = 0; i < 6; i++) slices.push(`<g data-z="${i}"><rect class="zl" x="${(L + i * w + .8).toFixed(1)}" y="${T - 4}" width="${(w - 1.6).toFixed(1)}" height="${B - T + 8}" clip-path="url(#zpBand)"/></g>`);
   return `<svg class="zpeak" viewBox="0 0 200 300" aria-label="Proxy zones">
-    <defs><linearGradient id="zpb" x1="0" x2="1"><stop offset="0" stop-color="#0c0c10"/><stop offset=".45" stop-color="#2a2930"/><stop offset="1" stop-color="#0c0c10"/></linearGradient>
-      <linearGradient id="zpg" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity=".16"/><stop offset=".4" stop-color="#fff" stop-opacity=".03"/><stop offset="1" stop-color="#fff" stop-opacity=".12"/></linearGradient></defs>
-    <path d="M86 14 h28 q4 0 4 4 v58 q0 10 10 18 q8 8 8 20 v20 h-72 v-20 q0 -12 8 -20 q10 -8 10 -18 v-58 q0 -4 4 -4z" fill="url(#zpg)" stroke="rgba(255,255,255,.38)"/>
-    <rect x="62" y="134" width="76" height="112" rx="14" fill="url(#zpb)" stroke="rgba(255,255,255,.14)"/>
-    <rect x="62" y="134" width="76" height="9" rx="4" fill="rgba(255,255,255,.08)"/>
-    <ellipse cx="${cx}" cy="${cy}" rx="${rx + 6}" ry="${ry + 5}" fill="#0b0b0e" stroke="rgba(255,255,255,.12)"/>
-    ${arcs.join('')}
+    <defs>
+      <linearGradient id="zpBody" x1="0" x2="1"><stop offset="0" stop-color="#08080a"/><stop offset=".32" stop-color="#2b2b30"/><stop offset=".55" stop-color="#1a1a1e"/><stop offset="1" stop-color="#070709"/></linearGradient>
+      <linearGradient id="zpCone" x1="0" x2="1"><stop offset="0" stop-color="#0b0b0d"/><stop offset=".35" stop-color="#2c2c31"/><stop offset=".6" stop-color="#1b1b1f"/><stop offset="1" stop-color="#09090b"/></linearGradient>
+      <linearGradient id="zpShine" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset=".45" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity=".12"/></linearGradient>
+      <clipPath id="zpBand"><path d="M${L} ${T} Q100 ${T + 6} ${R} ${T} L${R} ${B} Q100 ${B + 6} ${L} ${B} Z"/></clipPath>
+    </defs>
+    <path d="M82 76 L82 34 Q82 22 93 22 L110 27 Q118 29 118 38 L118 76 Z" fill="url(#zpCone)" stroke="rgba(255,255,255,.14)"/>
+    <rect x="92" y="30" width="9" height="4" rx="2" fill="#000" transform="rotate(14 96 32)"/>
+    <rect x="113" y="48" width="3" height="8" rx="1.5" fill="#000"/>
+    <path d="M78 76 L122 76 L124 92 L76 92 Z" fill="url(#zpCone)" stroke="rgba(255,255,255,.1)"/>
+    <path d="M76 92 L124 92 Q150 118 ${R} ${T} L${L} ${T} Q50 118 76 92 Z" fill="url(#zpCone)" stroke="rgba(255,255,255,.12)"/>
+    <path d="M70 108 q8 -4 16 0 M96 104 q8 -4 16 0 M64 124 q10 -4 20 0 M92 120 q10 -4 20 0 M120 118 q8 -4 16 0" stroke="rgba(255,255,255,.07)" stroke-width="2" fill="none"/>
+    <path d="M${L - 1} ${T} Q100 ${T + 6} ${R + 1} ${T} L${R + 1} ${B} Q100 ${B + 6} ${L - 1} ${B} Z" fill="#050507"/>
+    ${slices.join('')}
+    <path d="M${L} ${T} Q100 ${T + 6} ${R} ${T} L${R} ${B} Q100 ${B + 6} ${L} ${B} Z" fill="url(#zpShine)" pointer-events="none"/>
+    <path d="M62 ${T - 2} q-2 10 0 22 q4 4 8 0 q2 -10 0 -18 Z" fill="#141417" stroke="rgba(255,255,255,.15)" pointer-events="none"/>
+    <path d="M${L + 2} ${B + 3} Q100 ${B + 9} ${R - 2} ${B + 3} L${R - 2} 262 Q${R - 2} 288 128 288 L72 288 Q${L + 2} 288 ${L + 2} 262 Z" fill="url(#zpBody)" stroke="rgba(255,255,255,.12)"/>
+    <text x="58" y="250" font-size="6" letter-spacing="2.5" fill="rgba(255,255,255,.28)" transform="rotate(-90 58 250)" font-family="system-ui,sans-serif">PROXY</text>
   </svg>`;
 }
 function peakSVG(){
@@ -5395,6 +5528,7 @@ function drawZoneEditor(el){
   const ref = { kind:'tpl', tag: ZONE_TAG, name: ed.name, meta: m };
   el.innerHTML = `
     <div class="row between"><b style="font-size:18px">${ed.editIdx != null ? 'Edit zones' : 'Zone designer'}</b><button class="btn small ghost" id="meClose">${ed.back ? 'Back' : 'Close'}</button></div>
+    ${S.mode === 'live' ? '' : `<div class="row between" style="border:1px dashed var(--accent);border-radius:14px;padding:8px 10px"><span class="muted" style="font-size:13px">Test: preview as</span><div class="seg" id="zDevPrev"><button data-zdev="peach" aria-pressed="${!isProxy()}">Peak</button><button data-zdev="toad" aria-pressed="${isProxy()}">Proxy</button></div></div>`}
     <div class="zwrap">${peakSVG()}
       <div class="zlist">${zoneOrder().map(i => [defs[i], i]).map(([d, i]) => `<button class="zbtn" data-zs="${i}" aria-pressed="${i === ed.zSel}"><i style="background:${m.zones[i].fx === 'off' ? 'transparent' : m.zones[i].c}"></i>${esc(d.n)}<span>${(ZONE_FX.find(f => f[0] === m.zones[i].fx) || ZONE_FX[0])[1]}</span></button>`).join('')}</div></div>
     <label class="mefield">Name<input type="text" id="meName" maxlength="24" value="${esc(ed.name)}"></label>
@@ -5526,7 +5660,7 @@ function drawDevice(){
     <div class="row between"><span>Lantern turns off after</span><div class="seg" id="ltSeg">${[[1800,'30m'],[3600,'1h'],[7200,'2h'],[14400,'4h']].map(([s, l]) => `<button data-lt="${s}" aria-pressed="${(store.lanternTime || 7200) === s}">${l}</button>`).join('')}</div></div>
     <div class="devinfo">
       <div><span class="muted">Edition</span><b>${d(S.edition)}</b></div>
-      <div><span class="muted">Chamber</span><b>${d(CHAMBERS[S.chamber])}</b></div>
+      ${isProxy() ? '' : `<div><span class="muted">Chamber</span><b>${d(CHAMBERS[S.chamber])}</b></div>`}
       <div><span class="muted">Firmware</span><b>${d(S.fw)}</b></div>
       <div><span class="muted">Battery</span><b>${S.battery == null ? '—' : S.battery + '%'}${S.batVolts ? ' · ' + S.batVolts.toFixed(2) + 'V' : ''}</b></div>
       <div><span class="muted">Battery temp</span><b>${S.batTemp ? (store.unit === 'F' ? Math.round(c2f(S.batTemp)) + '°F' : Math.round(S.batTemp) + '°C') : '—'}</b></div>
@@ -5664,9 +5798,13 @@ async function puffcoSignIn(email, password){
   try { t = await apiFetch('/api/users/login', { method:'POST', headers:{ 'Content-Type':'application/json', Accept:'application/json' }, body: JSON.stringify({ email, password }) }); }
   catch(e){ if (e.kind === 'auth') throw new AcctError('auth', 'Wrong email or password. If you sign in to Puffco with Apple or Google, set a password in the Puffco app first (Account → Change password).'); throw e; }
   if (!t || !t.accessToken) throw new AcctError('http', 'Puffco didn’t return a sign-in token.');
+  const switching = store.account && store.account.email && store.account.email !== email;
+  if (switching){ // a different Puffco account: forget the last one's profile so nothing carries over
+    store.account = null; LB.me = null; LB.rows = null; const L = lbStore(); L.joined = false; L.meCache = null; L.username = ''; L.dev = false;
+  }
   store.account = Object.assign(store.account || {}, { auth: { accessToken: t.accessToken, refreshToken: t.refreshToken }, email }); save();
   await puffcoSync();
-  lbRestore().then(p => { if (p && p.username) toast('Welcome back, ' + p.username); });
+  lbRestore().then(p => { if (p && p.username) toast('Welcome back, ' + p.username); try { drawSocial(); drawRank(); } catch(e){} setTimeout(claimPrompt, 1200); });
 }
 async function puffcoSync(quiet){
   drawStats.sig = null;
@@ -5739,7 +5877,7 @@ function drawAccount(){
   const el = $('#acctCard'); if (!el) return;
   const a = acct();
   el.innerHTML = `<span class="label">Puffco account</span>` + (a && a.data
-    ? `${acctSummary()}<div class="shop-actions">${a.auth ? '<button class="btn small primary" id="acSync">Sync now</button>' : ''}<label class="btn small" for="acFile2" hidden>Import from file<input type="file" id="acFile2" accept=".har,application/json" hidden></label><button class="btn small ghost" id="acOut" style="color:var(--bad)">Sign out</button></div>`
+    ? `${acctSummary()}<div class="shop-actions">${a.auth ? '<button class="btn small primary" id="acSync">Sync now</button>' : ''}<label class="btn small" for="acFile2" hidden>Import from file<input type="file" id="acFile2" accept=".har,application/json" hidden></label>${(store.sessions || []).some(x => !x.acct) && store.sessOwner !== acctId() ? '<button class="btn small" id="acClaim">Count this phone’s old sessions</button>' : ''}<button class="btn small ghost" id="acOut" style="color:var(--bad)">Sign out</button></div>`
     : `<p class="muted" style="margin:0;font-size:14px">Link your Puffco account to bring in your saved moods, heat profiles and dab stats.</p>${acctFormHtml('ac')}`);
 }
 async function runAcct(prefix, fn){
@@ -6198,6 +6336,7 @@ $('#devCard').addEventListener('change', async e => {
 
 $('#acctCard').addEventListener('click', async e => {
   if (e.target.id === 'acOut'){ signOut(); wireAcctForm('ac'); return; }
+  if (e.target.id === 'acClaim'){ const id = acctId(); if (!id) return; store.sessOwner = null; if (store.claimAsked) delete store.claimAsked[id]; save(); claimPrompt(); return; }
   if (e.target.id === 'acSync'){ e.target.disabled = true; e.target.textContent = 'Syncing…'; try { await puffcoSync(); } catch(err){ toast(err.message); } drawAccount(); }
 });
 $('#acctCard').addEventListener('change', async e => {
@@ -6242,6 +6381,7 @@ requestAnimationFrame(gaugeLoop);
 setTimeout(ignite, 350);
 // first time using the app: ask to sign in to Puffco and sync, otherwise the usual greeting
 if (!store.onboarded && !(store.account && store.account.data)) setTimeout(showWelcome, 600); else setTimeout(showGreeting, 500);
+setTimeout(claimPrompt, 7000);
 addEventListener('resize', () => moveTabPill(view));
 document.fonts && document.fonts.ready.then(() => moveTabPill(view));
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { applyTheme(); draw(); });
