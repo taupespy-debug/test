@@ -20,7 +20,7 @@ pre{margin:0;white-space:pre-wrap;word-break:break-word;font:11px/1.45 ui-monosp
 </style></head><body>
 <h1>Path Inspector</h1>
 <p>Open this in Path. It lists what Path adds to web pages (Bluetooth, fullscreen, notifications and anything custom) so Emberline can use it. Nothing leaves your phone. Tap Copy and paste the result to Claude.</p>
-<div class="bar"><button id="copy">Copy report</button><button class="ghost" id="bt">Test Bluetooth picker</button><button class="ghost" id="scan">Test background scan</button></div>
+<div class="bar"><button id="copy">Copy report</button><button class="ghost" id="bt">Test Bluetooth picker</button><button class="ghost" id="scan">Test background scan</button><button class="ghost" id="silent">Test reconnect by name</button></div>
 <div id="status">Collecting…</div>
 <div id="out"></div>
 <script>
@@ -73,6 +73,25 @@ function collect(){
     R.extraGlobals[k] = t === 'function' ? { type: t, native: isNative(v), source: isNative(v) ? undefined : src(v) } : t === 'object' && v ? { type: t, keys: protoKeys(v).slice(0, 60) } : { type: t, value: String(v).slice(0, 200) }; });
   const extraNav = protoKeys(nav).filter(k => !protoKeys(iframe.contentWindow.navigator).includes(k));
   R.extraNavigator = extraNav;
+  // Path is built on WebBLE: its whole Bluetooth layer lives under uk.co.greenparksoftware
+  R.polyfill = {};
+  const dumpObj = (o, path, depth) => {
+    if (!o || depth > 3) return;
+    let keys = []; try { keys = Object.getOwnPropertyNames(o).concat(Object.getOwnPropertyNames(Object.getPrototypeOf(o) || {})); } catch(e){ return; }
+    [...new Set(keys)].forEach(k => {
+      if (k === 'constructor' || k === '__proto__') return;
+      let v; try { v = o[k]; } catch(e){ return; }
+      const pth = path + '.' + k;
+      if (typeof v === 'function'){
+        if (!isNative(v)) R.polyfill[pth] = src(v);
+        if (v.prototype && depth < 3) Object.getOwnPropertyNames(v.prototype).forEach(pk => { if (pk === 'constructor') return; let pv; try { pv = v.prototype[pk]; } catch(e){ return; } if (typeof pv === 'function' && !isNative(pv)) R.polyfill[pth + '.prototype.' + pk] = src(pv); });
+      } else if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Node)) dumpObj(v, pth, depth + 1);
+      else if (typeof v !== 'object') R.polyfill[pth] = '(' + typeof v + ') ' + String(v).slice(0, 120);
+    });
+  };
+  try { if (window.uk && uk.co && uk.co.greenparksoftware) dumpObj(uk.co.greenparksoftware, 'uk.co.greenparksoftware', 0); else R.polyfill.missing = 'no uk.co.greenparksoftware'; } catch(e){ R.polyfill.error = String(e); }
+  Object.getOwnPropertyNames(window).filter(k => /^(receive|handle|native|nslog|stopLEScan|bluetooth)/i.test(k)).forEach(k => { const v = window[k]; R.polyfill['window.' + k] = typeof v === 'function' ? src(v) : typeof v; });
+  try { if (window.webkit && webkit.messageHandlers){ R.webkit.bluetoothHandler = !!webkit.messageHandlers.bluetooth; R.webkit.probe = ['bluetooth','fullscreen','notifications','logger','path','haptics','share','nslog'].filter(n => { try { return !!webkit.messageHandlers[n]; } catch(e){ return false; } }); } } catch(e){}
   R.injectedScripts = [...document.scripts].filter(s => s.src && !s.src.startsWith(location.origin)).map(s => s.src);
 }
 function draw(){
@@ -110,6 +129,20 @@ document.getElementById('bt').onclick = async () => {
     R.pickedDevice = { id: d.id, name: d.name, keys: protoKeys(d), gattKeys: d.gatt ? protoKeys(d.gatt) : null };
     log('Picked ' + (d.name || d.id) + '. Added to the report.'); draw();
   } catch(e){ R.pickError = e.name + ': ' + e.message; log('Picker: ' + R.pickError); draw(); }
+};
+document.getElementById('silent').onclick = async () => {
+  if (!R.pickedDevice) return log('Do "Test Bluetooth picker" first.');
+  const t0 = Date.now();
+  try {
+    const d = await navigator.bluetooth.requestDevice({ filters:[{ deviceId: R.pickedDevice.id }, { name: R.pickedDevice.name }] });
+    R.silentDeviceId = { ok: true, ms: Date.now() - t0, sameId: d.id === R.pickedDevice.id, name: d.name };
+  } catch(e){ R.silentDeviceId = { ok: false, ms: Date.now() - t0, err: e.name + ': ' + e.message }; }
+  const t1 = Date.now();
+  try {
+    const d = await navigator.bluetooth.requestDevice({ filters:[{ name: R.pickedDevice.name }] });
+    R.silentName = { ok: true, ms: Date.now() - t1, sameId: d.id === R.pickedDevice.id };
+  } catch(e){ R.silentName = { ok: false, ms: Date.now() - t1, err: e.name + ': ' + e.message }; }
+  log('Done. Did a picker pop up each time? Tell Claude. Results added to the report.'); draw();
 };
 document.getElementById('scan').onclick = async () => {
   const bt = navigator.bluetooth; if (!bt || !bt.requestLEScan) return log('requestLEScan is not available.');
