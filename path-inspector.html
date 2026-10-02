@@ -1,103 +1,76 @@
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Haptic Test</title>
+<title>Haptic Test 2</title>
 <style>
 :root{color-scheme:dark;--bg:#0d0b14;--panel:#17131f;--line:#2c2639;--fg:#efeaf7;--muted:#9b93ad;--accent:#a24bff;--ok:#3ddc84;--bad:#ff5a6e}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,system-ui,sans-serif;padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(28px + env(safe-area-inset-bottom,0px))}
 h1{font-size:22px;margin:0 0 4px}
 .lede{color:var(--muted);margin:0 0 12px}
-.env{font:12px ui-monospace,Menlo,monospace;color:var(--muted);word-break:break-word;margin-bottom:12px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:12px;display:grid;gap:8px;margin-bottom:10px}
 .card h2{font-size:15px;margin:0}
 .card small{color:var(--muted);font-size:12.5px}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-button{font:600 15px system-ui;padding:12px 16px;border-radius:12px;border:0;background:var(--accent);color:#fff;touch-action:manipulation}
-button:active{transform:scale(.96)}
-button.vote{background:transparent;border:1px solid var(--line);color:var(--fg);padding:8px 12px;font-size:13px}
-button.vote.on.y{background:var(--ok);color:#062010;border-color:transparent}
-button.vote.on.n{background:var(--bad);color:#2a0008;border-color:transparent}
-input[switch]{transform:scale(1.4);margin:6px 12px}
-.off{position:fixed;left:-300px;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none}
+.btn{position:relative;display:inline-flex;align-items:center;justify-content:center;font:600 15px system-ui;padding:12px 18px;border-radius:12px;border:0;background:var(--accent);color:#fff;overflow:hidden;user-select:none;-webkit-user-select:none}
+.btn:active{transform:scale(.96)}
+.vote{font:600 13px system-ui;padding:8px 12px;border-radius:12px;background:transparent;border:1px solid var(--line);color:var(--fg)}
+.vote.on.y{background:var(--ok);color:#062010;border-color:transparent}
+.vote.on.n{background:var(--bad);color:#2a0008;border-color:transparent}
+.count{font:600 13px ui-monospace,Menlo,monospace;color:var(--muted)}
+/* A: a real switch stretched over the whole button, almost invisible */
+.ov input[switch]{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:.011;-webkit-appearance:auto;appearance:auto;cursor:pointer}
+/* B: same, but fully see-through */
+.ov0 input[switch]{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+/* C: whole button is a label wrapping a tiny on-screen switch */
+.lb input[switch]{position:absolute;right:6px;bottom:6px;width:20px;height:12px;margin:0;opacity:.011;pointer-events:none}
+/* D: label + switch clipped to 1px but still on screen */
+.clip input[switch]{position:absolute;left:50%;top:50%;width:1px;height:1px;margin:0;clip-path:inset(50%);pointer-events:none}
+/* E: scaled-up real switch, invisible, centered */
+.big input[switch]{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(4);margin:0;opacity:.011}
 pre{margin:0;font:12px ui-monospace,Menlo,monospace;white-space:pre-wrap;color:#d8d0ea}
 </style></head><body>
-<h1>Haptic Test</h1>
-<p class="lede">iPhone blocks normal vibration on websites, so each card tries a different workaround. Tap Try, then mark whether you felt a tap. Copy the results at the bottom and paste them to Claude.</p>
-<div class="env" id="env"></div>
+<h1>Haptic Test 2</h1>
+<p class="lede">Round one showed only a real finger tap on a switch makes a buzz. These hide a real switch exactly where you tap, in different ways. Tap each button a few times, then mark it.</p>
+
 <div id="list"></div>
 
 <div class="card">
-  <h2>Screen refresh rate</h2>
-  <small>How many frames per second this browser draws. 60 is the normal web limit on iPhone. 120 means ProMotion is on for web pages.</small>
-  <div class="row"><b id="fps" style="font-size:28px">…</b><span class="muted" style="color:var(--muted)">fps (max seen <b id="fpsMax">0</b>)</span></div>
-</div>
-<div class="card">
-  <h2>Baseline: real switch</h2>
-  <small>Flip this yourself. If you don't feel this one, your phone has system haptics turned off (Settings, Sounds &amp; Haptics, System Haptics).</small>
-  <div class="row"><input type="checkbox" switch id="realSw"></div>
+  <h2>Baseline: visible switch</h2>
+  <small>The one you already felt.</small>
+  <div class="row"><input type="checkbox" switch style="transform:scale(1.4);margin:6px 12px"></div>
 </div>
 
 <div class="card">
-  <h2>Every button test</h2>
-  <small>Pick a method, turn it on, then tap the buttons to feel it on every press.</small>
-  <div class="row"><select id="everyPick" style="font-size:15px;padding:8px;border-radius:10px;background:#000;color:#fff"></select><label><input type="checkbox" id="everyOn"> On</label></div>
-  <div class="row"><button class="demo">One</button><button class="demo">Two</button><button class="demo">Three</button><button class="demo">Four</button></div>
-</div>
-
-<div class="card">
-  <button id="copy">Copy results</button>
+  <button class="btn" id="copy" style="width:100%">Copy results</button>
   <pre id="out"></pre>
 </div>
 
-<label class="off" id="lblA"><input type="checkbox" switch id="swA" tabindex="-1"></label>
-<input type="checkbox" switch id="swB" class="off" tabindex="-1"><label for="swB" class="off" id="lblB"></label>
-
 <script>
-document.getElementById('env').textContent = navigator.userAgent;
-const ticks = {
-  labelClick(){ document.getElementById('lblA').click(); },
-  inputClick(){ document.getElementById('swA').click(); },
-  labelFor(){ document.getElementById('lblB').click(); },
-  freshSwitch(){ const l = document.createElement('label'); l.className = 'off'; const i = document.createElement('input'); i.type = 'checkbox'; i.setAttribute('switch', ''); l.appendChild(i); document.body.appendChild(l); l.click(); setTimeout(() => l.remove(), 400); },
-  vibrate(){ if (!navigator.vibrate) throw new Error('vibrate not available'); navigator.vibrate(30); }
-};
 const TESTS = [
-  { id:'vibrate', name:'Standard vibrate', desc:'The normal web way. Works on Android, usually blocked on iPhone.', run: () => ticks.vibrate() },
-  { id:'labelClick', name:'Hidden switch, label click', desc:'What Emberline uses now. Needs iOS 18 or newer.', run: () => ticks.labelClick() },
-  { id:'inputClick', name:'Hidden switch, direct click', desc:'Clicks the switch itself instead of its label.', run: () => ticks.inputClick() },
-  { id:'labelFor', name:'Hidden switch, separate label', desc:'A label linked to the switch from elsewhere on the page.', run: () => ticks.labelFor() },
-  { id:'freshSwitch', name:'New switch every time', desc:'Makes a brand new hidden switch for each tap.', run: () => ticks.freshSwitch() },
-  { id:'delayed', name:'Delayed tap (half second)', desc:'Same as Emberline\'s method, but fired 0.5s after you tap. Tests if it works outside a tap, like when a blinker hits.', run: () => setTimeout(() => ticks.labelClick(), 500) },
-  { id:'later', name:'Delayed tap (3 seconds)', desc:'Fires 3 seconds after you tap. Put the phone down flat and feel for it.', run: () => setTimeout(() => ticks.labelClick(), 3000) },
-  { id:'triple', name:'Triple tap pattern', desc:'Three taps 160ms apart, like Emberline\'s blinker buzz.', run: () => [0, 160, 320].forEach(t => setTimeout(() => ticks.labelClick(), t)) },
-  { id:'tripleFresh', name:'Triple tap, new switches', desc:'Same pattern using a new switch each time.', run: () => [0, 160, 320].forEach(t => setTimeout(() => ticks.freshSwitch(), t)) },
-  { id:'onDown', name:'Fires on finger down', desc:'Taps the moment your finger touches, instead of when you lift.', down: true, run: () => ticks.labelClick() }
+  { id:'overlay', cls:'ov', name:'A. Invisible switch over the button', desc:'A real switch stretched over the button at 1% opacity. Your finger flips it.', html:'<input type="checkbox" switch>' },
+  { id:'overlay0', cls:'ov0', name:'B. Fully see-through switch over the button', desc:'Same as A but 0% opacity.', html:'<input type="checkbox" switch>' },
+  { id:'labelWrap', cls:'lb', tag:'label', name:'C. Button is a label for a tiny switch', desc:'Tapping anywhere on the button flips a tiny real switch inside it.', html:'<input type="checkbox" switch tabindex="-1">' },
+  { id:'labelClip', cls:'clip', tag:'label', name:'D. Label + 1px clipped switch', desc:'Like C, but the switch is shrunk to one pixel.', html:'<input type="checkbox" switch tabindex="-1">' },
+  { id:'bigSwitch', cls:'big', name:'E. Huge invisible switch', desc:'A real switch scaled up 4x over the button.', html:'<input type="checkbox" switch>' }
 ];
-const res = {};
-const list = document.getElementById('list');
+const res = {}, list = document.getElementById('list');
 list.innerHTML = TESTS.map(t => `<div class="card" data-id="${t.id}"><h2>${t.name}</h2><small>${t.desc}</small>
-  <div class="row"><button class="try">Try</button><span style="flex:1"></span><button class="vote y">Felt it</button><button class="vote n">Nothing</button></div>
-  <small class="err"></small></div>`).join('');
+  <div class="row"><${t.tag || 'div'} class="btn ${t.cls}">Tap me${t.html}</${t.tag || 'div'}><span class="count">0 taps</span><span style="flex:1"></span><button class="vote y">Felt it</button><button class="vote n">Nothing</button></div></div>`).join('');
 TESTS.forEach(t => {
-  const card = list.querySelector(`[data-id="${t.id}"]`), btn = card.querySelector('.try'), err = card.querySelector('.err');
-  const go = () => { err.textContent = ''; try { t.run(); } catch(e){ err.textContent = e.message; res[t.id] = Object.assign(res[t.id] || {}, { error: e.message }); show(); } };
-  if (t.down) btn.addEventListener('pointerdown', go); else btn.addEventListener('click', go);
+  const card = list.querySelector(`[data-id="${t.id}"]`), b = card.querySelector('.btn'), c = card.querySelector('.count');
+  let n = 0;
+  b.addEventListener('click', ev => { if (t.tag === 'label' && ev.target.tagName === 'INPUT') return; n++; c.textContent = n + ' tap' + (n === 1 ? '' : 's'); res[t.id] = Object.assign(res[t.id] || {}, { taps: n }); show(); });
   card.querySelectorAll('.vote').forEach(v => v.addEventListener('click', () => {
     card.querySelectorAll('.vote').forEach(x => x.classList.remove('on')); v.classList.add('on');
     res[t.id] = Object.assign(res[t.id] || {}, { felt: v.classList.contains('y') }); show();
   }));
 });
-const pick = document.getElementById('everyPick');
-pick.innerHTML = Object.keys(ticks).filter(k => k !== 'vibrate').map(k => `<option value="${k}">${k}</option>`).join('');
-document.querySelectorAll('.demo').forEach(b => b.addEventListener('click', () => { if (document.getElementById('everyOn').checked) try { ticks[pick.value](); } catch(e){} }));
-let fFrames = 0, fLast = performance.now(), fMax = 0;
-(function tick(now){ fFrames++; if (now - fLast >= 1000){ const f = Math.round(fFrames * 1000 / (now - fLast)); fMax = Math.max(fMax, f); document.getElementById('fps').textContent = f; document.getElementById('fpsMax').textContent = fMax; res.fps = { now: f, max: fMax }; fFrames = 0; fLast = now; } requestAnimationFrame(tick); })(performance.now());
 function show(){ document.getElementById('out').textContent = JSON.stringify({ ua: navigator.userAgent, results: res }, null, 2); }
 show();
 document.getElementById('copy').addEventListener('click', async () => {
-  const t = document.getElementById('out').textContent;
-  try { await navigator.clipboard.writeText(t); document.getElementById('copy').textContent = 'Copied'; }
-  catch(e){ const r = document.createRange(); r.selectNodeContents(document.getElementById('out')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); document.getElementById('copy').textContent = 'Selected, use Copy'; }
-  setTimeout(() => document.getElementById('copy').textContent = 'Copy results', 1600);
+  const t = document.getElementById('out').textContent, b = document.getElementById('copy');
+  try { await navigator.clipboard.writeText(t); b.textContent = 'Copied'; }
+  catch(e){ const r = document.createRange(); r.selectNodeContents(document.getElementById('out')); const s = getSelection(); s.removeAllRanges(); s.addRange(r); b.textContent = 'Selected, use Copy'; }
+  setTimeout(() => b.textContent = 'Copy results', 1600);
 });
 </script>
 </body></html>
