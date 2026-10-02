@@ -274,7 +274,7 @@ select,.num{background:var(--fill);border:0;border-radius:12px;padding:8px 10px}
 
 /* floating capsule tab bar */
 nav{position:fixed;left:0;right:0;bottom:0;z-index:6;padding:0 16px calc(10px + env(safe-area-inset-bottom,0px));pointer-events:none}
-nav .in{max-width:480px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr);border-radius:99px;padding:5px;pointer-events:auto;background:var(--glass-strong)}
+nav .in{max-width:480px;margin:0 auto;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-radius:99px;padding:5px;pointer-events:auto;background:var(--glass-strong)}
 nav button{border:0;background:none;padding:7px 0 6px;border-radius:99px;display:grid;justify-items:center;gap:1px;font-size:10px;font-weight:600;color:var(--fg);transition:background .25s,color .25s}
 nav button svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 nav button[aria-current="page"]{color:var(--accent);background:var(--fill-2)}
@@ -827,13 +827,15 @@ html.scrolling .ambient{animation-play-state:paused}
 .bv-close{margin-top:18px;position:relative;overflow:hidden}
 .bv.off{opacity:0;transition:opacity .25s ease}
 /* ===== round photo cropper ===== */
-.crop{position:fixed;inset:0;z-index:61;display:grid;place-items:center;background:rgba(6,4,10,.86);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
-.crop-in{width:min(92vw,380px);display:grid;gap:14px;justify-items:center}
-.crop-stage{position:relative;width:min(82vw,320px);aspect-ratio:1;overflow:hidden;border-radius:20px;background:#000;touch-action:none;cursor:grab}
+.crop{position:fixed;inset:0;z-index:61;background:#000}
+.crop-in{position:absolute;inset:0;display:grid;grid-template-rows:auto 1fr auto;padding:calc(12px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px));gap:10px;justify-items:center;pointer-events:none}
+.crop-in > *{pointer-events:auto}
+.crop-top{display:grid;justify-items:center;gap:2px;text-align:center;position:relative;z-index:2}
+.crop-stage{position:fixed;inset:0;overflow:hidden;border-radius:0;background:#000;touch-action:none;cursor:grab}
 .crop-img{position:absolute;left:0;top:0;pointer-events:none}
-.crop-ring{position:absolute;inset:6%;border-radius:50%;box-shadow:0 0 0 999px rgba(0,0,0,.6);outline:2px solid rgba(255,255,255,.85);pointer-events:none}
+.crop-ring{position:absolute;border-radius:50%;box-shadow:0 0 0 9999px rgba(0,0,0,.62);outline:2px solid rgba(255,255,255,.9);pointer-events:none}
 .crop-zoom{width:100%}
-.crop-row{display:flex;gap:10px;width:100%}
+.crop-row{display:flex;gap:10px;width:100%;max-width:520px;position:relative;z-index:2;grid-row:3}
 .crop-row .btn{flex:1}
 .crop h3{margin:0;font-size:17px;color:#fff}
 .crop small{color:#bdb4cc}
@@ -846,6 +848,30 @@ html,body{touch-action:pan-x pan-y}
 /* app feel: no web-style scroll bars anywhere */
 html,body,*{scrollbar-width:none;-ms-overflow-style:none}
 html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:none;width:0;height:0;background:transparent}
+/* ===== social ===== */
+.soc-me,.soc-find{display:grid;gap:12px}
+.soc-head{display:flex;gap:14px;align-items:center}
+.soc-head .lb-av{box-shadow:0 0 0 3px var(--accent),0 8px 24px rgba(0,0,0,.35);font-size:28px}
+.soc-id{display:grid;gap:2px;min-width:0}
+.soc-id > b{font-size:21px;display:flex;align-items:center;gap:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.soc-counts{display:flex;gap:14px;font-size:14px;color:var(--muted)}
+.soc-counts b,.lbp-head .soc-counts b,.soc-id .soc-counts b{display:inline;font-size:15px;color:var(--fg);font-variant-numeric:tabular-nums;font-weight:700}
+.soc-counts span{white-space:nowrap}
+.lbp-head .soc-counts{justify-content:center;margin-top:2px}
+.soc-bio{margin:0;font-size:15px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
+.lbp .soc-bio{text-align:center;color:color-mix(in srgb,var(--fg) 88%,transparent)}
+.soc-search{display:flex;align-items:center;gap:8px;background:var(--fill);border-radius:14px;padding:0 12px}
+.soc-search svg{width:18px;height:18px;flex:none;fill:none;stroke:var(--muted);stroke-width:2;stroke-linecap:round}
+.soc-search input{flex:1;min-width:0;border:0;background:transparent;padding:12px 0;font-size:16px;color:var(--fg);outline:none;-webkit-appearance:none}
+.soc-list{display:grid}
+.soc-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:.5px solid var(--sep);cursor:pointer}
+.soc-row:last-child{border-bottom:0}
+.soc-name{flex:1;min-width:0;display:grid}
+.soc-name b{display:flex;align-items:center;gap:5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.soc-name small{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.soc-follow{flex:none}
+.lb-bio{width:100%;background:var(--fill);border:0;border-radius:14px;padding:11px 12px;color:var(--fg);font:inherit;font-size:16px;line-height:1.4;resize:none}
+#socFollowing{display:grid;gap:8px}
 /* ===== celebrations ===== */
 .cel{position:fixed;inset:0;z-index:70;display:grid;place-items:center;overflow:hidden;background:rgba(6,4,10,0);transition:background .45s ease;--cc:#ff9f0a;cursor:pointer}
 .cel.on{background:rgba(6,4,10,.78);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
@@ -1306,7 +1332,6 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
   <section class="view" id="v-stats" hidden>
     <div class="row between"><h1 class="largetitle">Stats</h1><span class="tag" id="sampleTag">Sample data</span></div>
     <div class="card rank" id="rankCard"></div>
-    <div class="card lb" id="lbCard"></div>
     <div class="tiles" id="statTiles"></div>
     <details class="card metrics" id="metrics">
       <summary><span class="label">Metrics</span><span class="muted mt-sub">History, charts and account stats</span><svg class="mt-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
@@ -1320,6 +1345,17 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
       </div>
     </details>
     <div class="card"><span class="label">Recent sessions</span><div class="list" id="recent" style="margin-top:4px"></div></div>
+  </section>
+
+  <!-- SOCIAL -->
+  <section class="view" id="v-social" hidden>
+    <h1 class="largetitle">Social</h1>
+    <div class="card soc-me" id="socMe"></div>
+    <div class="card soc-find"><span class="label">Find people</span>
+      <div class="soc-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" id="socQ" placeholder="Search usernames" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+      <div class="soc-list" id="socResults"></div></div>
+    <div class="card lb" id="lbCard"></div>
+    <div class="card" id="socFollowing"></div>
   </section>
 
   <!-- SHOP -->
@@ -1390,6 +1426,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
   <button data-v="home" aria-current="page"><svg viewBox="0 0 24 24"><path d="M12 3c2 3 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.2.3 1.8 1 2.7 2 3.2C11 8.5 11.3 5.6 12 3z"/></svg>Session</button>
   <button data-v="prof"><svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>Profiles</button>
   <button data-v="stats"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Stats</button>
+  <button data-v="social"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-6 6.5-6s5.9 2.4 6.5 6"/><circle cx="17" cy="9" r="2.8"/><path d="M16 14.2c3 .1 5 2.2 5.5 5.3"/></svg>Social</button>
   <button data-v="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
 </div></nav>
 <div class="toast" id="toast"></div>
@@ -2859,7 +2896,7 @@ let view = 'home', raf = 0;
 function setHTML(el, html){ if (el && el._h !== html){ el._h = html; el.innerHTML = html; } }
 
 /* haptics: only on the moments that matter (start/stop/boost, picking a profile or vapor level, saving lights, marking cleaned) */
-const HZ_SEL = '#bStart, #bStop, #bBoost, #bCleaned, #ltSave, #homeChips .pchip, .seg.vap button, .seg.hseg button, #nav > button, [data-bv], .bv-close, .crop [data-c="ok"]';
+const HZ_SEL = '#bStart, #bStop, #bBoost, #bCleaned, #ltSave, #homeChips .pchip, .seg.vap button, .seg.hseg button, #nav > button, [data-bv], .soc-follow, .bv-close, .crop [data-c="ok"]';
 function applyHaptics(){
   if (document.documentElement.dataset.ui === 'cockpit') return;
   document.querySelectorAll(HZ_SEL).forEach(el => {
@@ -3376,12 +3413,24 @@ function showcaseEditor(){
 }
 function openPlayer(r){
   let el = $('#lbProfile'); if (!el){ el = document.createElement('div'); el.id = 'lbProfile'; el.className = 'welcome'; document.body.appendChild(el); }
-  const sc = r.showcase || [];
-  el.innerHTML = `<div class="wl-card lbp"><div class="row between"><span class="label">Profile</span><button class="btn small ghost" id="lbpClose">Close</button></div>
-    <div class="lbp-head">${lbAvatar(r.avatar_url, r.username, 96)}<b>${esc(r.username)}${r.dev ? devBadge(26) : ''}</b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span></div>
-    ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, r)}">${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}</div>`;
-  el.hidden = false; applyHaptics();
-  el.onclick = e => { if (e.target === el || e.target.id === 'lbpClose') el.hidden = true; };
+  const sc = r.showcase || [], meId = LB.me && LB.me.id, isMe = r.id === meId;
+  const paint = (counts) => {
+    const following = SOC.following.has(r.id);
+    el.innerHTML = `<div class="wl-card lbp"><div class="row between"><span class="label">Profile</span><button class="btn small ghost" id="lbpClose">Close</button></div>
+      <div class="lbp-head">${lbAvatar(r.avatar_url, r.username, 96)}<b>${esc(r.username)}${r.dev ? devBadge(26) : ''}</b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
+        <div class="soc-counts"><span><b>${counts ? counts.followers : '…'}</b> followers</span><span><b>${counts ? counts.following : '…'}</b> following</span></div></div>
+      ${r.bio ? `<p class="soc-bio">${esc(r.bio)}</p>` : ''}
+      ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, r)}">${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}
+      ${isMe ? '' : meId ? `<button class="btn ${following ? '' : 'primary'} soc-follow" data-follow="${r.id}" style="width:100%">${following ? 'Following' : 'Follow'}</button>`
+        : '<p class="muted" style="margin:0;text-align:center;font-size:13px">Make your profile in Social to follow people.</p>'}</div>`;
+    applyHaptics();
+  };
+  paint(null); el.hidden = false;
+  socCounts(r.id).then(c => { if (!el.hidden) paint(c); });
+  el.onclick = async e => {
+    if (e.target === el || e.target.id === 'lbpClose'){ el.hidden = true; return; }
+    const f = e.target.closest('[data-follow]'); if (f){ await socToggleFollow(r); socCounts(r.id).then(c => { if (!el.hidden) paint(c); }); }
+  };
 }
 
 /* ===== badge viewer: tap a badge to see it big ===== */
@@ -3441,23 +3490,22 @@ async function cropAvatar(file){
   if (!IW || !IH) throw new Error('That picture couldn’t be opened. Try a different photo.');
   return new Promise(resolve => {
     const el = document.createElement('div'); el.className = 'crop';
-    el.innerHTML = `<div class="crop-in"><h3>Move and zoom</h3><small>Drag to move. Pinch or double-tap to zoom.</small>
-      <div class="crop-stage"><div class="crop-ring"></div></div>
-      <input type="range" class="crop-zoom" min="0" max="1" step="0.001" value="0" aria-label="Zoom">
+    el.innerHTML = `<div class="crop-stage"><div class="crop-ring"></div></div><div class="crop-in"><div class="crop-top"><h3>Move and zoom</h3><small>Drag to move. Pinch or double-tap to zoom.</small></div>
       <div class="crop-row"><button class="btn ghost" data-c="cancel">Cancel</button><button class="btn primary" data-c="ok">Use photo</button></div></div>`;
     document.body.appendChild(el); applyHaptics();
-    const stage = el.querySelector('.crop-stage'), zoomEl = el.querySelector('.crop-zoom');
+    const stage = el.querySelector('.crop-stage');
     const cv = document.createElement('canvas'); cv.className = 'crop-img'; stage.prepend(cv);
-    const W = stage.clientWidth || 300, dpr = Math.min(3, window.devicePixelRatio || 1);
-    cv.width = Math.round(W * dpr); cv.height = Math.round(W * dpr); cv.style.width = cv.style.height = W + 'px';
+    const W = stage.clientWidth || innerWidth, H = stage.clientHeight || innerHeight, dpr = Math.min(3, window.devicePixelRatio || 1);
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.width = W + 'px'; cv.style.height = H + 'px';
     const ctx = cv.getContext('2d'); ctx.imageSmoothingQuality = 'high';
-    const ring = W * .88, off = W * .06, base = ring / Math.min(IW, IH), ZMAX = 5;
-    let z = 1, x = (W - IW * base) / 2, y = (W - IH * base) / 2, vx = 0, vy = 0, anim = 0;
-    const bounds = () => { const w = IW * base * z, h = IH * base * z; return { minX: off + ring - w, maxX: off, minY: off + ring - h, maxY: off }; };
+    const ring = Math.min(W * .9, H - 260, 520), offX = (W - ring) / 2, offY = (H - ring) / 2, base = ring / Math.min(IW, IH), ZMAX = 5;
+    const ringEl = el.querySelector('.crop-ring'); Object.assign(ringEl.style, { left: offX + 'px', top: offY + 'px', width: ring + 'px', height: ring + 'px' });
+    let z = 1, x = (W - IW * base) / 2, y = (H - IH * base) / 2, vx = 0, vy = 0, anim = 0;
+    const bounds = () => { const w = IW * base * z, h = IH * base * z; return { minX: offX + ring - w, maxX: offX, minY: offY + ring - h, maxY: offY }; };
     const clampIn = () => { const b = bounds(); x = Math.min(b.maxX, Math.max(b.minX, x)); y = Math.min(b.maxY, Math.max(b.minY, y)); };
-    const draw = () => { ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, W); ctx.drawImage(src, x, y, IW * base * z, IH * base * z); };
+    const draw = () => { ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.drawImage(src, x, y, IW * base * z, IH * base * z); };
     const rubber = (v, lo, hi) => v < lo ? lo - Math.pow(lo - v, .7) : v > hi ? hi + Math.pow(v - hi, .7) : v; // resist past the edge
-    const syncSlider = () => { zoomEl.value = (Math.log(Math.max(1, Math.min(ZMAX, z))) / Math.log(ZMAX)).toFixed(3); };
+    const syncSlider = () => {};
     const zoomAround = (nz, cx, cy, soft) => {
       nz = soft ? (nz < 1 ? 1 - (1 - nz) * .35 : nz > ZMAX ? ZMAX + (nz - ZMAX) * .35 : nz) : Math.max(1, Math.min(ZMAX, nz));
       const k = nz / z; x = cx - (cx - x) * k; y = cy - (cy - y) * k; z = nz; };
@@ -3465,7 +3513,7 @@ async function cropAvatar(file){
     const settle = () => {
       cancelAnimationFrame(anim);
       const step = () => {
-        if (z < 1 || z > ZMAX){ const t = z < 1 ? 1 : ZMAX; const nz = z + (t - z) * .25; zoomAround(Math.abs(t - nz) < .002 ? t : nz, W / 2, W / 2, true); }
+        if (z < 1 || z > ZMAX){ const t = z < 1 ? 1 : ZMAX; const nz = z + (t - z) * .25; zoomAround(Math.abs(t - nz) < .002 ? t : nz, W / 2, H / 2, true); }
         x += vx; y += vy; vx *= .92; vy *= .92;
         const b = bounds();
         if (x > b.maxX){ x += (b.maxX - x) * .22; vx *= .5; } else if (x < b.minX){ x += (b.minX - x) * .22; vx *= .5; }
@@ -3521,7 +3569,6 @@ async function cropAvatar(file){
     };
     stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
     stage.addEventListener('wheel', ev => { ev.preventDefault(); const p = local(ev); cancelAnimationFrame(anim); zoomAround(z * Math.exp(-ev.deltaY * .002), p.x, p.y); clampIn(); draw(); syncSlider(); }, { passive: false });
-    zoomEl.addEventListener('input', () => { cancelAnimationFrame(anim); zoomAround(Math.pow(ZMAX, +zoomEl.value), W / 2, W / 2); clampIn(); draw(); });
     const done = v => { cancelAnimationFrame(anim); el.remove(); try { src.close && src.close(); } catch(_){} resolve(v); };
     el.addEventListener('click', ev => {
       const c = ev.target.closest('[data-c]'); if (!c) return;
@@ -3529,7 +3576,7 @@ async function cropAvatar(file){
       clampIn();
       const sc = base * z, out = document.createElement('canvas'); out.width = out.height = 320;
       const o = out.getContext('2d'); o.imageSmoothingQuality = 'high';
-      o.drawImage(src, (off - x) / sc, (off - y) / sc, ring / sc, ring / sc, 0, 0, 320, 320);
+      o.drawImage(src, (offX - x) / sc, (offY - y) / sc, ring / sc, ring / sc, 0, 0, 320, 320);
       done(out.toDataURL('image/jpeg', .86));
     });
   });
@@ -3576,6 +3623,111 @@ document.addEventListener('pointerdown', e => {
   const up = ev => end(ev, false), cc = ev => end(ev, true);
   document.addEventListener('pointermove', move, true); document.addEventListener('pointerup', up, true); document.addEventListener('pointercancel', cc, true);
 }, true);
+
+/* ===================== SOCIAL: profiles, bios, follows, search ===================== */
+const SOC = { following: new Set(), followers: [], followingRows: [], results: null, q: '', loaded: false };
+async function socCounts(pid){
+  try {
+    const [a, b] = await Promise.all([
+      sbJSON(`/rest/v1/follows?select=follower&followee=eq.${pid}&limit=2000`, { method:'GET' }),
+      sbJSON(`/rest/v1/follows?select=followee&follower=eq.${pid}&limit=2000`, { method:'GET' })
+    ]);
+    return { followers: a.length, following: b.length, followerIds: a.map(x => x.follower), followingIds: b.map(x => x.followee) };
+  } catch(e){ return { followers: 0, following: 0, followerIds: [], followingIds: [] }; }
+}
+const SOC_COLS = 'id,username,avatar_url,tier,rp,blinkers,dev,showcase,bio,month';
+async function socPlayers(ids){
+  if (!ids.length) return [];
+  try { return await sbJSON(`/rest/v1/players?select=${SOC_COLS}&id=in.(${ids.slice(0, 200).join(',')})`, { method:'GET' }); } catch(e){ return []; }
+}
+async function socLoad(){
+  drawSocial();
+  const me = LB.me;
+  if (!me || !me.id){ if (lbUsesPuffco() && !LB.me) { const p = await lbRestore(); if (p) return socLoad(); } return; }
+  const c = await socCounts(me.id);
+  SOC.myCounts = c; SOC.following = new Set(c.followingIds); SOC.loaded = true;
+  SOC.followingRows = await socPlayers(c.followingIds);
+  drawSocial();
+}
+async function socToggleFollow(r){
+  if (!LB.me || !LB.me.id || r.id === LB.me.id) return;
+  const was = SOC.following.has(r.id);
+  if (was) SOC.following.delete(r.id); else SOC.following.add(r.id); // update right away, undo if the server says no
+  drawSocial();
+  try {
+    await lbCall({ action: was ? 'unfollow' : 'follow', target: r.id });
+    if (!was){ SOC.followingRows = SOC.followingRows.filter(x => x.id !== r.id).concat([r]); toast('Following ' + r.username); }
+    else SOC.followingRows = SOC.followingRows.filter(x => x.id !== r.id);
+    if (SOC.myCounts) SOC.myCounts.following = SOC.following.size;
+  } catch(e){
+    if (was) SOC.following.add(r.id); else SOC.following.delete(r.id);
+    toast(e.code === 'username_required' ? 'Make your profile first' : 'Couldn’t update. Try again.');
+  }
+  drawSocial();
+}
+function socRow(r){
+  const meId = LB.me && LB.me.id, on = SOC.following.has(r.id);
+  return `<div class="soc-row" data-soc="${r.id}" role="button" tabindex="0">${lbAvatar(r.avatar_url, r.username, 42)}
+    <span class="soc-name"><b>${esc(r.username)}${r.dev ? devBadge(18) : ''}</b><small style="color:${lbTierColor(r.tier)}">${esc(r.tier || 'Ember')}${r.bio ? ` <span class="muted">· ${esc(r.bio.slice(0, 40))}${r.bio.length > 40 ? '…' : ''}</span>` : ''}</small></span>
+    ${meId && r.id !== meId ? `<button class="btn small ${on ? '' : 'primary'} soc-follow" data-follow="${r.id}">${on ? 'Following' : 'Follow'}</button>` : ''}</div>`;
+}
+function drawSocial(){
+  const meEl = $('#socMe'); if (!meEl) return;
+  const puff = lbUsesPuffco(), me = LB.me;
+  if (!puff){
+    meEl.innerHTML = `<span class="label">Your profile</span><div class="banner" style="padding:12px 14px"><div class="grow"><b>Sign in to join Social</b>Your Emberline profile uses your Puffco login. Sign in to make a profile, follow people and show your badges.</div><button class="btn small primary" id="lbGoSign">Sign in</button></div>`;
+  } else if (!me || !me.username){
+    meEl.innerHTML = `<span class="label">Your profile</span><p class="muted" style="margin:0">Make a profile with a username, photo and bio. People can find you, follow you and see your badges.</p><button class="btn primary" id="socCreate">Create your profile</button>`;
+  } else {
+    const c = SOC.myCounts, sc = me.showcase || [];
+    meEl.innerHTML = `<div class="soc-head">${lbAvatar(me.avatar_url, me.username, 72)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}</b>
+        <span class="muted"><span style="color:${lbTierColor(rankFor(data().sessions).tier.n)};font-weight:700">${rankFor(data().sessions).tier.n}</span> · ${rankFor(data().sessions).rp} RP</span>
+        <div class="soc-counts"><span><b>${c ? c.followers : '…'}</b> followers</span><span><b>${c ? c.following : '…'}</b> following</span></div></div></div>
+      ${me.bio ? `<p class="soc-bio">${esc(me.bio)}</p>` : '<p class="muted" style="margin:0;font-size:14px">No bio yet.</p>'}
+      ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, { tier: rankFor(data().sessions).tier.n })}">${showBadge(k, undefined, { tier: rankFor(data().sessions).tier.n })}<span>${esc(showName(k, { tier: rankFor(data().sessions).tier.n }))}</span></div>`).join('')}</div>` : ''}
+      <button class="btn" id="socEdit">Edit profile</button>`;
+  }
+  // search results
+  const res = $('#socResults');
+  if (res){
+    if (!SOC.q) res.innerHTML = '';
+    else if (SOC.results == null) res.innerHTML = '<p class="muted" style="margin:0">Searching…</p>';
+    else res.innerHTML = SOC.results.length ? SOC.results.map(socRow).join('') : '<p class="muted" style="margin:0">Nobody by that name yet.</p>';
+  }
+  // following list
+  const fl = $('#socFollowing');
+  if (fl){
+    fl.hidden = !(me && me.username);
+    fl.innerHTML = `<span class="label">Following</span>${SOC.followingRows.length ? `<div class="soc-list">${SOC.followingRows.slice().sort((a, b) => (b.rp || 0) - (a.rp || 0)).map(socRow).join('')}</div>` : '<p class="muted" style="margin:0">You aren’t following anyone yet. Search for friends above or tap someone on the leaderboard.</p>'}`;
+  }
+  applyHaptics();
+}
+// search as you type
+{ let t = 0, seq = 0;
+  document.addEventListener('input', e => {
+    if (e.target.id === 'lbBio'){ LB.bioDraft = e.target.value; return; }
+    if (e.target.id !== 'socQ') return;
+    const q = e.target.value.trim().replace(/[^A-Za-z0-9_.]/g, '').slice(0, 20);
+    SOC.q = q; SOC.results = null; clearTimeout(t);
+    if (!q){ drawSocial(); return; }
+    drawSocial();
+    const my = ++seq;
+    t = setTimeout(async () => {
+      try { const rows = await sbJSON(`/rest/v1/players?select=${SOC_COLS}&username=ilike.*${encodeURIComponent(q)}*&order=rp.desc&limit=20`, { method:'GET' }); if (my === seq){ SOC.results = rows; drawSocial(); } }
+      catch(err){ if (my === seq){ SOC.results = []; drawSocial(); } }
+    }, 280);
+  });
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest) return;
+  if (e.target.closest('#lbProfile')) return; // the profile sheet handles its own taps
+  const f = e.target.closest('[data-follow]');
+  if (f && e.target.closest('#v-social')){ e.stopPropagation(); const id = f.dataset.follow;
+    const r = (SOC.results || []).concat(SOC.followingRows, LB.rows || []).find(x => x.id === id); if (r) socToggleFollow(r); return; }
+  const row = e.target.closest('[data-soc]');
+  if (row){ const id = row.dataset.soc; const r = (SOC.results || []).concat(SOC.followingRows, LB.rows || []).find(x => x.id === id); if (r) openPlayer(r); return; }
+  if (e.target.closest('#socEdit') || e.target.closest('#socCreate')){ LB.edit = true; LB.err = ''; drawLeaderboard(); setTimeout(() => { const c = $('#lbCard'); if (c) c.scrollIntoView({ behavior:'smooth', block:'start' }); }, 60); }
+});
 function lbRowHtml(r, i, meId){ return `<div class="lb-row${r.id === meId ? ' me' : ''}" data-lbi="${i}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier)}</small>${(r.showcase || []).length ? `<span class="lb-show">${r.showcase.map(k => showBadge(k, undefined, r)).join('')}</span>` : ''}</span><span class="lb-medal">${rankBadge(new Date().getMonth(), rbTierIdx(r.tier), 34)}</span><b>${r.rp}<small> RP</small></b></div>`; }
 function drawLeaderboard(){
   const el = $('#lbCard'); if (!el) return;
@@ -3595,6 +3747,7 @@ function drawLeaderboard(){
         <label class="lb-pic" for="lbPicFile">${LB.avatar ? `<img class="lb-av" src="${LB.avatar}" alt="" style="width:64px;height:64px">` : lbAvatar(me.avatar_url, me.username || L.username, 64)}<span>Photo</span></label>
         <input type="text" id="lbName" maxlength="20" placeholder="Username" autocomplete="nickname" value="${esc(me.username || L.username || '')}">
       </div>
+      <textarea id="lbBio" class="lb-bio" maxlength="160" rows="3" placeholder="Bio (optional): your setup, favorite temp, anything">${esc(LB.bioDraft != null ? LB.bioDraft : (me.bio || ''))}</textarea>
       <p class="muted" style="margin:0;font-size:13px">Tied to your Puffco login${acct() && acct().email ? ` (${esc(acct().email)})` : ''}. Sign in with it on any phone and your profile comes back. Usernames are one per person.</p>
       ${showcaseEditor()}
       <p class="acct-err" id="lbErr" ${LB.err ? '' : 'hidden'}>${esc(LB.err)}</p>
@@ -3616,9 +3769,9 @@ async function lbSave(){
   LB.busy = true; LB.err = ''; drawLeaderboard();
   const wasJoined = !!L.joined;
   try {
-    const body = Object.assign({ username: name }, lbPayload()); if (LB.avatar) body.avatar = LB.avatar; if (LB.pick) body.showcase = LB.pick.slice(0, 3);
+    const body = Object.assign({ username: name, bio: (($('#lbBio') && $('#lbBio').value) || '').slice(0, 160) }, lbPayload()); if (LB.avatar) body.avatar = LB.avatar; if (LB.pick) body.showcase = LB.pick.slice(0, 3);
     const r = await lbCall(body);
-    LB.me = r.player; LB.pick = null; try { drawRank(); } catch(_){} L.joined = true; L.username = name; LB.avatar = null; LB.edit = false; save();
+    LB.me = r.player; LB.pick = null; LB.bioDraft = null; try { drawRank(); drawSocial(); } catch(_){} L.joined = true; L.username = name; LB.avatar = null; LB.edit = false; save();
     toast(wasJoined ? 'Profile saved' : 'You’re on the leaderboard');
     LB.busy = false; lbLoad();
   } catch(e){ LB.busy = false; LB.err = e.code === 'puffco_blocked' ? e.message : (LB_ERRS[e.code] || (/load failed|failed to fetch|network/i.test(e.message) ? 'Couldn’t reach the leaderboard server.' : 'Couldn’t save: ' + e.message)); drawLeaderboard(); }
@@ -3666,7 +3819,7 @@ function lbStart(){ // called when Stats opens: load now, refresh every 30s whil
   if (lbUsesPuffco() && !LB.me){ lbRestore(); } else if (lbStore().joined && !LB.me) lbCall({ action:'me' }).then(r => { LB.me = r.player; if (r.player){ lbStore().dev = !!r.player.dev; if (r.player.username) lbStore().username = r.player.username; save(); } drawLeaderboard(); try { drawRank(); } catch(e){} }).catch(() => {});
   lbPush(); lbLoad();
   clearInterval(LB.timer);
-  LB.timer = setInterval(() => { if (view !== 'stats'){ clearInterval(LB.timer); return; } if (!document.hidden) lbLoad(); }, 30000);
+  LB.timer = setInterval(() => { if (view !== 'stats' && view !== 'social'){ clearInterval(LB.timer); return; } if (!document.hidden) lbLoad(); }, 30000);
 }
 
 function drawStats(){
@@ -3718,7 +3871,7 @@ function drawStats(){
 function syncRange(r){ const p = (r.value - r.min) / (r.max - r.min) * 100; r.style.setProperty('--p', p + '%'); }
 document.addEventListener('input', e => { if (e.target.type === 'range') syncRange(e.target); });
 function syncRanges(){ document.querySelectorAll('input[type=range]').forEach(syncRange); }
-const ORDER = ['home','prof','lights','stats','set']; // Shop tab removed (its page stays hidden)
+const ORDER = ['home','prof','lights','stats','social','set']; // Shop tab removed (its page stays hidden)
 let enterTimer = 0;
 function moveTabPill(v){
   const b = document.querySelector(`#nav button[data-v="${v}"]`), pill = $('#tabpill');
@@ -3743,6 +3896,7 @@ function show(v){
   if (v === 'set'){ drawSettings(); drawDevice(); drawAccount(); wireAcctForm('ac'); drawTestTools(); }
   if (v === 'shop'){ closeShopForm(); drawShops(); }
   if (v === 'stats'){ drawStats.sig = null; autoSync(); lbStart(); }
+  if (v === 'social'){ lbStart(); socLoad(); }
   draw(); syncRanges(); window.scrollTo(0,0);
   sec.querySelectorAll('.pcard, .shop').forEach((c,j) => c.style.setProperty('--j', j));
   sec.querySelectorAll('.bar, .hbar .t b').forEach((c,k) => c.style.setProperty('--k', k % 14));
