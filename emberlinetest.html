@@ -1286,18 +1286,6 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
 .gs-flakes i{position:absolute;top:-10px;left:var(--x);width:7px;height:11px;border-radius:2px;background:linear-gradient(180deg,#fff2c4,#d6a33a);transform:scale(var(--s));animation:flake 2.4s var(--d) cubic-bezier(.3,.6,.4,1) both}
 @keyframes flake{from{transform:translateY(-20px) rotate(0) scale(var(--s));opacity:1}to{transform:translateY(520px) rotate(540deg) scale(var(--s));opacity:0}}
 
-
-.lbalert{position:fixed;left:50%;top:calc(10px + env(safe-area-inset-top,0px));z-index:45;width:min(calc(100% - 20px),520px);display:flex;gap:12px;align-items:center;text-align:left;padding:12px 14px;border-radius:22px;border:1px solid var(--glass-edge);background:color-mix(in srgb,var(--surface) 94%,transparent);-webkit-backdrop-filter:blur(28px) saturate(180%);backdrop-filter:blur(28px) saturate(180%);box-shadow:0 12px 34px rgba(0,0,0,.35);color:var(--fg);transform:translate3d(-50%,-160%,0) scale(.94);opacity:0;transition:transform .55s cubic-bezier(.2,1.2,.35,1),opacity .3s ease;cursor:pointer}
-.lbalert.show{transform:translate3d(-50%,0,0) scale(1);opacity:1}
-.lba-ic{width:40px;height:40px;flex:none;border-radius:12px;display:grid;place-items:center;background:linear-gradient(145deg,var(--bad),#ff8a3d)}
-.lba-ic svg{width:22px;height:22px;fill:none;stroke:#fff;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;transform:scaleY(-1)}
-.lba-t{display:grid;gap:1px;min-width:0}
-.lba-t b{font-size:16px}
-.lba-t small{font-size:14px;color:var(--muted)}
-:root[data-ui="block"] .lbalert{background:#212121;border:2px solid #000;border-radius:4px;box-shadow:inset 2px 2px 0 #555,inset -2px -2px 0 #111;color:#fff;text-shadow:2px 2px 0 #000}
-:root[data-ui="block"] .lba-t b{color:#ffff55}
-:root[data-ui="block"] .lba-ic{border-radius:0}
-:root[data-ui="heist"] .lbalert{border-radius:4px;background:rgba(0,0,0,.85);border:0;box-shadow:inset 4px 0 0 var(--bad)}
 /* ===================== SECRET SKINS (unlocked by tapping Settings 5 times) ===================== */
 /* ---------- BLOCK: blocky survival game GUI ---------- */
 :root[data-ui="block"]{
@@ -1698,8 +1686,6 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
     <div class="card" id="devCard" style="display:grid;gap:14px"></div>
     <div class="card" style="display:grid;gap:10px">
       <span class="label">Peak light</span>
-      <label class="toggle"><span>Leaderboard alerts<br><span class="muted" style="font-size:13px">Tell me when someone passes me this month</span></span><input type="checkbox" class="switch" id="tPassed"></label>
-      <div class="row" id="passedTools" style="gap:8px;padding:2px 0 8px"><button class="btn small ghost" id="bTestPassed">Show a test alert</button><button class="btn small ghost" id="bNotifyPerm" hidden>Allow phone notifications</button></div>
       <label class="toggle"><span>Flash profile color when you switch<br><span class="muted" style="font-size:13px">Your Peak shows that profile’s light for 5 seconds</span></span><input type="checkbox" class="switch" id="tSelFlash"></label>
       <label class="toggle"><span>Long hit celebration<br><span class="muted" style="font-size:13px">Phone buzzes 3 times and your Peak goes Disco for 10 seconds</span></span><input type="checkbox" class="switch" id="tBigHit"></label>
       <div class="row between" id="bigHitRow"><span>When a hit reaches</span><span class="row" style="gap:8px"><input class="num" type="number" id="bigHitSecs" min="3" max="30" step="1"><span class="muted">seconds</span></span></div>
@@ -2873,6 +2859,27 @@ async function readProfiles(){
   try { S.active = clamp(await ble.u8('/p/app/hcs'),0,3); } catch(e){}
 }
 
+/* sessions done while the app was closed: the Peak's dab counter keeps going, so fill in the gap when we see it again */
+function odoSync(){
+  const id = ble.dev && ble.dev.id; if (!id || S.mode !== 'live' || S.odo == null) return;
+  store.odoSeen = store.odoSeen || {};
+  const seen = store.odoSeen[id], now = Date.now();
+  if (seen && S.odo > seen.odo){
+    const missed = Math.min(30, S.odo - seen.odo - (S.cyclesSinceOdo || 0));
+    if (missed > 0 && !(S.state >= 7 && S.state <= 9)){
+      const span = Math.max(60000, now - seen.t);
+      for (let i = 0; i < missed; i++){
+        const t = Math.round(seen.t + span * (i + 1) / (missed + 1));
+        const pr = S.profiles[S.active] || {}, tg = pr.tempC ? Math.round(c2f(pr.tempC)) : null;
+        store.sessions.push({ t, p:S.active, name:pr.name || 'Session', target:tg, peak:tg, away:true, hits:[], vapor:pr.vapor, dev:id, series:S.series || 'peach' });
+      }
+      store.sessions.sort((a, b) => a.t - b.t);
+      toast(`Added ${missed} session${missed > 1 ? 's' : ''} from while the app was closed`);
+      try { lbPush(true); } catch(e){}
+    }
+  }
+  if (!(S.state >= 7 && S.state <= 9)){ store.odoSeen[id] = { odo:S.odo, t:now }; S.cyclesSinceOdo = 0; save(); }
+}
 async function slowPoll(){
   if (++slowPoll.n % 4 === 0) await readBatteryDetail();
   try { S.chamber = await ble.u8('/p/htr/chmt'); } catch(e){}
@@ -2888,6 +2895,7 @@ async function slowPoll(){
   try { S.odo = Math.round(await ble.f32('/p/app/odom/0/nc', 12)); }
   catch(e){ try { S.odo = Math.round(await ble.f32('/p/app/info/dtot', 12)); } catch(e2){} }
   try { S.dpd = await ble.f32('/p/app/info/dpd', 12); } catch(e){}
+  try { odoSync(); } catch(e){}
   if (Date.now() > hcsHold){ try { S.active = clamp(await ble.u8('/p/app/hcs'),0,3); } catch(e){} }
   try { S.stealth = (await ble.u8('/u/app/ui/stlm')) === 1; } catch(e){}
 }
@@ -2929,7 +2937,9 @@ function trackSession(prev, st){
     cur.peak = Math.max(cur.peak, tF);
     if (st === 8){ cur.hit = true; if (!cur.readyAt) cur.readyAt = Date.now(); }
     if ((st === 9 || st === 5 || st < 5) && prev >= 7 && prev <= 8){
-      if (cur.hit){ logSession({ t:cur.t, p:cur.p, name:cur.name, target:cur.target, peak:Math.round(cur.peak), dur:Math.round((Date.now()-cur.t)/1000), batt:cur.batt, hits:(cur.hits || HIT.hits).slice(0, 20), vapor:(S.profiles[cur.p] || {}).vapor, sc:sinceClean() + 1, run: cur.readyAt ? Math.round((Date.now() - cur.readyAt) / 1000) : null }); }
+      const ranFor = cur.readyAt ? (Date.now() - cur.readyAt) / 1000 : 0;
+      S.cyclesSinceOdo = (S.cyclesSinceOdo || 0) + 1;
+      if (cur.hit && ranFor >= 20){ logSession({ t:cur.t, p:cur.p, name:cur.name, target:cur.target, peak:Math.round(cur.peak), dur:Math.round((Date.now()-cur.t)/1000), batt:cur.batt, hits:(cur.hits || HIT.hits).slice(0, 20), vapor:(S.profiles[cur.p] || {}).vapor, sc:sinceClean() + 1, run: cur.readyAt ? Math.round((Date.now() - cur.readyAt) / 1000) : null }); }
       cur = null;
     }
   }
@@ -3540,8 +3550,6 @@ function drawSettings(){
   $('#tAll').checked = store.showAll;
   $('#tAuto').checked = store.autoConnect !== false;
   $('#tSelFlash').checked = store.selFlash !== false;
-  $('#tPassed').checked = store.notifyPassed !== false;
-  $('#bNotifyPerm').hidden = !('Notification' in window) || Notification.permission !== 'default' || store.notifyPassed === false;
   $('#tWarn').checked = store.warnOn !== false;
   $('#tBigHit').checked = store.bigHit !== false; $('#bigHitSecs').value = store.bigHitSecs || 8; $('#bigHitRow').style.opacity = store.bigHit === false ? .45 : 1;
   $('#warnSecs').value = store.warnSecs || 15; $('#warnColor').value = store.warnColor || '#ffffff';
@@ -3859,53 +3867,15 @@ async function lbPush(force){
   const L = lbStore(); if (!L.joined || !lbUsesPuffco()) return;
   if (!force && Date.now() - LB.lastPush < 60000) return;
   LB.lastPush = Date.now();
-  try { const r = await lbCall(lbPayload()); if (r && r.player){ LB.me = r.player; } } catch(e){}
+  try { const r = await lbCall(lbPayload()); if (r && r.player){ LB.me = r.player; lbStore().meCache = r.player; save(); } } catch(e){}
 }
 async function lbLoad(){
   try {
     LB.rows = await sbRows(`/rest/v1/players?select=*&month=eq.${lbMonth()}&order=rp.desc,updated_at.asc&limit=100`);
     LB.err = '';
-    lbCheckPassed(LB.rows);
   } catch(e){ LB.err = 'Couldn’t load the leaderboard. Check your connection.'; }
   drawLeaderboard();
 }
-/* leaderboard alerts: tell me when someone passes me */
-function lbCheckPassed(rows){
-  const meId = LB.me && LB.me.id; if (!meId || !rows || !rows.length) return;
-  const mine = rows.findIndex(r => r.id === meId); if (mine < 0) return;
-  const month = lbMonth(), order = rows.map(r => r.id);
-  const prev = store.lbSnap && store.lbSnap.month === month && store.lbSnap.me === meId ? store.lbSnap : null;
-  store.lbSnap = { month, me: meId, order }; save();
-  if (!prev || store.notifyPassed === false) return;
-  const was = prev.order.indexOf(meId); if (was < 0) return;
-  const wasBelow = new Set(prev.order.slice(was + 1));
-  const passers = rows.slice(0, mine).filter(r => wasBelow.has(r.id));
-  if (passers.length) lbAlertPassed(passers, mine + 1, rows[mine - 1], rows[mine]);
-}
-function lbAlertPassed(passers, rank, above, me){
-  const who = passers.length === 1 ? passers[0].username : `${passers[0].username} and ${passers.length - 1} other${passers.length > 2 ? 's' : ''}`;
-  const gap = above && me ? Math.max(0, (above.rp || 0) - (me.rp || 0)) : 0;
-  const title = `${who} passed you`, msg = `You're now #${rank} this month${gap ? `, ${gap} RP behind` : ''}.`;
-  lbAlertShow(title, msg);
-  try { if ('Notification' in window && Notification.permission === 'granted' && document.hidden) new Notification(title, { body: msg }); } catch(e){}
-}
-function lbAlertShow(title, msg){
-  let el = $('#lbAlert');
-  if (!el){ el = document.createElement('button'); el.id = 'lbAlert'; el.className = 'lbalert'; document.body.appendChild(el);
-    el.addEventListener('click', () => { el.classList.remove('show'); show('social'); }); }
-  el.innerHTML = `<span class="lba-ic"><svg viewBox="0 0 24 24"><path d="M4 18l5-6 4 4 7-9"/><path d="M15 7h5v5"/></svg></span><span class="lba-t"><b>${esc(title)}</b><small>${esc(msg)}</small></span>`;
-  requestAnimationFrame(() => el.classList.add('show'));
-  clearTimeout(lbAlertShow.t); lbAlertShow.t = setTimeout(() => el.classList.remove('show'), 6500);
-}
-// check in the background every few minutes, and right when you come back to the app
-async function lbQuietCheck(){
-  if (store.notifyPassed === false || !LB.me || document.hidden) return;
-  if (view === 'stats' || view === 'social') return; // those already refresh every 30s
-  try { const rows = await sbRows(`/rest/v1/players?select=*&month=eq.${lbMonth()}&order=rp.desc,updated_at.asc&limit=100`); LB.rows = rows; lbCheckPassed(rows); } catch(e){}
-}
-setInterval(lbQuietCheck, 180000);
-setTimeout(lbQuietCheck, 9000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(lbQuietCheck, 1500); });
 function lbTierColor(n){ const t = RANK_TIERS.find(x => x.n === n); return t ? t.c : '#888'; }
 function lbAvatar(url, name, size){
   const ok = typeof url === 'string' && url.startsWith(SB_URL + '/storage/');
@@ -4405,7 +4375,7 @@ function socRow(r){
 }
 function drawSocial(){
   const meEl = $('#socMe'); if (!meEl) return;
-  const puff = lbUsesPuffco(), me = LB.me;
+  const puff = lbUsesPuffco(), me = LB.me || (lbStore().joined ? lbStore().meCache : null); // last known profile shows instantly while it reloads
   if (!puff){
     setHTML(meEl, `<span class="label">Your profile</span><div class="banner" style="padding:12px 14px"><div class="grow"><b>Sign in to join Social</b>Your Emberline profile uses your Puffco login. Sign in to make a profile, follow people and show your badges.</div><button class="btn small primary" id="lbGoSign">Sign in</button></div>`);
   } else if (!me || !me.username){
@@ -4505,7 +4475,7 @@ async function lbSave(){
     // the server drops badges it doesn't know; if that happened, say why instead of failing silently
     const sent = body.showcase || [], kept = (r.player && r.player.showcase) || [], lost = sent.filter(k => !kept.includes(k));
     const bioLost = body.bio && r.player && r.player.bio == null;
-    LB.me = r.player; LB.pick = null; LB.bioDraft = null; try { drawRank(); drawSocial(); } catch(_){} L.joined = true; L.username = name; LB.avatar = null; LB.edit = false; save();
+    LB.me = r.player; lbStore().meCache = r.player; LB.pick = null; LB.bioDraft = null; try { drawRank(); drawSocial(); } catch(_){} L.joined = true; L.username = name; LB.avatar = null; LB.edit = false; save();
     if (lost.length || bioLost){
       LB.err = (lost.some(k => k.startsWith('sp:')) || bioLost)
         ? 'Saved, but the server didn’t keep ' + (lost.length ? 'your new badges' : 'your bio') + '. Update the player function in Supabase (paste the newest player-function.ts and Deploy), and run add-social.sql.'
@@ -4545,10 +4515,10 @@ function lbRestore(){
   lbRestoring = lbCall({ action:'me' }).then(r => {
     const L = lbStore(), p = r && r.player;
     if (p){
-      LB.me = p; L.joined = true; L.dev = !!p.dev;
+      LB.me = p; L.joined = true; L.dev = !!p.dev; L.meCache = p;
       if (p.username) L.username = p.username;
       L.email = (acct() && acct().email) || L.email; save();
-      try { drawLeaderboard(); drawRank(); } catch(e){}
+      try { drawLeaderboard(); drawRank(); drawSocial(); } catch(e){}
       try { if (view === 'set') drawSettings(); } catch(e){}
     }
     return p;
@@ -4556,7 +4526,7 @@ function lbRestore(){
   return lbRestoring;
 }
 function lbStart(){ // called when Stats opens: load now, refresh every 30s while open
-  if (lbUsesPuffco() && !LB.me){ lbRestore(); } else if (lbStore().joined && !LB.me) lbCall({ action:'me' }).then(r => { LB.me = r.player; if (r.player){ lbStore().dev = !!r.player.dev; if (r.player.username) lbStore().username = r.player.username; save(); } drawLeaderboard(); try { drawRank(); } catch(e){} }).catch(() => {});
+  if (lbUsesPuffco() && !LB.me){ lbRestore(); } else if (lbStore().joined && !LB.me) lbCall({ action:'me' }).then(r => { LB.me = r.player; if (r.player){ lbStore().dev = !!r.player.dev; if (r.player.username) lbStore().username = r.player.username; lbStore().meCache = r.player; save(); } drawLeaderboard(); try { drawRank(); drawSocial(); } catch(e){} }).catch(() => {});
   lbPush(); lbLoad();
   clearInterval(LB.timer);
   LB.timer = setInterval(() => { if (view !== 'stats' && view !== 'social'){ clearInterval(LB.timer); return; } if (!document.hidden) lbLoad(); }, 30000);
@@ -4789,9 +4759,6 @@ $('#sinceSave').onclick = () => {
 $('#tAll').onchange = e => { store.showAll = e.target.checked; save(); };
 $('#tAuto').onchange = e => { store.autoConnect = e.target.checked; save(); };
 $('#tSelFlash').onchange = e => { store.selFlash = e.target.checked; save(); };
-$('#tPassed').onchange = e => { store.notifyPassed = e.target.checked; save(); drawSettings(); toast(e.target.checked ? 'Leaderboard alerts on' : 'Leaderboard alerts off'); };
-$('#bTestPassed').onclick = () => lbAlertShow('ember_king passed you', "You're now #4 this month, 12 RP behind.");
-$('#bNotifyPerm').onclick = async () => { try { await Notification.requestPermission(); } catch(e){} drawSettings(); };
 $('#tWarn').onchange = e => { store.warnOn = e.target.checked; save(); drawSettings(); };
 $('#tBigHit').onchange = e => { store.bigHit = e.target.checked; save(); drawSettings(); };
 $('#bigHitSecs').onchange = e => { store.bigHitSecs = clamp(Math.round(+e.target.value || 8), 3, 30); e.target.value = store.bigHitSecs; save(); };
