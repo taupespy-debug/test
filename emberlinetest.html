@@ -14,6 +14,8 @@
   opacity:0;animation:splUp .6s ease-out .55s forwards}
 .spl-bar{width:120px;height:3px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden;opacity:0;animation:splUp .5s ease-out .8s forwards}
 .spl-bar i{display:block;width:40%;height:100%;border-radius:2px;background:linear-gradient(90deg,transparent,#b06bff,#7300ff,transparent);animation:splSlide 1.1s ease-in-out infinite}
+.spl-note{min-height:18px;font:500 13px -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.55);opacity:0;transition:opacity .3s}
+.spl-note.on{opacity:1}
 @keyframes splRise{from{transform:translateY(100%)}to{transform:none}}
 @keyframes splFlick{50%{transform:translateY(-.4px) scaleY(1.04)}}
 @keyframes splBreath{50%{transform:scale(1.08);opacity:.75}}
@@ -34,11 +36,17 @@
     </svg>
     <span class="spl-word">Emberline</span>
     <span class="spl-bar"><i></i></span>
+    <span class="spl-note" id="splNote"></span>
   </div>
 </div>
-<script>(function(){var t0=Date.now(),done=false;function hide(){if(done)return;done=true;var el=document.getElementById('spl');if(!el)return;
-setTimeout(function(){el.classList.add('out');setTimeout(function(){el.remove()},600)},Math.max(0,1600-(Date.now()-t0)))}
-if(document.readyState==='complete')hide();else window.addEventListener('load',hide);setTimeout(hide,6000)})();</script>
+<script>(function(){var t0=Date.now(),done=false,loaded=false,ready=false;
+function hide(){if(done)return;done=true;var el=document.getElementById('spl');if(!el)return;el.classList.add('out');setTimeout(function(){el.remove()},600)}
+function check(){var t=Date.now()-t0;if(loaded&&t>=1600&&(ready||t>=3200))hide()}
+// the app starts Bluetooth while this screen is up and calls this once connected (or once it gives up)
+window.emberSplashReady=function(){ready=true;check()};
+window.emberSplashNote=function(txt){var n=document.getElementById('splNote');if(n){n.textContent=txt;n.classList.add('on')}};
+function onLoad(){loaded=true;check();setInterval(check,150)}
+if(document.readyState==='complete')onLoad();else window.addEventListener('load',onLoad);setTimeout(hide,7000)})();</script>
 <title>Emberline</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Saira+Semi+Condensed:wght@400;500;600;700&display=swap">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -822,7 +830,7 @@ html.scrolling .ambient{animation-play-state:paused}
 .crop{position:fixed;inset:0;z-index:61;display:grid;place-items:center;background:rgba(6,4,10,.86);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
 .crop-in{width:min(92vw,380px);display:grid;gap:14px;justify-items:center}
 .crop-stage{position:relative;width:min(82vw,320px);aspect-ratio:1;overflow:hidden;border-radius:20px;background:#000;touch-action:none;cursor:grab}
-.crop-stage img{position:absolute;left:0;top:0;transform-origin:0 0;user-select:none;-webkit-user-select:none;pointer-events:none;max-width:none}
+.crop-img{position:absolute;left:0;top:0;pointer-events:none}
 .crop-ring{position:absolute;inset:6%;border-radius:50%;box-shadow:0 0 0 999px rgba(0,0,0,.6);outline:2px solid rgba(255,255,255,.85);pointer-events:none}
 .crop-zoom{width:100%}
 .crop-row{display:flex;gap:10px;width:100%}
@@ -835,6 +843,9 @@ html.scrolling .ambient{animation-play-state:paused}
 .sc-slots.sc-moving .sc-slot:not(.filled){border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
 html,body{touch-action:pan-x pan-y}
 .crop-stage{touch-action:none}
+/* app feel: no web-style scroll bars anywhere */
+html,body,*{scrollbar-width:none;-ms-overflow-style:none}
+html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:none;width:0;height:0;background:transparent}
 /* ===== celebrations ===== */
 .cel{position:fixed;inset:0;z-index:70;display:grid;place-items:center;overflow:hidden;background:rgba(6,4,10,0);transition:background .45s ease;--cc:#ff9f0a;cursor:pointer}
 .cel.on{background:rgba(6,4,10,.78);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
@@ -1087,6 +1098,9 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
 /* dab history explorer */
 .hcard{display:grid;gap:12px}
 .hseg{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))}
+.hseg button{min-width:0;padding:7px 2px;font-size:15px;white-space:nowrap;position:relative;z-index:2}
+.seg.hseg{position:relative}
+.seg.hseg,.seg.hseg button,.seg.hseg .hz{touch-action:pan-y}
 .hhead{display:grid;grid-template-columns:40px minmax(0,1fr) 40px;align-items:center;gap:6px}
 .hnav{width:40px;height:40px;border-radius:50%;border:1px solid var(--glass-edge);background:color-mix(in srgb,var(--fg) 6%,transparent);color:var(--fg);font-size:24px;line-height:1;padding:0 0 3px}
 .hnav:active{transform:scale(.92)}
@@ -2433,7 +2447,7 @@ window.addEventListener('pageshow', ev => { if (ev.persisted && S.mode !== 'live
 
 // Bluetooth availability and remembered device
 async function bootConnection(){
-  if (!('bluetooth' in navigator)){ setConnUI('unsupported'); return; }
+  if (!('bluetooth' in navigator)){ setConnUI('unsupported'); try { window.emberSplashReady && window.emberSplashReady(); } catch(_){} return; }
   setConnUI('idle');
   try {
     if (navigator.bluetooth.getAvailability && !(await navigator.bluetooth.getAvailability())) setConnUI('btoff');
@@ -2442,12 +2456,15 @@ async function bootConnection(){
       else if (ev.value && C.state === 'btoff') setConnUI('idle');
     });
   } catch(e){}
-  if (store.autoConnect === false || !store.lastDeviceName || C.state === 'btoff') return;
+  const splashDone = () => { try { window.emberSplashReady && window.emberSplashReady(); } catch(_){} };
+  if (store.autoConnect === false || !store.lastDeviceName || C.state === 'btoff'){ splashDone(); return; }
   const canSilent = IS_PATH || navigator.bluetooth.getDevices || navigator.bluetooth.requestLEScan;
   if (canSilent){
     setConnUI('connecting', { label:'Connecting to ' + store.lastDeviceName + '…' });
+    try { window.emberSplashNote && window.emberSplashNote('Connecting to ' + store.lastDeviceName + '…'); } catch(_){}
+    setTimeout(splashDone, 3000); // don't hold the loading screen longer than this
     for (let n = 0; n < 2; n++){
-      if (await connectLast({ scan: n ? 2500 : 6000, skipCached: n === 0 })) return;
+      if (await connectLast({ scan: n ? 2500 : 6000, skipCached: n === 0 })){ splashDone(); return; }
       if (S.mode === 'live' || manualDisconnect) return;
       await sleep(1200);
     }
@@ -2457,6 +2474,7 @@ async function bootConnection(){
     return;
   }
   // otherwise ask for the last Peak by name right away
+  splashDone();
   startConnect(false, true);
 }
 
@@ -2841,7 +2859,7 @@ let view = 'home', raf = 0;
 function setHTML(el, html){ if (el && el._h !== html){ el._h = html; el.innerHTML = html; } }
 
 /* haptics: only on the moments that matter (start/stop/boost, picking a profile or vapor level, saving lights, marking cleaned) */
-const HZ_SEL = '#bStart, #bStop, #bBoost, #bCleaned, #ltSave, #homeChips .pchip, .seg.vap button, #nav > button, [data-bv], .bv-close, .crop [data-c="ok"]';
+const HZ_SEL = '#bStart, #bStop, #bBoost, #bCleaned, #ltSave, #homeChips .pchip, .seg.vap button, .seg.hseg button, #nav > button, [data-bv], .bv-close, .crop [data-c="ok"]';
 function applyHaptics(){
   if (document.documentElement.dataset.ui === 'cockpit') return;
   document.querySelectorAll(HZ_SEL).forEach(el => {
@@ -3399,52 +3417,121 @@ document.addEventListener('click', e => {
   e.stopPropagation(); openBadge(b.dataset.bv);
 }, true);
 
-/* ===== round photo cropper: drag to move, pinch or slide to zoom ===== */
-function cropAvatar(file){
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file), img = new Image();
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That picture couldn’t be opened.')); };
-    img.onload = () => {
-      const el = document.createElement('div'); el.className = 'crop';
-      el.innerHTML = `<div class="crop-in"><h3>Move and zoom</h3><small>Drag to position. Pinch or use the slider to zoom.</small>
-        <div class="crop-stage"><img alt=""><div class="crop-ring"></div></div>
-        <input type="range" class="crop-zoom" min="1" max="4" step="0.01" value="1" aria-label="Zoom">
-        <div class="crop-row"><button class="btn ghost" data-c="cancel">Cancel</button><button class="btn primary" data-c="ok">Use photo</button></div></div>`;
-      document.body.appendChild(el); applyHaptics();
-      const stage = el.querySelector('.crop-stage'), im = el.querySelector('img'), zoom = el.querySelector('.crop-zoom');
-      im.src = url;
-      const W = stage.clientWidth, ring = W * .88, ringOff = W * .06;
-      const base = ring / Math.min(img.width, img.height); // smallest scale that still fills the circle
-      let z = 1, x = (W - img.width * base) / 2, y = (W - img.height * base) / 2;
-      const clampPos = () => { const sc = base * z, w = img.width * sc, h = img.height * sc;
-        x = Math.min(ringOff, Math.max(ringOff + ring - w, x)); y = Math.min(ringOff, Math.max(ringOff + ring - h, y)); };
-      const paint = () => { clampPos(); im.style.transform = `translate(${x}px,${y}px) scale(${base * z})`; };
-      const zoomAt = (nz, cx, cy) => { nz = Math.max(1, Math.min(4, nz)); const k = nz / z; x = cx - (cx - x) * k; y = cy - (cy - y) * k; z = nz; zoom.value = z; paint(); };
-      paint();
-      const pts = new Map(); let pinch0 = 0, z0 = 1;
-      stage.addEventListener('pointerdown', e => { stage.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pts.size === 2){ const [a, b] = [...pts.values()]; pinch0 = Math.hypot(a.x - b.x, a.y - b.y); z0 = z; } });
-      stage.addEventListener('pointermove', e => {
-        const p = pts.get(e.pointerId); if (!p) return;
-        const r = stage.getBoundingClientRect();
-        if (pts.size === 1){ x += e.clientX - p.x; y += e.clientY - p.y; pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); paint(); return; }
-        pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-        const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
-        if (pinch0) zoomAt(z0 * d / pinch0, (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top);
-      });
-      const up = e => { pts.delete(e.pointerId); if (pts.size < 2) pinch0 = 0; };
-      stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
-      zoom.addEventListener('input', () => zoomAt(+zoom.value, W / 2, W / 2));
-      const done = v => { el.remove(); URL.revokeObjectURL(url); resolve(v); };
-      el.addEventListener('click', e => {
-        const c = e.target.closest('[data-c]'); if (!c) return;
-        if (c.dataset.c === 'cancel') return done(null);
-        const sc = base * z, out = document.createElement('canvas'); out.width = out.height = 256;
-        const sx = (ringOff - x) / sc, sy = (ringOff - y) / sc, sw = ring / sc;
-        out.getContext('2d').drawImage(img, sx, sy, sw, sw, 0, 0, 256, 256);
-        done(out.toDataURL('image/jpeg', .85));
-      });
+/* ===== round photo cropper: drag with momentum, pinch around your fingers, rubber-band edges, double-tap to zoom ===== */
+async function loadPhoto(file){
+  // shrink huge camera photos first: decoding a 48MP picture is slow and sometimes fails on iPhone
+  const MAX = 1600;
+  if (window.createImageBitmap){
+    try {
+      const full = await createImageBitmap(file);
+      const k = Math.min(1, MAX / Math.max(full.width, full.height));
+      if (k >= 1) return full;
+      const c = document.createElement('canvas'); c.width = Math.round(full.width * k); c.height = Math.round(full.height * k);
+      c.getContext('2d').drawImage(full, 0, 0, c.width, c.height); full.close && full.close(); return c;
+    } catch(e){}
+  }
+  return new Promise((res, rej) => { const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => { const k = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight)); const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); res(c); };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('That picture couldn’t be opened. Try a different photo.')); };
+    img.src = url; });
+}
+async function cropAvatar(file){
+  const src = await loadPhoto(file), IW = src.width, IH = src.height;
+  if (!IW || !IH) throw new Error('That picture couldn’t be opened. Try a different photo.');
+  return new Promise(resolve => {
+    const el = document.createElement('div'); el.className = 'crop';
+    el.innerHTML = `<div class="crop-in"><h3>Move and zoom</h3><small>Drag to move. Pinch or double-tap to zoom.</small>
+      <div class="crop-stage"><div class="crop-ring"></div></div>
+      <input type="range" class="crop-zoom" min="0" max="1" step="0.001" value="0" aria-label="Zoom">
+      <div class="crop-row"><button class="btn ghost" data-c="cancel">Cancel</button><button class="btn primary" data-c="ok">Use photo</button></div></div>`;
+    document.body.appendChild(el); applyHaptics();
+    const stage = el.querySelector('.crop-stage'), zoomEl = el.querySelector('.crop-zoom');
+    const cv = document.createElement('canvas'); cv.className = 'crop-img'; stage.prepend(cv);
+    const W = stage.clientWidth || 300, dpr = Math.min(3, window.devicePixelRatio || 1);
+    cv.width = Math.round(W * dpr); cv.height = Math.round(W * dpr); cv.style.width = cv.style.height = W + 'px';
+    const ctx = cv.getContext('2d'); ctx.imageSmoothingQuality = 'high';
+    const ring = W * .88, off = W * .06, base = ring / Math.min(IW, IH), ZMAX = 5;
+    let z = 1, x = (W - IW * base) / 2, y = (W - IH * base) / 2, vx = 0, vy = 0, anim = 0;
+    const bounds = () => { const w = IW * base * z, h = IH * base * z; return { minX: off + ring - w, maxX: off, minY: off + ring - h, maxY: off }; };
+    const clampIn = () => { const b = bounds(); x = Math.min(b.maxX, Math.max(b.minX, x)); y = Math.min(b.maxY, Math.max(b.minY, y)); };
+    const draw = () => { ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, W); ctx.drawImage(src, x, y, IW * base * z, IH * base * z); };
+    const rubber = (v, lo, hi) => v < lo ? lo - Math.pow(lo - v, .7) : v > hi ? hi + Math.pow(v - hi, .7) : v; // resist past the edge
+    const syncSlider = () => { zoomEl.value = (Math.log(Math.max(1, Math.min(ZMAX, z))) / Math.log(ZMAX)).toFixed(3); };
+    const zoomAround = (nz, cx, cy, soft) => {
+      nz = soft ? (nz < 1 ? 1 - (1 - nz) * .35 : nz > ZMAX ? ZMAX + (nz - ZMAX) * .35 : nz) : Math.max(1, Math.min(ZMAX, nz));
+      const k = nz / z; x = cx - (cx - x) * k; y = cy - (cy - y) * k; z = nz; };
+    // settle after letting go: spring back inside the edges and glide with leftover speed
+    const settle = () => {
+      cancelAnimationFrame(anim);
+      const step = () => {
+        if (z < 1 || z > ZMAX){ const t = z < 1 ? 1 : ZMAX; const nz = z + (t - z) * .25; zoomAround(Math.abs(t - nz) < .002 ? t : nz, W / 2, W / 2, true); }
+        x += vx; y += vy; vx *= .92; vy *= .92;
+        const b = bounds();
+        if (x > b.maxX){ x += (b.maxX - x) * .22; vx *= .5; } else if (x < b.minX){ x += (b.minX - x) * .22; vx *= .5; }
+        if (y > b.maxY){ y += (b.maxY - y) * .22; vy *= .5; } else if (y < b.minY){ y += (b.minY - y) * .22; vy *= .5; }
+        draw(); syncSlider();
+        const out = x > b.maxX + .3 || x < b.minX - .3 || y > b.maxY + .3 || y < b.minY - .3 || z < 1 || z > ZMAX;
+        if (out || Math.abs(vx) > .1 || Math.abs(vy) > .1) anim = requestAnimationFrame(step); else { clampIn(); draw(); }
+      };
+      anim = requestAnimationFrame(step);
     };
-    img.src = url;
+    // smooth animated zoom for double-tap
+    const animateZoom = (target, cx, cy) => {
+      cancelAnimationFrame(anim); vx = vy = 0;
+      const tick = () => { const nz = z + (target - z) * .2; zoomAround(Math.abs(target - nz) < .003 ? target : nz, cx, cy); clampIn(); draw(); syncSlider();
+        if (z !== target) anim = requestAnimationFrame(tick); };
+      anim = requestAnimationFrame(tick);
+    };
+    draw();
+    const pts = new Map(); let last = null, pinch = null, lastTap = 0, hist = [];
+    const local = ev => { const r = stage.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
+    stage.addEventListener('pointerdown', ev => {
+      ev.preventDefault(); try { stage.setPointerCapture(ev.pointerId); } catch(_){} cancelAnimationFrame(anim); vx = vy = 0;
+      pts.set(ev.pointerId, local(ev));
+      if (pts.size === 1){
+        const now = Date.now(), p = pts.get(ev.pointerId);
+        if (now - lastTap < 280){ animateZoom(z < 2 ? Math.min(ZMAX, z * 2.2) : 1, p.x, p.y); lastTap = 0; pts.clear(); return; }
+        lastTap = now; last = p; hist = [{ x: p.x, y: p.y, t: performance.now() }];
+      }
+      if (pts.size === 2){ const [a, b] = [...pts.values()]; pinch = { d: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), z, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; last = null; }
+    });
+    stage.addEventListener('pointermove', ev => {
+      if (!pts.has(ev.pointerId)) return;
+      const p = local(ev); pts.set(ev.pointerId, p);
+      if (pts.size >= 2 && pinch){
+        const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        x += mx - pinch.mx; y += my - pinch.my; pinch.mx = mx; pinch.my = my; // move with your fingers
+        zoomAround(pinch.z * d / pinch.d, mx, my, true);                     // and zoom around them
+      } else if (last){
+        const b = bounds();
+        x = rubber(x + (p.x - last.x), b.minX, b.maxX); y = rubber(y + (p.y - last.y), b.minY, b.maxY); last = p;
+        hist.push({ x: p.x, y: p.y, t: performance.now() }); if (hist.length > 5) hist.shift();
+      }
+      draw(); syncSlider();
+    });
+    const up = ev => {
+      if (!pts.has(ev.pointerId)) return;
+      pts.delete(ev.pointerId);
+      if (pts.size === 1){ const p = [...pts.values()][0]; last = p; pinch = null; hist = [{ x: p.x, y: p.y, t: performance.now() }]; return; }
+      if (pts.size === 0){
+        if (hist.length > 1){ const a = hist[0], b = hist[hist.length - 1], dt = Math.max(16, b.t - a.t); if (performance.now() - b.t < 80){ vx = (b.x - a.x) / dt * 16; vy = (b.y - a.y) / dt * 16; } }
+        last = null; pinch = null; settle();
+      }
+    };
+    stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
+    stage.addEventListener('wheel', ev => { ev.preventDefault(); const p = local(ev); cancelAnimationFrame(anim); zoomAround(z * Math.exp(-ev.deltaY * .002), p.x, p.y); clampIn(); draw(); syncSlider(); }, { passive: false });
+    zoomEl.addEventListener('input', () => { cancelAnimationFrame(anim); zoomAround(Math.pow(ZMAX, +zoomEl.value), W / 2, W / 2); clampIn(); draw(); });
+    const done = v => { cancelAnimationFrame(anim); el.remove(); try { src.close && src.close(); } catch(_){} resolve(v); };
+    el.addEventListener('click', ev => {
+      const c = ev.target.closest('[data-c]'); if (!c) return;
+      if (c.dataset.c === 'cancel') return done(null);
+      clampIn();
+      const sc = base * z, out = document.createElement('canvas'); out.width = out.height = 320;
+      const o = out.getContext('2d'); o.imageSmoothingQuality = 'high';
+      o.drawImage(src, (off - x) / sc, (off - y) / sc, ring / sc, ring / sc, 0, 0, 320, 320);
+      done(out.toDataURL('image/jpeg', .86));
+    });
   });
 }
 
@@ -3505,7 +3592,7 @@ function drawLeaderboard(){
     el.innerHTML = `<div class="row between"><span class="label">Leaderboard</span>${L.joined ? '<button class="btn small ghost" id="lbCancel">Cancel</button>' : ''}</div>
       <p class="muted" style="margin:0;font-size:14px">${L.joined ? 'Edit your profile.' : 'Show your rank to everyone using Emberline. Pick a username and a picture.'}</p>
       <div class="lb-form">
-        <label class="lb-pic" for="lbPic">${LB.avatar ? `<img class="lb-av" src="${LB.avatar}" alt="" style="width:64px;height:64px">` : lbAvatar(me.avatar_url, me.username || L.username, 64)}<span>Photo</span><input type="file" id="lbPic" accept="image/*" hidden></label>
+        <label class="lb-pic" for="lbPicFile">${LB.avatar ? `<img class="lb-av" src="${LB.avatar}" alt="" style="width:64px;height:64px">` : lbAvatar(me.avatar_url, me.username || L.username, 64)}<span>Photo</span></label>
         <input type="text" id="lbName" maxlength="20" placeholder="Username" autocomplete="nickname" value="${esc(me.username || L.username || '')}">
       </div>
       <p class="muted" style="margin:0;font-size:13px">Tied to your Puffco login${acct() && acct().email ? ` (${esc(acct().email)})` : ''}. Sign in with it on any phone and your profile comes back. Usernames are one per person.</p>
@@ -3547,10 +3634,15 @@ document.addEventListener('click', e => {
   const pk = e.target.closest('[data-sck]'); if (pk && !pk.disabled){ const k = pk.dataset.sck, i = LB.pick.indexOf(k); if (i >= 0) LB.pick.splice(i, 1); else if (LB.pick.length < 3) LB.pick.push(k); keepName(); return; }
   const row = e.target.closest('[data-lbi]'); if (row && LB.rows){ const r = LB.rows[+row.dataset.lbi]; if (r) openPlayer(r); }
 });
-document.addEventListener('change', async e => {
-  if (e.target.id !== 'lbPic') return; const f = e.target.files[0]; if (!f) return;
-  e.target.value = ''; // let the same photo be picked again
-  try { const v = await cropAvatar(f); if (!v) return; LB.avatar = v; LB.err = ''; } catch(err){ LB.err = err.message; }
+// the photo picker input lives outside the leaderboard card: the card redraws every 30s, and a redraw while
+// the iPhone photo picker was open threw away the chosen picture
+const lbPicFile = (() => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.id = 'lbPicFile'; i.hidden = true; document.body.appendChild(i); return i; })();
+let lbPicBusy = false;
+lbPicFile.addEventListener('change', async () => {
+  const f = lbPicFile.files && lbPicFile.files[0]; if (!f || lbPicBusy) return;
+  lbPicBusy = true;
+  try { const v = await cropAvatar(f); if (v){ LB.avatar = v; LB.err = ''; } } catch(err){ LB.err = err.message; }
+  finally { lbPicBusy = false; lbPicFile.value = ''; } // reset after, so the same photo can be picked again
   const keep = $('#lbName') && $('#lbName').value; drawLeaderboard(); if (keep != null && $('#lbName')) $('#lbName').value = keep;
 });
 // your Emberline profile lives on the server, keyed to your Puffco account: sign in on any phone or link and it comes back
@@ -3660,7 +3752,7 @@ function show(v){
 $('#nav').addEventListener('click', e => { const b = e.target.closest('button'); if (b) show(b.dataset.v); });
 
 /* ===== liquid glass drag ===== */
-const GD_HOSTS = [ ['#nav', 'button'], ['#homeChips', '.pchip'], ['.seg.vap', 'button'] ];
+const GD_HOSTS = [ ['#nav', 'button'], ['#homeChips', '.pchip'], ['.seg.vap', 'button'], ['.seg.hseg', 'button'] ];
 let gdSynthetic = false, gdSwallowUntil = 0, gdSwallowHost = null;
 document.addEventListener('click', e => {
   if (gdSynthetic || Date.now() > gdSwallowUntil || !gdSwallowHost) return;
@@ -4903,7 +4995,8 @@ function histBars(bars){
   });
   return svg + '</svg>';
 }
-function drawHistory(dir){
+function drawHistory(dir){ drawHistoryInner(dir); applyHaptics(); }
+function drawHistoryInner(dir){
   const el = $('#histCard'); if (!el) return;
   const md = histModel(), lv = ['day','week','month','year','all'];
   const crumbs = []; const at = new Date(HV.at);
