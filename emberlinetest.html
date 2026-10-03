@@ -2603,7 +2603,7 @@ function hitSample(v, now){
   // learn the resting level only from quiet samples, so a pull that's already going when Ready hits still counts
   if (!HIT.on){ const b = HIT.base || HIT_IDLE; if (v < b + .05) HIT.base = Math.min(.08, b * .9 + v * .1); }
   const up = Math.max(.12, HIT.base + .1), down = Math.max(.06, HIT.base + .04);
-  if (S.state !== 8){ render(); return; } // preheating: just learning the resting level
+  if (S.state !== 8){ if (HIT.on){ HIT.on = false; const secs = (now - HIT.start) / 1000; if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); if (cur) cur.hits = HIT.hits.slice(); } } render(); return; } // not Ready: close any hit that was still open
   if (!HIT.on && v >= up){ HIT.on = true; HIT.start = now + HIT_DELAY; HIT.peak = v; HIT.party = false; buzz(15); }
   else if (HIT.on){
     HIT.peak = Math.max(HIT.peak, v); HIT.live = Math.max(0, (now - HIT.start) / 1000);
@@ -2667,6 +2667,8 @@ function hitLoopStart(){
         else if (!HIT.on && Math.abs(v - HIT.pbase) < .02) HIT.pbase = HIT.pbase * .97 + v * .03;                    // drift slowly when quiet
         v = Math.abs(v - HIT.pbase) * 4;
       }
+      // Proxy: the inhale reading only counts while dynamic inhale is live (dia > 0). Otherwise dif freezes on its last value.
+      if (isFinite(v) && isProxy() && !store.inhOld){ let a = 1; try { a = await ble.f32('/p/app/led/dia'); } catch(e){} if (!(a > 0)) v = 0; }
       if (isFinite(v)) hitSample(clamp(v, 0, 1), performance.now());
     }
     catch(e){ if (e && e.status){ HIT.supported = false; hitLoopStop(); } }
