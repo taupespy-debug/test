@@ -1680,6 +1680,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
       <button class="btn small primary" id="tbProxyLab">Proxy test section</button>
       <button class="btn small" id="tbInspect">Device inspector (connect first)</button>
       <button class="btn small" id="tbColorTest">Proxy color write test (connect first)</button>
+      <button class="btn small" id="tbMoodTest">Proxy mood test (connect first)</button>
       <div class="row" style="gap:6px"><span class="muted" style="font-size:13px;width:100%">Light test: tap each, tell Claude which turned the light red</span><button class="btn small" data-lt="a">A: new format</button><button class="btn small" data-lt="b">B: old format</button><button class="btn small" data-lt="c">C: clear</button><button class="btn small" data-lt="d">D: own light red</button><button class="btn small" data-lt="e">E: other clear</button></div>
     </div>
     <div class="card" id="looksCard" style="display:grid;gap:10px" hidden>
@@ -2234,12 +2235,16 @@ function cbor(v){
     else if (typeof x === 'boolean'){ out.push(x ? 0xf5 : 0xf4); }
     else if (x === null || x === undefined){ out.push(0xf6); }
     else if (typeof x === 'number' && !Number.isInteger(x)){
-      if (Math.fround(x) === x){ const b = new Uint8Array(4); new DataView(b.buffer).setFloat32(0, x); out.push(0xfa, ...b); }
+      if (Math.fround(x) === x && !cbor.f64){ const b = new Uint8Array(4); new DataView(b.buffer).setFloat32(0, x); out.push(0xfa, ...b); }
       else { const b = new Uint8Array(8); new DataView(b.buffer).setFloat64(0, x); out.push(0xfb, ...b); }
     }
     else if (typeof x === 'number'){ x >= 0 ? head(0, x) : head(1, -1 - x); }
     else if (typeof x === 'string'){ const b = enc.encode(x); head(3, b.length); out.push(...b); }
     else if (Array.isArray(x)){ head(4, x.length); x.forEach(w); }
+    else if (x instanceof Map){
+      const keys = [...x.keys()].map(k => ({k, b: cbor(k)})).sort((a,b) => a.b.length - b.b.length || cmpBytes(a.b, b.b));
+      head(5, keys.length); keys.forEach(({k,b}) => { out.push(...b); w(x.get(k)); });
+    }
     else {
       const keys = Object.keys(x).map(k => ({k, b: cbor(k)}))
         .sort((a,b) => a.b.length - b.b.length || cmpBytes(a.b, b.b));
@@ -2248,6 +2253,40 @@ function cbor(v){
   };
   w(v); return new Uint8Array(out);
 }
+/* Proxy ("toad") light format, matched to the official Puffco web app: number keys instead of names,
+   and decimals scaled to whole numbers. {0:{0:<lamp id>, 1:<params>}, 1:<meta>} */
+const Toad = (() => {
+  const k = (key, sc, opt) => ({ key, opt, f: v => typeof v === 'number' ? Math.round(v * sc) : v });
+  const P = (key, a, b) => ({ key, f: v => Array.isArray(v) ? v.map(e => [Math.round(e[0] * a), Math.round(e[1] * b)]) : v });
+  const O = (key, sub) => ({ key, f: v => Array.isArray(v) ? v.map(e => apply(e, sub)) : v });
+  const V = { posXMin:k(0,16384,1), posXMax:k(1,16384,1), posYMin:k(2,16384), posYMax:k(3,16384), minRad:k(4,16384), maxRad:k(5,16384), period:k(6,32768), attack:k(7,32768), velXMin:k(8,4096,1), velXMax:k(9,4096,1), velYMin:k(10,4096,1), velYMax:k(11,4096,1) };
+  const M = { aX:k(0,16384), aY:k(1,16384), bX:k(2,16384), bY:k(3,16384), elast:k(4,256), exProb:k(5,256), exPkRdSc:k(6,256), exAtkTm:k(7,32768), exDecTm:k(8,32768) };
+  const PP = { constX:P(0,16384,512), constY:P(1,16384,512), brownX:P(2,16384,512), brownY:P(3,16384,512), visc:k(4,256), spawn:{ key:5, sub:V }, terminal:O(6,M), bgBright:k(7,256), partSoft:k(8,256), partToon:k(9,256), prNvRdSc:k(10,256), repuls:k(11,256), minQty:{ key:12 }, maxQty:{ key:13 }, prnDecTm:k(14,32768), colorByY:k(15,256) };
+  const LAMPS = {
+    pikaled2: { id:0, map:{ bright:{key:0}, speed:k(1,16), anim:{key:2}, plNum:{key:3}, plDenom:{key:4}, offset:{key:5}, color:{key:6}, colorLen:{key:7}, speedDi0:k(8,16,1), speedDi1:k(9,16,1), diFrac:k(10,256,1) } },
+    solid: { id:1, map:{ color:{key:0} } },
+    partphy2: { id:2, map:{ nonDi:{key:0,sub:PP}, di0:{key:1,sub:PP}, di1:{key:2,sub:PP}, colors:{key:3}, diFrac:k(4,256), boxBot:k(5,16384), boxTop:k(6,16384), blendClr:k(7,1) } }
+  };
+  const META = { version:{key:1}, moodName:{key:2}, moodType:{key:4}, userColors:{ key:9, f: v => Array.isArray(v) ? MoodEngine.packRgb(v.map(c => typeof c === 'string' ? c : '#' + [...c].map(x => x.toString(16).padStart(2, '0')).join(''))) : v }, bgBright:k(10,32768), density:k(11,4096), dynamicInhale:k(12,32768), tempoFrac:k(13,32768) };
+  function apply(obj, map){
+    const m = new Map();
+    for (const [name, spec] of Object.entries(map)){
+      if (!(name in obj) || obj[name] == null) continue;
+      const v = obj[name];
+      m.set(spec.key, spec.sub ? apply(v, spec.sub) : spec.f ? spec.f(v) : v);
+    }
+    return m;
+  }
+  function encode(lamp, meta){
+    const L = LAMPS[lamp.name]; if (!L) throw new Error('No Proxy version of ' + lamp.name);
+    const root = new Map([[0, new Map([[0, L.id], [1, apply(lamp.param, L.map)]])]]);
+    if (meta){ const mm = {}; for (const key in meta) if (key !== 'userColors' || Array.isArray(meta[key])) mm[key] = meta[key]; root.set(1, apply(mm, META)); }
+    const b = cbor(root); b.native = true; return b;
+  }
+  return { encode };
+})();
+// a light pattern as bytes for whichever device is connected
+const lampBlob = (lamp, meta) => isProxy() ? Toad.encode(lamp, meta) : cbor(meta ? { lamp, meta } : { lamp });
 function cborDecode(buf){
   let i = 0; const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const len = ai => ai < 24 ? ai : ai === 24 ? buf[i++] : ai === 25 ? (i += 2, dv.getUint16(i-2)) : ai === 26 ? (i += 4, dv.getUint32(i-4)) : ai === 27 ? (i += 8, Number(dv.getBigUint64(i-8))) : -1;
@@ -2575,7 +2614,7 @@ setInterval(() => { if (S.state === 8) checkWarn(); }, 500);
 const DISCO_MS = 10000;
 function bigHit(){
   blinker(+store.bigHitSecs || 8);
-  if (S.mode !== 'live' || isProxy()) return; // Disco on the Proxy waits until its light format is confirmed
+  if (S.mode !== 'live') return;
   const disco = MOODS.excl.find(x => /disco/i.test(x.name));
   let blob = null; try { blob = S.api === 2 ? '#ff00ff' : disco ? moodPayload({ kind:'excl', id: disco.id, name: disco.name }) : null; } catch(e){}
   if (!blob) return;
@@ -4657,7 +4696,7 @@ function keepOpenNotice(){
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
   el.querySelector('#koOk').onclick = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
 }
-setTimeout(() => { const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; const pl = $('#tbProxyLab'); if (pl) pl.onclick = proxyLab; const ct = $('#tbColorTest'); if (ct) ct.onclick = colorTest; }, 0);
+setTimeout(() => { const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; const pl = $('#tbProxyLab'); if (pl) pl.onclick = proxyLab; const ct = $('#tbColorTest'); if (ct) ct.onclick = colorTest; const mt = $('#tbMoodTest'); if (mt) mt.onclick = moodTest; }, 0);
 // test build: one place to check everything on a Proxy, with live raw readings
 function proxyLab(){
   if (document.querySelector('.plab')) return;
@@ -4719,6 +4758,31 @@ document.addEventListener('click', async e => { const b = e.target.closest('[dat
 });
 // test build: read a bunch of device values raw so we can see how this device stores them
 // test build: try every way of saving a color on the Proxy and read it back, so we see which one sticks
+// test build: send real Puffco Proxy moods as previews in a few different ways, to find the one the Proxy plays
+async function moodTest(){
+  if (S.mode !== 'live'){ toast('Connect your device first'); return; }
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:86vh;overflow:auto;text-align:left;justify-items:stretch"><h2>Mood test</h2><p id="mtStat">Each step plays for 4 seconds. Watch the Proxy and note which steps animate.</p><pre id="mtOut" style="margin:0;font:11px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;color:var(--fg)"></pre><button class="btn primary" id="mtCopy">Copy results</button><button class="btn" id="mtClose">Close</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
+  let stop = false; el.querySelector('#mtClose').onclick = () => { stop = true; el.remove(); };
+  const L = [`series=${S.series} variant=${ledVariant()}`], out = () => { el.querySelector('#mtOut').textContent = L.join('\n'); };
+  const clear = async () => { try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(_){ try { await ble.write('/p/app/led/pclr', new Uint8Array(0)); } catch(e){} } };
+  const moods = [['Fade', { kind:'tpl', tag:'pikaled2-fade-mood-light', name:'Fade', meta:{} }], ['Spin', { kind:'tpl', tag:'pikaled2-spin-mood-light', name:'Spin', meta:{} }], ['Confetti', { kind:'tpl', tag:'migration-confetti-mood-light', name:'Confetti', meta:{} }]];
+  let step = 0;
+  for (const [mn, ref] of moods){
+    for (const [en, f64, withMeta] of [['normal', false, true], ['float64', true, true], ['lamp only', false, false]]){
+      if (stop) return; step++;
+      let blob; try { cbor.f64 = f64; const lamp = moodLamp(ref); blob = withMeta ? moodPayload(ref) : cbor({ lamp }); } catch(e){ L.push(`${step}. ${mn} ${en}: build ERR ${e.message}`); out(); continue; } finally { cbor.f64 = false; }
+      for (const [wn, fn] of [['blob', () => ble.writeBlob('/p/app/led/pclr', blob)], ['legacy', () => ble.writeBlobLegacy('/p/app/led/pclr', blob)]]){
+        let res = 'ok'; try { await fn(); } catch(e){ res = 'ERR ' + (e.message || e); }
+        L.push(`${step}${wn === 'blob' ? 'a' : 'b'}. ${mn} ${en} ${wn} (${blob.length}b): ${res}`); el.querySelector('#mtStat').textContent = `Now showing step ${step}${wn === 'blob' ? 'a' : 'b'}: ${mn} ${en} ${wn}`; out();
+        await sleep(4000); await clear(); await sleep(600);
+      }
+    }
+  }
+  el.querySelector('#mtStat').textContent = 'Done. Tell Claude which step numbers animated, then tap Copy and paste.';
+  el.querySelector('#mtCopy').onclick = async () => { try { await navigator.clipboard.writeText(L.join('\n')); toast('Copied'); } catch(e){ const r = document.createRange(); r.selectNodeContents(el.querySelector('#mtOut')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected, tap Copy'); } };
+}
 async function colorTest(){
   if (S.mode !== 'live'){ toast('Connect your device first'); return; }
   const el = document.createElement('div'); el.className = 'egg';
@@ -5425,7 +5489,6 @@ const ZFX_ANIM = ['pulse','fade','rainbow','flicker','strobe'];
 function zoneLiveStart(meta, quiet){
   if (S.mode !== 'live'){ if (!quiet) needLive('preview zones'); return false; }
   if (S.api === 2) return false;
-  if (isProxy()){ if (!quiet) toast('Live zones on the Proxy are coming soon.'); return false; }
   zoneLive.meta = meta; zoneLive.t0 = performance.now(); clearTimeout(previewTimer);
   if (zoneLive.on) return true;
   zoneLive.on = true; zoneLive.lastKey = ''; zoneLive.fails = 0;
@@ -5441,7 +5504,7 @@ function zoneLiveStart(meta, quiet){
     const anim = k < 1 || m.zones.some(z => ZFX_ANIM.includes(z.fx)), key = cols.join();
     if (!anim && key === zoneLive.lastKey) return;   // nothing changed, don't spam the Peak
     zoneLive.lastKey = key; zoneLive.busy = true;
-    ledJob(() => ble.writeBlob('/p/app/led/pclr', cbor({ lamp: zoneLampFromColors(cols) })).then(() => { zoneLive.fails = 0; }, () => { if (++zoneLive.fails > 8) zoneLiveStop(true); })).finally(() => { zoneLive.busy = false; });
+    ledJob(() => ble.writeBlob('/p/app/led/pclr', lampBlob(zoneLampFromColors(cols))).then(() => { zoneLive.fails = 0; }, () => { if (++zoneLive.fails > 8) zoneLiveStop(true); })).finally(() => { zoneLive.busy = false; });
   }, 60);
   return true;
 }
@@ -5460,7 +5523,7 @@ function ltCanShow(){ return S.mode === 'live' && !(S.state >= 7 && S.state <= 9
 function ltWrite(blobOrHex){ if (!ltCanShow()) return; clearTimeout(previewTimer); ledJob(() => previewWrite(blobOrHex).catch(() => {})); }
 // the Proxy only takes solid colors so far, so a mood shows as its main color there
 function moodSolid(ref){ try { const mc = moodColors(ref).filter((c, k, a) => a.indexOf(c) === k); return pickAccent(mc) || mc[0] || '#ffffff'; } catch(e){ return '#ffffff'; } }
-function ltShowRef(ref){ let blob; try { blob = isProxy() ? moodSolid(ref) : S.api === 2 ? (moodColors(ref)[0] || '#ffffff') : moodPayload(ref); } catch(e){ return; } ltWrite(blob); }
+function ltShowRef(ref){ let blob; try { blob = S.api === 2 ? (moodColors(ref)[0] || '#ffffff') : moodPayload(ref); } catch(e){ return; } ltWrite(blob); }
 function ltShowCurrent(){
   if (!LT.on || !ltCanShow()) return;
   if (LT.pending) return ltShowRef(LT.pending);
@@ -5472,7 +5535,6 @@ function ltShowCurrent(){
     let blob = null;
     if (S.api !== 2){ try { const r = await ble.readAll(`/u/app/hc/${t}/colr`); if (r.length > 8 && (r[0] & 0xe0) === 0xa0){ blob = r; if (isProxy()) blob.native = true; } } catch(e){} }
     const p = S.profiles[t] || {};
-    if (!blob && isProxy()) blob = p.color || '#ffffff';
     if (!blob){ blob = p.color || '#ffffff'; if (p.mood && S.api !== 2){ try { blob = moodPayload(p.mood); } catch(e){} } }
     try { await previewWrite(blob); } catch(e){}
   });
@@ -5529,7 +5591,7 @@ const INTRO_ZONES = { motion:'still', tempoFrac:.5, zones:[
 const INTRO_PROXY = { motion:'still', tempoFrac:.5, zones: Array.from({ length: 6 }, () => ({ c:'#ffffff', c2:'#64007d', fx:'fade', sp:.25, bias:.25 })) }; // Proxy ring: purple, with a white sweep going around
 let introDone = false;
 function connectIntro(){
-  if (introDone || S.mode !== 'live' || S.api === 2 || isProxy() || // Proxy: off until its light format is confirmed
+  if (introDone || S.mode !== 'live' || S.api === 2 ||
       (S.state >= 7 && S.state <= 9) || zoneLive.on) return;
   introDone = true;
   const meta = JSON.parse(JSON.stringify(isProxy() ? INTRO_PROXY : INTRO_ZONES));
@@ -5558,6 +5620,7 @@ function moodPayload(ref){
   const m = ref.kind === 'excl' ? { userColors: (MOODS.excl.find(e => e.id === ref.id) || {}).colors } : (ref.meta || {});
   if (m.userColors) meta.userColors = m.userColors.map(h => MoodEngine.packRgb([h]));
   for (const k of ['tempoFrac','density','dynamicInhale']) if (typeof m[k] === 'number') meta[k] = m[k];
+  if (isProxy()){ const mm = Object.assign({}, meta); if (m.userColors) mm.userColors = m.userColors.slice(); return lampBlob(lamp, mm); }
   return cbor({ lamp, meta });
 }
 function moodSpeed(ref){
@@ -5572,13 +5635,6 @@ function swatchStyle(ref){
 }
 async function writeMoodTo(target, ref){
   const name = ref.name || 'Mood';
-  if (isProxy() && S.mode === 'live'){ // Proxy: solid colors only for now (it rejects the Peak mood format)
-    const hex = moodSolid(ref);
-    if (target === 'lantern'){ store.lanternMood = null; store.lantern = hex; save(); await writeLanternColor(hex); await ble.write('/p/app/ltrn/cmd', new Uint8Array([1])); S.lantern = true; toast(`Lantern set to ${name}'s color`); drawLightsState(); return; }
-    const p = S.profiles[target]; p.mood = null; p.color = hex; p.pal = [hex];
-    try { await writeProfileColor(target, hex); toast(`${p.name} set to ${name}'s color. Animated moods on the Proxy are coming soon.`); } catch(e){ toast('Color write failed: ' + e.message); }
-    render(); return;
-  }
   if (target === 'lantern'){
     store.lanternMood = ref; save();
     if (!needLive('light the lantern')) return;
@@ -5600,7 +5656,7 @@ async function writeMoodTo(target, ref){
 }
 function previewMood(ref, ms){
   if (S.mode !== 'live' || (S.state >= 7 && S.state <= 9)) return;
-  let blob; try { blob = isProxy() ? moodSolid(ref) : S.api === 2 ? (moodColors(ref)[0] || '#ffffff') : moodPayload(ref); } catch(e){ return; }
+  let blob; try { blob = S.api === 2 ? (moodColors(ref)[0] || '#ffffff') : moodPayload(ref); } catch(e){ return; }
   clearTimeout(previewTimer);
   ledJob(() => previewWrite(blob).catch(() => {}));
   previewTimer = setTimeout(() => ledJob(previewClear), ms || 4000);
@@ -5776,7 +5832,7 @@ function drawMoodEditor(){
 }
 let edLiveT = null, edLiveOn = false;
 function edLivePreview(){
-  if (!ed || S.mode !== 'live' || S.api === 2 || isProxy()) return;
+  if (!ed || S.mode !== 'live' || S.api === 2) return;
   if (S.state >= 7 && S.state <= 9) return;
   clearTimeout(edLiveT);
   edLiveT = setTimeout(() => {
