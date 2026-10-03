@@ -2503,6 +2503,7 @@ let hcsHold = 0;
 let ledChain = Promise.resolve(), previewTimer = null;
 function ledJob(fn){ const p = ledChain.then(fn, fn); ledChain = p.catch(() => {}); return p; }
 async function previewWrite(blobOrHex){
+  if (isProxy() && !(blobOrHex && blobOrHex.native)) return; // the Proxy rejects Peak-style light data, only replay its own
   if (S.api === 2){ await ble.write('/p/app/led/pclr', rgbt(typeof blobOrHex === 'string' ? blobOrHex : '#ffffff')); return; }
   await ble.writeBlob('/p/app/led/pclr', typeof blobOrHex === 'string' ? solidPayload(blobOrHex) : blobOrHex);
 }
@@ -2523,14 +2524,15 @@ function flashPeak(hex, times){
   });
 }
 function previewProfile(i){
-  if (S.mode !== 'live' || store.selFlash === false || isProxy()) return; // the Proxy shows its own profile light already
+  if (S.mode !== 'live' || store.selFlash === false) return;
   if (S.state >= 7 && S.state <= 9) return;
   const p = S.profiles[i];
   clearTimeout(previewTimer);
   ledJob(async () => {
     // show exactly what this profile has on the Peak: read its saved light and play it on the preview channel
     let blob = null;
-    if (S.api !== 2){ try { const r = await ble.readAll(`/u/app/hc/${i}/colr`); if (r.length > 8 && (r[0] & 0xe0) === 0xa0) blob = r; } catch(e){} }
+    if (S.api !== 2){ try { const r = await ble.readAll(`/u/app/hc/${i}/colr`); if (r.length > 8 && (r[0] & 0xe0) === 0xa0){ blob = r; blob.native = true; } } catch(e){} }
+    if (!blob && isProxy()) return; // couldn't read the Proxy's own light, leave it alone
     if (!blob){ blob = p.color || '#ffffff'; if (p.mood && S.api !== 2){ try { blob = moodPayload(p.mood); } catch(e){} } }
     try { await previewWrite(blob); } catch(e){}
   });
@@ -2684,6 +2686,7 @@ function flashHeatCycle(hex, times){
   if (S.mode !== 'live') return Promise.resolve();
   if (!(S.state >= 7 && S.state <= 9)) return flashPeak(hex, times);
   if (discoRestore) return Promise.resolve(); // Disco is showing, leave it
+  if (isProxy()) return Promise.resolve(); // waits on the Proxy light format
   return ledJob(async () => {
     try {
       if (S.api === 2){
@@ -3099,6 +3102,7 @@ async function saveProfile(i){
     await ble.wf32(`/u/app/hc/${i}/time`, p.time);
     try { await ble.wf32(`/u/app/hc/${i}/btmp`, p.boostF * 5 / 9); await ble.wf32(`/u/app/hc/${i}/btim`, p.boostT); } catch(e){ toast('Boost settings not supported on this firmware'); }
     try { await ble.wf32(`/u/app/hc/${i}/intn`, p.vapor); } catch(e){}
+    if (p.lightDirty && isProxy()){ p.lightDirty = false; toast('Saved. Custom lights on the Proxy are coming soon, so its lights were left as is.'); }
     if (p.lightDirty){
       if (p.mood && S.api !== 2){ const blob = moodPayload(p.mood); await ble.writeBlob(`/u/app/hc/${i}/colr`, blob); if (S.active === i){ try { await ble.writeBlob('/p/app/thc/colr', blob); } catch(e){} } }
       else await writeProfileColor(i, p.color);
@@ -3110,6 +3114,7 @@ async function saveProfile(i){
   } catch(e){ toast('Save failed: ' + e.message); }
 }
 async function writeProfileColor(i, hex){
+  if (isProxy()) return; // Proxy light format not supported yet
   if (S.api === 2){
     await ble.write(`/u/app/hc/${i}/colr`, rgbt(hex));
     for (const s of ['phcl','accl']){ try { await ble.write(`/u/app/hc/${i}/${s}`, rgbt(hex)); } catch(e){} }
@@ -3129,6 +3134,7 @@ async function setLantern(on){
   } catch(e){ toast('Lantern failed: '+e.message); }
 }
 async function writeLanternColor(hex){
+  if (isProxy()) return; // keep the Proxy's own lantern color
   if (S.api === 2) await ble.write('/p/app/ltrn/colr', rgbt(hex));
   else await ble.writeBlob('/p/app/ltrn/colr', solidPayload(hex));
 }
@@ -3162,6 +3168,7 @@ async function applyScheme(sc){
   sc.c.forEach((c,i) => { S.profiles[i].color = c; S.profiles[i].mood = null; });
   render();
   if (S.mode !== 'live'){ toast(`${sc.n} saved here. Connect to send it to your Peak.`); return; }
+  if (isProxy()){ toast('Color schemes on the Proxy are coming soon.'); return; }
   toast(`Writing ${sc.n} to your Peak…`);
   try { for (let i=0;i<4;i++) await writeProfileColor(i, sc.c[i]); if (S.lantern) await writeLanternColor(store.lantern); toast(`${sc.n} applied`); }
   catch(e){ toast('Color write failed: '+e.message); }
@@ -3982,8 +3989,8 @@ function myGear(){
   try { devList().forEach(d => { const k = d.series === 'toad' ? 'proxy' : 'peak' + (d.edition ? ':' + String(d.edition).replace(/[^A-Za-z0-9 ]/g, '').slice(0, 24) : ''); if (!out.includes(k)) out.push(k); }); } catch(e){}
   return out.slice(0, 6);
 }
-function gearHtml(list){
-  if (!list || !list.length) return '';
+function gearHtml(list, empty){
+  if (!list || !list.length) return empty ? '<div class="gear"><span class="label">Gear</span><span class="muted" style="font-size:13px">Not shared yet</span></div>' : '';
   const ic = k => k === 'proxy'
     ? '<svg viewBox="0 0 24 24"><path d="M10 3h4l1 5H9z"/><rect x="7" y="8" width="10" height="3" rx="1"/><rect x="7" y="11" width="10" height="10" rx="3"/></svg>'
     : '<svg viewBox="0 0 24 24"><path d="M10 2h4v9h-4z"/><path d="M8 11h8l1 3H7z"/><rect x="6" y="14" width="12" height="8" rx="2"/></svg>';
@@ -4064,13 +4071,16 @@ function openPlayer(r){
     <div class="lbp-head">${lbAvatar(r.avatar_url, r.username, 96)}<b>${esc(r.username)}${r.dev ? devBadge(26) : ''}</b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
       <div class="soc-counts"><span><b data-cnt="followers">–</b> followers</span><span><b data-cnt="following">–</b> following</span></div></div>
     ${r.bio ? `<p class="soc-bio">${esc(r.bio)}</p>` : ''}
-    ${gearHtml(LB.me && r.id === LB.me.id ? myGear() : r.gear)}
+    <div id="lbpGear">${gearHtml(isMe ? myGear() : r.gear, true)}</div>
     ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, r)}">${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}
     ${isMe ? '' : meId ? `<button class="btn soc-follow" data-follow="${r.id}" style="width:100%">Follow</button>`
       : '<p class="muted" style="margin:0;text-align:center;font-size:13px">Make your profile in Social to follow people.</p>'}</div>`;
   socPaintFollow(r.id); el.hidden = false; applyHaptics();
   const fillCounts = () => socCounts(r.id).then(c => { if (el.hidden) return; el.querySelectorAll('[data-cnt]').forEach(b => { b.textContent = c[b.dataset.cnt]; }); });
   fillCounts();
+  // grab their latest row so gear shows even if the list we opened from is old
+  if (!isMe && r.id) sbRows(`/rest/v1/players?select=${SOC_COLS}&id=eq.${r.id}`).then(rows => { const f = rows && rows[0]; if (!f || el.hidden) return;
+    if (Array.isArray(f.gear)){ r.gear = f.gear; const g = el.querySelector('#lbpGear'); if (g) g.innerHTML = gearHtml(f.gear, true); } }).catch(() => {});
   el.onclick = async e => {
     if (e.target === el || e.target.id === 'lbpClose'){ el.hidden = true; return; }
     const f = e.target.closest('[data-follow]'); if (f){ e.stopPropagation(); const was = SOC.following.has(r.id);
@@ -5361,6 +5371,7 @@ const ZFX_ANIM = ['pulse','fade','rainbow','flicker','strobe'];
 function zoneLiveStart(meta, quiet){
   if (S.mode !== 'live'){ if (!quiet) needLive('preview zones'); return false; }
   if (S.api === 2) return false;
+  if (isProxy()){ if (!quiet) toast('Live zones on the Proxy are coming soon.'); return false; }
   zoneLive.meta = meta; zoneLive.t0 = performance.now(); clearTimeout(previewTimer);
   if (zoneLive.on) return true;
   zoneLive.on = true; zoneLive.lastKey = ''; zoneLive.fails = 0;
@@ -5504,6 +5515,7 @@ function swatchStyle(ref){
 }
 async function writeMoodTo(target, ref){
   const name = ref.name || 'Mood';
+  if (isProxy() && S.mode === 'live'){ toast('Custom moods on the Proxy are coming soon. Its own profile lights still work.'); return; } // the Proxy rejects the Peak light format (status 0x16)
   if (target === 'lantern'){
     store.lanternMood = ref; save();
     if (!needLive('light the lantern')) return;
@@ -5524,7 +5536,7 @@ async function writeMoodTo(target, ref){
   toast(`${name} set on ${p.name}`); render();
 }
 function previewMood(ref, ms){
-  if (S.mode !== 'live' || (S.state >= 7 && S.state <= 9)) return;
+  if (S.mode !== 'live' || isProxy() || (S.state >= 7 && S.state <= 9)) return;
   let blob; try { blob = S.api === 2 ? (moodColors(ref)[0] || '#ffffff') : moodPayload(ref); } catch(e){ return; }
   clearTimeout(previewTimer);
   ledJob(() => previewWrite(blob).catch(() => {}));
