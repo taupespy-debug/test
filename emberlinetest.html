@@ -1679,7 +1679,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
       <button class="btn small" id="tbKeepOpen">Show "Keep Emberline open" popup</button>
       <button class="btn small primary" id="tbProxyLab">Proxy test section</button>
       <button class="btn small" id="tbInspect">Device inspector (connect first)</button>
-      <div class="row" style="gap:6px"><span class="muted" style="font-size:13px;width:100%">Light test: tap each, tell Claude which turned the light red</span><button class="btn small" data-lt="a">A: new format</button><button class="btn small" data-lt="b">B: old format</button><button class="btn small" data-lt="c">C: clear</button></div>
+      <div class="row" style="gap:6px"><span class="muted" style="font-size:13px;width:100%">Light test: tap each, tell Claude which turned the light red</span><button class="btn small" data-lt="a">A: new format</button><button class="btn small" data-lt="b">B: old format</button><button class="btn small" data-lt="c">C: clear</button><button class="btn small" data-lt="d">D: own light red</button><button class="btn small" data-lt="e">E: other clear</button></div>
     </div>
     <div class="card" id="looksCard" style="display:grid;gap:10px" hidden>
       <span class="label">Secret looks</span>
@@ -2502,12 +2502,16 @@ let hcsHold = 0;
 /* Peak light previews: same /p/app/led/pclr channel the Puffco app uses */
 let ledChain = Promise.resolve(), previewTimer = null;
 function ledJob(fn){ const p = ledChain.then(fn, fn); ledChain = p.catch(() => {}); return p; }
+let pvOn = false; // true while we have something on the preview channel
 async function previewWrite(blobOrHex){
   if (isProxy() && !(blobOrHex && blobOrHex.native)) return; // the Proxy rejects Peak-style light data, only replay its own
+  pvOn = true;
   if (S.api === 2){ await ble.write('/p/app/led/pclr', rgbt(typeof blobOrHex === 'string' ? blobOrHex : '#ffffff')); return; }
   await ble.writeBlob('/p/app/led/pclr', typeof blobOrHex === 'string' ? solidPayload(blobOrHex) : blobOrHex);
 }
 async function previewClear(){
+  if (isProxy() && !pvOn) return; // clearing a preview that isn't there puts the Proxy into its rainbow look
+  pvOn = false;
   try {
     if (S.api === 2) await ble.write('/p/app/led/pclr', new Uint8Array(8));
     else { try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(e){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } }
@@ -4652,7 +4656,7 @@ function proxyLab(){
     <div style="height:14px;border-radius:99px;background:var(--track);overflow:hidden"><i id="plBar" style="display:block;height:100%;width:0;background:var(--good);transition:width .15s"></i></div>
     <span class="muted" id="plDif" style="font-size:13px">raw: –  peak: –</span>
     <span class="label">Lights (watch the ring)</span>
-    <div class="row" style="gap:6px"><button class="btn small" data-lt="a">A: new format red</button><button class="btn small" data-lt="b">B: old format red</button><button class="btn small" data-lt="c">C: clear</button></div>
+    <div class="row" style="gap:6px"><button class="btn small" data-lt="a">A: new format red</button><button class="btn small" data-lt="b">B: old format red</button><button class="btn small" data-lt="c">C: clear</button><button class="btn small" data-lt="d">D: own light red</button><button class="btn small" data-lt="e">E: other clear</button></div>
     <span class="label">Checklist</span>
     <div style="display:grid;gap:6px;font-size:15px">${['Battery % matches the Puffco app','Profile temps match the Puffco app','Temp climbs while heating','Countdown works when Ready','Inhale meter moves when you pull','Light test A turns the ring red','Clean meter counts up after a session'].map((t, k) => `<label class="row" style="gap:10px;flex-wrap:nowrap"><input type="checkbox" data-plc="${k}" style="width:20px;height:20px;flex:none">${t}</label>`).join('')}</div>
     <button class="btn" id="plInspect">Run device inspector</button>
@@ -4687,6 +4691,13 @@ document.addEventListener('click', async e => { const b = e.target.closest('[dat
   try {
     if (b.dataset.lt === 'a') await ble.writeBlob('/p/app/led/pclr', solidPayload('#ff0000'));
     else if (b.dataset.lt === 'b') await ble.write('/p/app/led/pclr', rgbt('#ff0000'));
+    else if (b.dataset.lt === 'd'){
+      // take the light saved on the device, turn every color in it red, and preview that
+      const t = cborDecode(await ble.readAll(`/u/app/hc/${S.active || 0}/colr`)), red = [255, 0, 0];
+      const fix = v => Array.isArray(v) ? v.map(fix) : v && typeof v === 'object' ? (typeof v.$b === 'string' ? (() => { const by = (v.$b.match(/../g) || []).map(h => parseInt(h, 16)); return new Uint8Array(by.length && by.length % 3 === 0 ? by.map((_, i) => red[i % 3]) : by); })() : v instanceof Uint8Array ? new Uint8Array(v.length % 3 === 0 ? [...v].map((_, i) => red[i % 3]) : v) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fix(x)]))) : v;
+      await ble.writeBlob('/p/app/led/pclr', cbor(fix(t)));
+    }
+    else if (b.dataset.lt === 'e'){ await ble.write('/p/app/led/pclr', new Uint8Array([0])); }
     else { try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(_){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } }
     toast('Sent ' + b.dataset.lt.toUpperCase());
   } catch(err){ toast(b.dataset.lt.toUpperCase() + ' failed: ' + (err.message || err)); }
@@ -5713,7 +5724,7 @@ function drawMoodEditor(){
 }
 let edLiveT = null, edLiveOn = false;
 function edLivePreview(){
-  if (!ed || S.mode !== 'live' || S.api === 2) return;
+  if (!ed || S.mode !== 'live' || S.api === 2 || isProxy()) return;
   if (S.state >= 7 && S.state <= 9) return;
   clearTimeout(edLiveT);
   edLiveT = setTimeout(() => {
