@@ -2276,6 +2276,7 @@ function lightPalette(blob){
     const hx = v => v && v.$b ? (v.$b.match(/.{6}/g) || []).map(h => '#' + h) : typeof v === 'number' ? ['#' + (v >>> 0 & 0xffffff).toString(16).padStart(6, '0')] : typeof v === 'string' && /^#?[0-9a-f]{6}$/i.test(v) ? ['#' + v.replace('#','')] : [];
     let cols = [];
     if (Array.isArray(meta.userColors)) meta.userColors.forEach(c => cols.push(...hx(c)));
+    if (!cols.length && o && o['0'] && o['0']['1'] && o['0']['1']['0']) cols = hx(o['0']['1']['0']); // Proxy format
     if (!cols.length && lamp && lamp.param){ const c = lamp.param.color || lamp.param.colors; if (c && c.$b) cols = hx(c); else if (Array.isArray(c)) c.forEach(x => cols.push(...hx(x))); }
     cols = cols.map(c => c.toLowerCase()).filter((c, i, a) => a.indexOf(c) === i);
     return { cols, name: meta.moodName || null };
@@ -2315,7 +2316,9 @@ function proxySolid(hex){
   if ('anim' in p) p.anim = 1;
   return cbor(t);
 }
-const solidPayload = hex => (isProxy() && PROXY_TPL) ? proxySolid(hex) : cbor({ lamp:{ name:'pikaled2', param:{ bright:255, speed:64, anim:1, plNum:0, plDenom:1, offset: S.series === 'toad' ? Array(12).fill(0) : SINGLE_OFFSETS, color:hexBytes(hex), colorLen:32 } } });
+// Proxy lights use number keys: {0:{0:1, 1:{0:<rgb bytes>}}} is one solid color (read off a real Proxy)
+const proxyBlob = hex => { const c = hexBytes(hex); const b = new Uint8Array([0xa1,0x00,0xa2,0x00,0x01,0x01,0xa1,0x00,0x43,c[0],c[1],c[2]]); b.native = true; return b; };
+const solidPayload = hex => isProxy() ? proxyBlob(hex) : cbor({ lamp:{ name:'pikaled2', param:{ bright:255, speed:64, anim:1, plNum:0, plDenom:1, offset: S.series === 'toad' ? Array(12).fill(0) : SINGLE_OFFSETS, color:hexBytes(hex), colorLen:32 } } });
 const rgbt = hex => { const c = hexBytes(hex); return new Uint8Array([c[0],c[1],c[2],0,0,0,0,0]); };
 
 /* ================= device controller ================= */
@@ -2504,7 +2507,7 @@ let ledChain = Promise.resolve(), previewTimer = null;
 function ledJob(fn){ const p = ledChain.then(fn, fn); ledChain = p.catch(() => {}); return p; }
 let pvOn = false; // true while we have something on the preview channel
 async function previewWrite(blobOrHex){
-  if (isProxy() && !(blobOrHex && blobOrHex.native)) return; // the Proxy rejects Peak-style light data, only replay its own
+  if (isProxy() && typeof blobOrHex !== 'string' && !(blobOrHex && blobOrHex.native)) return; // the Proxy rejects Peak-style light data
   pvOn = true;
   if (S.api === 2){ await ble.write('/p/app/led/pclr', rgbt(typeof blobOrHex === 'string' ? blobOrHex : '#ffffff')); return; }
   await ble.writeBlob('/p/app/led/pclr', typeof blobOrHex === 'string' ? solidPayload(blobOrHex) : blobOrHex);
@@ -2512,6 +2515,7 @@ async function previewWrite(blobOrHex){
 async function previewClear(){
   if (isProxy() && !pvOn) return; // clearing a preview that isn't there puts the Proxy into its rainbow look
   pvOn = false;
+  if (isProxy()){ try { await ble.write('/p/app/led/pclr', new Uint8Array([0])); } catch(e){} return; } // the Proxy's idle preview value is a single 0
   try {
     if (S.api === 2) await ble.write('/p/app/led/pclr', new Uint8Array(8));
     else { try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(e){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } }
@@ -2690,7 +2694,6 @@ function flashHeatCycle(hex, times){
   if (S.mode !== 'live') return Promise.resolve();
   if (!(S.state >= 7 && S.state <= 9)) return flashPeak(hex, times);
   if (discoRestore) return Promise.resolve(); // Disco is showing, leave it
-  if (isProxy()) return Promise.resolve(); // waits on the Proxy light format
   return ledJob(async () => {
     try {
       if (S.api === 2){
@@ -3106,7 +3109,7 @@ async function saveProfile(i){
     await ble.wf32(`/u/app/hc/${i}/time`, p.time);
     try { await ble.wf32(`/u/app/hc/${i}/btmp`, p.boostF * 5 / 9); await ble.wf32(`/u/app/hc/${i}/btim`, p.boostT); } catch(e){ toast('Boost settings not supported on this firmware'); }
     try { await ble.wf32(`/u/app/hc/${i}/intn`, p.vapor); } catch(e){}
-    if (p.lightDirty && isProxy()){ p.lightDirty = false; toast('Saved. Custom lights on the Proxy are coming soon, so its lights were left as is.'); }
+    if (p.lightDirty && isProxy()){ await writeProfileColor(i, p.color || '#ffffff'); p.lightDirty = false; }
     if (p.lightDirty){
       if (p.mood && S.api !== 2){ const blob = moodPayload(p.mood); await ble.writeBlob(`/u/app/hc/${i}/colr`, blob); if (S.active === i){ try { await ble.writeBlob('/p/app/thc/colr', blob); } catch(e){} } }
       else await writeProfileColor(i, p.color);
@@ -3118,7 +3121,6 @@ async function saveProfile(i){
   } catch(e){ toast('Save failed: ' + e.message); }
 }
 async function writeProfileColor(i, hex){
-  if (isProxy()) return; // Proxy light format not supported yet
   if (S.api === 2){
     await ble.write(`/u/app/hc/${i}/colr`, rgbt(hex));
     for (const s of ['phcl','accl']){ try { await ble.write(`/u/app/hc/${i}/${s}`, rgbt(hex)); } catch(e){} }
@@ -3138,7 +3140,6 @@ async function setLantern(on){
   } catch(e){ toast('Lantern failed: '+e.message); }
 }
 async function writeLanternColor(hex){
-  if (isProxy()) return; // keep the Proxy's own lantern color
   if (S.api === 2) await ble.write('/p/app/ltrn/colr', rgbt(hex));
   else await ble.writeBlob('/p/app/ltrn/colr', solidPayload(hex));
 }
@@ -3172,7 +3173,6 @@ async function applyScheme(sc){
   sc.c.forEach((c,i) => { S.profiles[i].color = c; S.profiles[i].mood = null; });
   render();
   if (S.mode !== 'live'){ toast(`${sc.n} saved here. Connect to send it to your Peak.`); return; }
-  if (isProxy()){ toast('Color schemes on the Proxy are coming soon.'); return; }
   toast(`Writing ${sc.n} to your Peak…`);
   try { for (let i=0;i<4;i++) await writeProfileColor(i, sc.c[i]); if (S.lantern) await writeLanternColor(store.lantern); toast(`${sc.n} applied`); }
   catch(e){ toast('Color write failed: '+e.message); }
@@ -4715,7 +4715,8 @@ async function devInspector(){
   const lines = [`series=${S.series} api=${S.api} name=${S.devName || S.name}`];
   for (const path of P){
     try {
-      if (/colr$/.test(path)){ const full = await ble.readAll(path); let j = ''; try { j = JSON.stringify(cborDecode(full), (k, v) => v instanceof Uint8Array ? [...v] : v); } catch(e){ j = 'decode failed'; } lines.push(path + '  len=' + full.length + '  ' + j); el.querySelector('#diOut').textContent = lines.join('\n'); continue; }
+      if (/colr$/.test(path)){ const full = await ble.readAll(path); let j = ''; try { j = JSON.stringify(cborDecode(full), (k, v) => v instanceof Uint8Array ? [...v] : v); } catch(e){ j = 'decode failed'; }
+        if (!j || j === 'decode failed' || full.length > 100) j += '  hex=' + [...full.slice(0, 160)].map(b => b.toString(16).padStart(2, '0')).join(' '); lines.push(path + '  len=' + full.length + '  ' + j); el.querySelector('#diOut').textContent = lines.join('\n'); continue; }
       const r = await ble.read(path, 32), dv = new DataView(r.buffer, r.byteOffset, r.length), hex = [...r].map(b => b.toString(16).padStart(2, '0')).join(' ');
       const parts = [`len=${r.length}`, `hex=${hex}`];
       if (r.length >= 1) parts.push(`u8=${r[0]}`);
@@ -5037,7 +5038,7 @@ $('#warnTest').onclick = () => {
 };
 $('#tFull').onchange = async e => { store.fullscreen = e.target.checked; save(); if (e.target.checked) await FS.enter(); else await FS.exit(); setTimeout(drawSettings, 300); };
 $('#uiLooks').addEventListener('click', e => { const b = e.target.closest('.look'); if (!b) return; store.ui = b.dataset.ui; save(); applyTheme(); drawSettings(); draw(); requestAnimationFrame(() => moveTabPill(view)); toast((LOOKS.find(l => l.id === store.ui) || LOOKS[0]).n + ' on'); });
-$('#setTitle').addEventListener('click', () => { const now = Date.now(); eggTaps.push(now); while (eggTaps.length && now - eggTaps[0] > 2500) eggTaps.shift(); if (eggTaps.length >= 5){ eggTaps.length = 0; eggPop(); } });
+$('#setTitle').addEventListener('click', () => { const now = Date.now(); eggTaps.push(now); while (eggTaps.length && now - eggTaps[0] > 2500) eggTaps.shift(); if (eggTaps.length === 3){ FS.exit(); } if (eggTaps.length >= 5){ eggTaps.length = 0; eggPop(); } }); // test build: 3 taps leaves full screen
 $('#ckSeg').addEventListener('click', e => { const b = e.target.closest('[data-p]'); if (b) selectProfile(+b.dataset.p); });
 function askClear(){
   const w = $('#clearWrap');
