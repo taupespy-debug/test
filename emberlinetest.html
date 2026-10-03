@@ -2523,7 +2523,7 @@ function flashPeak(hex, times){
   });
 }
 function previewProfile(i){
-  if (S.mode !== 'live' || store.selFlash === false) return;
+  if (S.mode !== 'live' || store.selFlash === false || isProxy()) return; // the Proxy shows its own profile light already
   if (S.state >= 7 && S.state <= 9) return;
   const p = S.profiles[i];
   clearTimeout(previewTimer);
@@ -2563,7 +2563,7 @@ setInterval(() => { if (S.state === 8) checkWarn(); }, 500);
 const DISCO_MS = 10000;
 function bigHit(){
   blinker(+store.bigHitSecs || 8);
-  if (S.mode !== 'live') return;
+  if (S.mode !== 'live' || isProxy()) return; // Disco on the Proxy waits until its light format is confirmed
   const disco = MOODS.excl.find(x => /disco/i.test(x.name));
   let blob = null; try { blob = S.api === 2 ? '#ff00ff' : disco ? moodPayload({ kind:'excl', id: disco.id, name: disco.name }) : null; } catch(e){}
   if (!blob) return;
@@ -5461,7 +5461,8 @@ const INTRO_ZONES = { motion:'still', tempoFrac:.5, zones:[
 const INTRO_PROXY = { motion:'still', tempoFrac:.5, zones: Array.from({ length: 6 }, () => ({ c:'#ffffff', c2:'#64007d', fx:'fade', sp:.25, bias:.25 })) }; // Proxy ring: purple, with a white sweep going around
 let introDone = false;
 function connectIntro(){
-  if (introDone || S.mode !== 'live' || S.api === 2 || (S.state >= 7 && S.state <= 9) || zoneLive.on) return;
+  if (introDone || S.mode !== 'live' || S.api === 2 || isProxy() || // Proxy: off until its light format is confirmed
+      (S.state >= 7 && S.state <= 9) || zoneLive.on) return;
   introDone = true;
   const meta = JSON.parse(JSON.stringify(isProxy() ? INTRO_PROXY : INTRO_ZONES));
   meta.env = { in: 500, out: 4300, outMs: 650 }; // 5 seconds: glide on fast, glide off at the end
