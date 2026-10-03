@@ -1620,8 +1620,8 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
   <section class="view" id="v-lights" hidden>
     <div class="lights-head"><button class="navbtn back" id="bLightsBack" aria-label="Back to Profiles"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><h1 class="largetitle">Lights</h1></div>
     <div class="card" style="display:grid;gap:12px">
-      <div class="row between"><span class="label">Mood lights</span><span class="muted" style="font-size:12px">Tap a mood to try it on your Peak</span></div>
-      <div class="field"><span class="muted" style="font-size:13px">Apply to</span><div class="seg" id="moodTarget"></div></div>
+      <div class="row between"><span class="label">Mood lights</span><span class="muted" style="font-size:12px" id="moodFor">Tap a mood to try it</span></div>
+      <div class="field" hidden><div class="seg" id="moodTarget"></div></div>
       <div id="moodLib" style="display:grid;gap:16px"></div>
     </div>
     <div class="card" id="moodEditor" hidden style="display:grid;gap:12px"></div>
@@ -1681,6 +1681,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
       <button class="btn small" id="tbInspect">Device inspector (connect first)</button>
       <button class="btn small" id="tbColorTest">Proxy color write test (connect first)</button>
       <button class="btn small" id="tbMoodTest">Proxy mood test (connect first)</button>
+      <div class="row" style="gap:6px;flex-wrap:wrap"><span class="muted" style="font-size:13px;width:100%">Proxy brightness test: tap each, tell Claude how bright it looks</span><button class="btn small" data-pbr="16">16</button><button class="btn small" data-pbr="64">64</button><button class="btn small" data-pbr="128">128</button><button class="btn small" data-pbr="256">256</button><button class="btn small" data-pbr="1024">1024</button><button class="btn small" data-pbr="16384">16384</button><button class="btn small" data-pbr="65280">65280</button></div>
       <div class="row" style="gap:6px"><span class="muted" style="font-size:13px;width:100%">Light test: tap each, tell Claude which turned the light red</span><button class="btn small" data-lt="a">A: new format</button><button class="btn small" data-lt="b">B: old format</button><button class="btn small" data-lt="c">C: clear</button><button class="btn small" data-lt="d">D: own light red</button><button class="btn small" data-lt="e">E: other clear</button></div>
     </div>
     <div class="card" id="looksCard" style="display:grid;gap:10px" hidden>
@@ -2537,6 +2538,7 @@ async function afterConnect(quick){
     try { await readProfiles(); render(); if (view === 'prof') drawProfiles(); } catch(e){}
     try { await applyProfileBright(S.active); } catch(e){}
     try { await readDeviceInfo(); render(); rememberDevice(); save(); } catch(e){}
+    { const g = myGear().join(); if (g && g !== store.gearSent){ store.gearSent = g; save(); try { await lbPush(true); } catch(e){} } } // share your gear on your profile as soon as a new device connects
     try { await loadProxyTpl(); } catch(e){}
     // Proxy: an unfinished preview left on the device shows as rainbow while idle. Its resting value is a single 0, so put that back.
     if (isProxy()){ try { const pv = await ble.readAll('/p/app/led/pclr'); if (pv.length > 1){ try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(_){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } } } catch(e){} } // same as test C, which turns it back to normal
@@ -3212,7 +3214,13 @@ function brightFor(i){
 }
 function brightProf(){ return typeof moodTarget === 'number' && moodTarget >= 0 && moodTarget <= 3 ? moodTarget : S.active; }
 let brEdit = null;
-async function writeBright(b){ if (isProxy()) return; await ble.write('/u/app/ui/lbrt', new Uint8Array(b)); store.bright = b.slice(); } // Proxy brightness format not confirmed yet, writing the Peak one can scramble its lights
+async function writeBright(b){
+  if (isProxy()){ // Proxy: one brightness for the whole light, a whole number where 256 = full (it reads 256 out of the box)
+    const v = new Uint8Array(4); new DataView(v.buffer).setInt32(0, Math.round((b[0] / 255) * 256), true);
+    await ble.write('/u/app/ui/lbrt', v); store.bright = b.slice(); return;
+  }
+  await ble.write('/u/app/ui/lbrt', new Uint8Array(b)); store.bright = b.slice();
+}
 async function applyProfileBright(i){
   const b = brightFor(i); if (!b || S.mode !== 'live') return;
   if (Array.isArray(store.bright) && b.join() === store.bright.join()) return; // already showing
@@ -4762,6 +4770,7 @@ document.addEventListener('click', async e => { const b = e.target.closest('[dat
 // test build: read a bunch of device values raw so we can see how this device stores them
 // test build: try every way of saving a color on the Proxy and read it back, so we see which one sticks
 // test build: send real Puffco Proxy moods as previews in a few different ways, to find the one the Proxy plays
+document.addEventListener('click', async e => { const b = e.target.closest('[data-pbr]'); if (!b) return; if (S.mode !== 'live'){ toast('Connect first'); return; } const v = new Uint8Array(4); new DataView(v.buffer).setInt32(0, +b.dataset.pbr, true); try { await ble.write('/u/app/ui/lbrt', v); toast('Brightness ' + b.dataset.pbr + ' sent'); } catch(err){ toast('Failed: ' + (err.message || err)); } });
 async function moodTest(){
   if (S.mode !== 'live'){ toast('Connect your device first'); return; }
   const el = document.createElement('div'); el.className = 'egg';
@@ -5677,6 +5686,7 @@ function moodTile(ref, idx, group){
 }
 function sameMood(a, b){ return a && b && a.kind === b.kind && (a.kind === 'excl' ? a.id === b.id : (a.id && a.id === b.id) || (a.tag === b.tag && JSON.stringify(a.meta) === JSON.stringify(b.meta))); }
 function drawMoods(){
+  { const el = $('#moodFor'); if (el){ const t = moodTarget ?? S.active, n = t === 'lantern' ? 'the lantern' : ((S.profiles[t] || {}).name || 'P' + (t + 1)); el.textContent = `Tap a mood to set it on ${n}`; } }
   const box = $('#moodLib'); if (!box) return;
   const tgt = moodTarget ?? S.active;
   $('#moodTarget').innerHTML = S.profiles.map((p, i) => `<button data-mt="${i}" aria-pressed="${tgt === i}">${esc(p.name.slice(0, 7))}</button>`).join('') + `<button data-mt="lantern" aria-pressed="${tgt === 'lantern'}">Lantern</button>`;
