@@ -2516,7 +2516,7 @@ async function previewWrite(blobOrHex){
 async function previewClear(){
   if (isProxy() && !pvOn) return; // clearing a preview that isn't there puts the Proxy into its rainbow look
   pvOn = false;
-  if (isProxy()){ try { await ble.write('/p/app/led/pclr', new Uint8Array([0])); } catch(e){} return; } // the Proxy's idle preview value is a single 0
+  if (isProxy()){ try { await ble.write('/p/app/led/pclr', new Uint8Array([0]), 0, 4); } catch(e){ try { await ble.writeBlob('/p/app/led/pclr', new Uint8Array([0])); } catch(_){} } return; } // truncate, or old bytes stay behind // the Proxy's idle preview value is a single 0
   try {
     if (S.api === 2) await ble.write('/p/app/led/pclr', new Uint8Array(8));
     else { try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(e){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } }
@@ -4711,7 +4711,7 @@ document.addEventListener('click', async e => { const b = e.target.closest('[dat
       const fix = v => Array.isArray(v) ? v.map(fix) : v && typeof v === 'object' ? (typeof v.$b === 'string' ? (() => { const by = (v.$b.match(/../g) || []).map(h => parseInt(h, 16)); return new Uint8Array(by.length && by.length % 3 === 0 ? by.map((_, i) => red[i % 3]) : by); })() : v instanceof Uint8Array ? new Uint8Array(v.length % 3 === 0 ? [...v].map((_, i) => red[i % 3]) : v) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fix(x)]))) : v;
       await ble.writeBlob('/p/app/led/pclr', cbor(fix(t)));
     }
-    else if (b.dataset.lt === 'e'){ await ble.write('/p/app/led/pclr', new Uint8Array([0])); }
+    else if (b.dataset.lt === 'e'){ await ble.write('/p/app/led/pclr', new Uint8Array([0]), 0, 4); }
     else { try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(_){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } }
     toast('Sent ' + b.dataset.lt.toUpperCase());
   } catch(err){ toast(b.dataset.lt.toUpperCase() + ' failed: ' + (err.message || err)); }
@@ -4739,7 +4739,7 @@ async function colorTest(){
   L.push('', 'preview red on /p/app/led/pclr:');
   try { await ble.writeBlob('/p/app/led/pclr', red); L.push('  sent, is the light red now?'); } catch(e){ L.push('  ERR ' + (e.message || e)); }
   out(); await sleep(2500);
-  try { await ble.write('/p/app/led/pclr', new Uint8Array([0])); L.push('  cleared'); } catch(e){ L.push('  clear ERR ' + (e.message || e)); }
+  try { await ble.write('/p/app/led/pclr', new Uint8Array([0]), 0, 4); L.push('  cleared'); } catch(e){ L.push('  clear ERR ' + (e.message || e)); }
   L.push('  pclr now: ' + await rd('/p/app/led/pclr')); out();
   el.querySelector('#ctStat').textContent = 'Done. Profiles 1 and 2 are now red. Tap Copy and paste it to Claude.';
   el.querySelector('#ctCopy').onclick = async () => { try { await navigator.clipboard.writeText(L.join('\n')); toast('Copied'); } catch(e){ const r = document.createRange(); r.selectNodeContents(el.querySelector('#ctOut')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected, tap Copy'); } };
