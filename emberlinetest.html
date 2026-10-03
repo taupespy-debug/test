@@ -1601,12 +1601,13 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
 
   <!-- PROFILES -->
   <section class="view" id="v-prof" hidden>
-    <h1 class="largetitle">Profiles</h1><div class="subhead">Changes save straight to your Peak</div>
+    <h1 class="largetitle">Profiles</h1><div class="subhead" id="profSub">Changes save straight to your Peak</div>
     <div id="profList" class="view"></div>
     <div class="card" style="display:grid;gap:6px">
-      <span class="label">Peak lights</span>
+      <span class="label" id="lightsLbl">Peak lights</span>
       <label class="toggle"><span><b>Lantern</b><br><span class="muted" style="font-size:13px">Ambient glow while idle</span></span><input type="checkbox" class="switch" id="tLantern"></label>
       <div class="row" style="margin:4px 0 8px"><span class="grow muted" style="font-size:13px">Lantern color</span><span class="colorbtn" id="lanternSw" style="background:#ff9d4d"><input type="color" id="lanternColor" value="#ff9d4d" aria-label="Lantern color"></span></div>
+      <div class="row" style="margin:0 0 8px;gap:8px"><span class="grow muted" style="font-size:13px">Lantern mood<br><b id="lanternMoodName" style="color:var(--fg);font-weight:600">None, using the color</b></span><button class="btn small" id="bLanternMood">Pick from Lights</button></div>
       <label class="toggle"><span><b>Stealth mode</b><br><span class="muted" style="font-size:13px">Dims all LEDs in profiles too</span></span><input type="checkbox" class="switch" id="tStealth"></label>
     </div>
     <div class="card" style="display:grid;gap:4px">
@@ -1682,6 +1683,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
       <button class="btn small" id="tbColorTest">Proxy color write test (connect first)</button>
       <button class="btn small" id="tbMoodTest">Proxy mood test (connect first)</button>
       <button class="btn small" id="tbInhale">Inhale sensor test (connect first)</button>
+      <button class="btn small" id="tbWhatsNew">Show "What's new" popup</button>
       <div class="row" style="gap:6px;flex-wrap:wrap"><span class="muted" style="font-size:13px;width:100%">Proxy brightness test: tap each, tell Claude how bright it looks</span><button class="btn small" data-pbr="16">16</button><button class="btn small" data-pbr="64">64</button><button class="btn small" data-pbr="128">128</button><button class="btn small" data-pbr="256">256</button><button class="btn small" data-pbr="1024">1024</button><button class="btn small" data-pbr="16384">16384</button><button class="btn small" data-pbr="65280">65280</button></div>
       <div class="row" style="gap:6px"><span class="muted" style="font-size:13px;width:100%">Light test: tap each, tell Claude which turned the light red</span><button class="btn small" data-lt="a">A: new format</button><button class="btn small" data-lt="b">B: old format</button><button class="btn small" data-lt="c">C: clear</button><button class="btn small" data-lt="d">D: own light red</button><button class="btn small" data-lt="e">E: other clear</button></div>
     </div>
@@ -2171,8 +2173,11 @@ class Lorax {
   intScale(path){
     // Proxy units (from the device inspector): temps in tenths of °C, times in hundredths of a second,
     // battery in hundredths of a percent, volts in millivolts
+    if (/tmpo/.test(path)) return 10;                              // boost temp
+    if (/timo/.test(path)) return 200;                             // boost time
+    if (/intn|lbrt/.test(path)) return 256;                       // vapor setting, brightness
     if (/temp|btmp|tcmd/.test(path)) return 10;
-    if (/elap|tott|time|btim/.test(path)) return 100;
+    if (/elap|tott|time|btim|mbct/.test(path)) return 200;         // Puffco web app: times are seconds x 200
     if (/bat\/soc/.test(path)) return 100;
     if (/volt/.test(path)) return 1000;
     if (/led\/di[fa]/.test(path)) return store.inhOld ? 1000 : 4096; // Puffco web app: 4096 = 1.0 (test build can flip back to the old 1000)
@@ -2181,7 +2186,7 @@ class Lorax {
   async u8(path){ return (await this.read(path, 1))[0]; }
   async u32(path){ const r = await this.read(path, 4); return new DataView(r.buffer).getUint32(0, true); }
   async str(path){ const r = await this.read(path, 64); return dec.decode(r).split('\0')[0].trim(); }
-  wf32(path, v){ const b = new Uint8Array(4), t = this.ints[path]; if (t) new DataView(b.buffer).setInt32(0, Math.round(v * t.scale), true); else new DataView(b.buffer).setFloat32(0, v, true); return this.write(path, b); }
+  wf32(path, v){ const b = new Uint8Array(4), t = this.ints[path] || (isProxy() ? { scale: this.intScale(path) } : null); /* Proxy stores whole numbers everywhere, even when the value reads 0 */ if (t) new DataView(b.buffer).setInt32(0, Math.round(v * t.scale), true); else new DataView(b.buffer).setFloat32(0, v, true); return this.write(path, b); }
   async readAll(path){
     const out = []; let off = 0;
     while (off < 4096){
@@ -2976,7 +2981,7 @@ async function bootConnection(){
 let wakeLock = null;
 async function holdWake(){ if (wakeLock || !navigator.wakeLock) return; try { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } catch(e){} }
 function releaseWake(){ try { wakeLock && wakeLock.release(); } catch(e){} wakeLock = null; }
-function needLive(what){ if (S.mode === 'live') return true; toast(`Connect your Peak to ${what}`); if (view !== 'home') show('home'); return false; }
+function needLive(what){ if (S.mode === 'live') return true; toast(`Connect your ${devWord()} to ${what}`); if (view !== 'home') show('home'); return false; }
 
 async function detectLedApi(){
   try {
@@ -3165,6 +3170,18 @@ function markCleaned(){
 }
 
 /* ================= actions ================= */
+// Boost the way the Puffco app does it: write the total added temp (°C) and time (s) to the override paths
+const BOOST = { temp: 0, time: 0 };
+async function boostCmd(){
+  if (!needLive('boost')) return;
+  if (!isProxy()) return modeCmd(9); // the Peak's own boost button command
+  const p = S.profiles[S.active] || {}, addC = (p.boostF || 0) * 5 / 9, addS = p.boostT || 0;
+  try {
+    if (addC > 0){ BOOST.temp += addC; await ble.wf32('/p/app/tmpo', BOOST.temp); }
+    if (addS > 0){ BOOST.time += addS; await ble.wf32('/p/app/timo', BOOST.time); }
+    buzz(15); toast(`Boosted +${store.unit === 'F' ? Math.round(p.boostF || 0) + '°F' : Math.round(addC) + '°C'} +${addS}s`);
+  } catch(e){ toast('Boost failed: ' + (e.message || e)); }
+}
 async function modeCmd(code){
   if (S.mode === 'live'){ try { await ble.write('/p/app/mc', new Uint8Array([code])); if (code === 8 && isProxy()){ await sleep(100); await ble.write('/p/app/mc', new Uint8Array([2])); } } catch(e){ toast('Command failed: '+e.message); } }
   else needLive('use it');
@@ -3175,7 +3192,7 @@ async function selectProfile(i){
 }
 async function saveProfile(i){
   const p = S.profiles[i];
-  if (S.mode !== 'live'){ toast('Connect your Peak to save. Your edits are kept here for now.'); render(); return; }
+  if (S.mode !== 'live'){ toast(`Connect your ${devWord()} to save. Your edits are kept here for now.`); render(); return; }
   try {
     await ble.write(`/u/app/hc/${i}/name`, new Uint8Array([...enc.encode(p.name).slice(0,20), 0]));
     await ble.wf32(`/u/app/hc/${i}/temp`, p.tempC);
@@ -3190,7 +3207,7 @@ async function saveProfile(i){
     }
     if (S.active === i) await ble.write('/p/app/hcs', new Uint8Array([i]));
     store.profSaved = store.profSaved || []; store.profSaved[i] = true; save();
-    toast(`Saved "${p.name}" to your Peak`);
+    toast(`Saved "${p.name}" to your ${devWord()}`);
   } catch(e){ toast('Save failed: ' + e.message); }
 }
 // Proxy: write a light file and read it back, trying each write style until the Proxy keeps it
@@ -3220,7 +3237,7 @@ async function setLantern(on){
   if (!needLive('use the lantern')){ drawLightsState(); return; }
   S.lantern = on;
   try {
-    if (on){ await writeLanternColor(store.lantern); }
+    if (on){ if (store.lanternMood && S.api !== 2){ try { await ble.writeBlob('/p/app/ltrn/colr', moodPayload(store.lanternMood)); } catch(e){ await writeLanternColor(store.lantern); } } else await writeLanternColor(store.lantern); }
     await ble.write('/p/app/ltrn/cmd', new Uint8Array([on?1:0]));
   } catch(e){ toast('Lantern failed: '+e.message); }
 }
@@ -3647,10 +3664,10 @@ function drawHome(){
   const left = Math.max(0, Math.round(S.total - S.elapsed));
   setHTML($('#gTimer'), S.state === 8 ? `${left}s left` : S.state === 7 ? 'Heating up…' : live && S.charging ? chargeLine() : '&nbsp;');
   { const h = hitText(), g = $('#gHit'); if (g.innerHTML !== h) g.innerHTML = h; }
-  const heating = S.state >= 7 && S.state <= 9;
-  $('#bStart').disabled = (live && heating) || (live && !isProxy() && S.chamber === 0) || (!live && (C.state === 'connecting' || C.state === 'reconnecting'));
-  if (live && heating) holdWake(); else releaseWake(); $('#bStop').disabled = !heating; $('#bBoost').disabled = !heating;
-  { const act = $('#bStart').parentElement, run = live && heating; if (act.classList.contains('run') !== run){ act.classList.toggle('run', run); act.classList.remove('morph'); void act.offsetWidth; act.classList.add('morph'); } }
+  const heating = S.state >= 7 && S.state <= 9, running = S.state === 7 || S.state === 8; // 9 = just finished: you can start the next one right away
+  $('#bStart').disabled = (live && running) || (live && !isProxy() && S.chamber === 0) || (!live && (C.state === 'connecting' || C.state === 'reconnecting'));
+  if (live && heating) holdWake(); else releaseWake(); $('#bStop').disabled = !heating; $('#bBoost').disabled = !running;
+  { const act = $('#bStart').parentElement, run = live && running; if (act.classList.contains('run') !== run){ act.classList.toggle('run', run); act.classList.remove('morph'); void act.offsetWidth; act.classList.add('morph'); } }
 
   if (!$('#homeChips').classList.contains('gd-on')) setHTML($('#homeChips'), S.profiles.map((q,i) => `<button class="pchip" data-p="${i}" aria-pressed="${i===S.active}"><b><span class="sw" style="background:${q.pal && q.pal.length > 1 ? `conic-gradient(${q.pal.concat(q.pal[0]).join(',')})` : q.color}"></span>${esc(q.name)}</b><span>${fmtT(q.tempC)}°</span></button>`).join(''));
 
@@ -3676,7 +3693,8 @@ function ago(t){ const d = Math.floor((Date.now()-t)/DAY); return d <= 0 ? 'toda
 
 function drawProfiles(){ drawProfilesInner(); applyHaptics(); }
 function drawProfilesInner(){
-  $('#profList').innerHTML = (S.mode === 'live' ? '' : '<div class="banner"><div class="grow"><b>Not connected</b>These are placeholder profiles. Connect to load and edit the ones on your Peak.</div></div>') + S.profiles.map((p,i) => `
+  { const a = $('#profSub'), b = $('#lightsLbl'); if (a) a.textContent = `Changes save straight to your ${devWord()}`; if (b) b.textContent = `${devWord()} lights`; }
+  $('#profList').innerHTML = (S.mode === 'live' ? '' : '<div class="banner"><div class="grow"><b>Not connected</b>These are placeholder profiles. Connect to load and edit the ones on your ' + devWord() + '.</div></div>') + S.profiles.map((p,i) => `
     <div class="card pcard">
       <div class="pcard-head">
         <button class="pdot" data-golights="${i}" style="${p.mood ? swatchStyle(p.mood) : 'background:' + p.color}" aria-label="Change ${esc(p.name)} lights"><span class="pdot-pen" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></span></button>
@@ -3688,8 +3706,8 @@ function drawProfilesInner(){
         <input type="range" id="pt${i}" data-i="${i}" min="400" max="644" step="1" value="${Math.round(c2f(p.tempC))}"></div>
       <div class="field"><div class="row between"><span class="muted">Duration</span><span class="val" id="pdv${i}">${p.time}s</span></div>
         <input type="range" id="pd${i}" data-i="${i}" min="15" max="120" step="5" value="${p.time}"></div>
-      <div class="field"><div class="row between"><span class="muted">Vapor</span>${is3DXL() ? '<span class="xl-tag on">3DXL</span>' : '<span class="xl-tag">Extreme needs 3DXL</span>'}</div>
-        <div class="seg vap" data-vi="${i}">${VAPOR.map(o => `<button data-vap="${o.v}" aria-pressed="${Math.abs(p.vapor - o.v) < .01}" ${o.xl && !is3DXL() ? 'disabled' : ''}>${o.n}</button>`).join('')}</div></div>
+      <div class="field"><div class="row between"><span class="muted">Vapor</span>${isProxy() ? '' : is3DXL() ? '<span class="xl-tag on">3DXL</span>' : '<span class="xl-tag">Extreme needs 3DXL</span>'}</div>
+        <div class="seg vap" data-vi="${i}">${VAPOR.filter(o => !(o.xl && isProxy())).map(o => `<button data-vap="${o.v}" aria-pressed="${Math.abs(p.vapor - o.v) < .01}" ${o.xl && !is3DXL() ? 'disabled' : ''}>${o.n}</button>`).join('')}</div></div>
       <div class="boostbox">
         <div class="row between"><span class="bb-title">Boost</span><span class="muted" style="font-size:13px" id="pbsum${i}">${fmtDelta(p.boostF)} · +${p.boostT}s per tap</span></div>
         <div class="field"><div class="row between"><span class="muted">Adds temperature</span><span class="val" id="pbfv${i}">${fmtDelta(p.boostF)}</span></div>
@@ -3697,7 +3715,7 @@ function drawProfilesInner(){
         <div class="field"><div class="row between"><span class="muted">Adds time</span><span class="val" id="pbtv${i}">+${p.boostT}s</span></div>
           <input type="range" id="pbt${i}" data-i="${i}" min="0" max="60" step="5" value="${p.boostT}"></div>
       </div>
-      <div class="row between"><span class="muted" style="font-size:13px">${i===S.active ? 'Active profile' : ''}</span><button class="btn small primary" data-save="${i}">Save to Peak</button></div>
+      <div class="row between"><span class="muted" style="font-size:13px">${i===S.active ? 'Active profile' : ''}</span><button class="btn small primary" data-save="${i}">Save to ${devWord()}</button></div>
     </div>`).join('');
 }
 
@@ -3711,10 +3729,10 @@ function drawLights(){
   const groups = [...new Set(LED_SCHEMES.map(s => s.g))];
   if ($('#ledSchemes')) $('#ledSchemes').innerHTML = groups.map(g => `<div class="sgroup"><div class="label">${g}</div><div class="swatches">` +
     LED_SCHEMES.map((s,i) => s.g !== g ? '' : `<button class="scheme" data-led="${i}" aria-pressed="${JSON.stringify(s.c)===cur}"><span class="bars">${s.c.map(c=>`<i style="background:${c}"></i>`).join('')}</span><b>${s.n}</b></button>`).join('') + '</div></div>').join('');
-  $('#lanternColor').value = store.lantern; $('#lanternSw').style.background = store.lantern;
+  $('#lanternColor').value = store.lantern; drawLightsState();
   drawLightsState();
 }
-function drawLightsState(){ $('#tLantern').checked = S.lantern; $('#tStealth').checked = S.stealth; }
+function drawLightsState(){ $('#tLantern').checked = S.lantern; $('#tStealth').checked = S.stealth; const n = $('#lanternMoodName'); if (n) n.textContent = store.lanternMood ? store.lanternMood.name || 'Mood' : 'None, using the color'; const sw = $('#lanternSw'); if (sw) sw.style.cssText = store.lanternMood ? swatchStyle(store.lanternMood) : 'background:' + store.lantern; }
 
 function drawCelDev(){
   const el = $('#celDev'); if (!el) return;
@@ -4188,6 +4206,7 @@ function openPlayer(r){
       await socToggleFollow(r); }
   };
 }
+
 
 /* ===== badge viewer: tap a badge to see it big ===== */
 function bvKeyNow(t){ const n = new Date(); return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + ':' + t; }
@@ -4738,7 +4757,7 @@ function keepOpenNotice(){
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
   el.querySelector('#koOk').onclick = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
 }
-setTimeout(() => { const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; const pl = $('#tbProxyLab'); if (pl) pl.onclick = proxyLab; const ct = $('#tbColorTest'); if (ct) ct.onclick = colorTest; const mt = $('#tbMoodTest'); if (mt) mt.onclick = moodTest; const ih = $('#tbInhale'); if (ih) ih.onclick = inhaleTest; }, 0);
+setTimeout(() => { const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; const pl = $('#tbProxyLab'); if (pl) pl.onclick = proxyLab; const ct = $('#tbColorTest'); if (ct) ct.onclick = colorTest; const mt = $('#tbMoodTest'); if (mt) mt.onclick = moodTest; const ih = $('#tbInhale'); if (ih) ih.onclick = inhaleTest; const wn = $('#tbWhatsNew'); if (wn) wn.onclick = () => whatsNew(true); }, 0);
 // test build: one place to check everything on a Proxy, with live raw readings
 function proxyLab(){
   if (document.querySelector('.plab')) return;
@@ -5169,9 +5188,9 @@ $('#connBtn').addEventListener('click', () => {
   if (C.state === 'unsupported'){ show('home'); return; }
   startConnect(false);
 });
-$('#bStart').onclick = () => S.mode === 'live' ? modeCmd(7) : startConnect(false);
+$('#bStart').onclick = async () => { if (S.mode !== 'live') return startConnect(false); BOOST.temp = 0; BOOST.time = 0; try { await ble.write('/p/app/hcs', new Uint8Array([S.active])); } catch(e){} modeCmd(7); }; // like the Puffco app: pick the profile, then start
 $('#bStop').onclick = () => modeCmd(8);
-$('#bBoost').onclick = () => modeCmd(9);
+$('#bBoost').onclick = () => boostCmd();
 { // first tap asks "Are you sure?" in the same button, second tap marks it
   const bc = $('#bCleaned'); let armT = 0;
   const label = t => { const n = [...bc.childNodes].find(x => x.nodeType === 3); if (n) n.nodeValue = t; else bc.prepend(t); };
@@ -5204,7 +5223,8 @@ $('#profList').addEventListener('click', e => {
 $('#tLantern').onchange = e => setLantern(e.target.checked);
 $('#tStealth').onchange = e => setStealth(e.target.checked);
 $('#lanternColor').oninput = e => { store.lantern = e.target.value; $('#lanternSw').style.background = store.lantern; };
-$('#lanternColor').onchange = async e => { save(); if (S.mode === 'live' && S.lantern){ try { await writeLanternColor(store.lantern); } catch(err){ toast('Lantern color failed'); } } };
+$('#bLanternMood').onclick = () => { moodTarget = 'lantern'; show('lights'); drawMoods(); };
+$('#lanternColor').onchange = async e => { store.lanternMood = null; drawLightsState(); save(); if (S.mode === 'live' && S.lantern){ try { await writeLanternColor(store.lantern); } catch(err){ toast('Lantern color failed'); } } };
 $('#brightList').addEventListener('input', e => { const i = +e.target.dataset.i; if (!brEdit) brEdit = store.bright.slice(); brEdit[i] = +e.target.value; $('#bv'+i).textContent = Math.round(brEdit[i]/2.55) + '%'; if (LT.on){ LT.brDirty = true; ltBar(); ltLiveBright(); } });
 $('#bBright').onclick = applyBrightness;
 $('#ltSave').onclick = ltSave;
@@ -5735,7 +5755,7 @@ function swatchStyle(ref){
 async function writeMoodTo(target, ref){
   const name = ref.name || 'Mood';
   if (target === 'lantern'){
-    store.lanternMood = ref; save();
+    store.lanternMood = ref; save(); drawLightsState(); toast(`${name} picked for the lantern`);
     if (!needLive('light the lantern')) return;
     if (S.api === 2){ await writeLanternColor(moodColors(ref)[0] || '#ffffff'); }
     else await ble.writeBlob('/p/app/ltrn/colr', moodPayload(ref));
@@ -5746,7 +5766,7 @@ async function writeMoodTo(target, ref){
   }
   const i = target, p = S.profiles[i];
   p.mood = ref; { const mc = moodColors(ref).filter((c, k, a) => a.indexOf(c) === k); p.color = pickAccent(mc) || p.color; p.pal = mc.filter(c => Math.max(...hexBytes(c)) > 40).slice(0, 6); }
-  if (S.mode !== 'live'){ p.lightDirty = true; toast(`${name} saved on ${p.name}. It goes to your Peak when you connect and save.`); render(); return; }
+  if (S.mode !== 'live'){ p.lightDirty = true; toast(`${name} saved on ${p.name}. It goes to your ${devWord()} when you connect and save.`); render(); return; }
   if (S.api === 2){ await writeProfileColor(i, p.color); toast('This firmware only supports solid colors, so the first color was used'); return; }
   const blob = moodPayload(ref);
   await ble.writeBlob(`/u/app/hc/${i}/colr`, blob);
@@ -6029,7 +6049,7 @@ function loadAccountProfile(i, slot){
     if (p.mood) p.color = moodColors(p.mood)[0] || p.color;
   }
   drawProfiles(); syncRanges();
-  toast(`Loaded "${a.name}" into P${slot + 1}. Tap Save to Peak to keep it.`);
+  toast(`Loaded "${a.name}" into P${slot + 1}. Tap Save to ${devWord()} to keep it.`);
 }
 
 /* ---- device settings ---- */
@@ -6793,6 +6813,33 @@ setTimeout(claimPrompt, 7000);
 addEventListener('resize', () => moveTabPill(view));
 document.fonts && document.fonts.ready.then(() => moveTabPill(view));
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { applyTheme(); draw(); });
+
+/* ---- What's new: shows once per update ---- */
+const WN_VER = '2026-10-proxy';
+const WN_ITEMS = [
+  ['Proxy support', 'Emberline now works with the Puffco Proxy: temps, battery, sessions, hit timer, blinkers, colors, moods, zones, brightness and the lantern.'],
+  ['Randomizer', 'Tap Shuffle at the top of Lights for a random color combo and effect. Keep the ones you like.'],
+  ['Gear on profiles', 'Profiles now show which Puffcos people use.']
+];
+function whatsNew(force){
+  if (!force && store.wnSeen === WN_VER) return;
+  if (!force && !store.wnSeen && !(store.sessions || []).length && !store.lastDeviceId){ store.wnSeen = WN_VER; save(); return; } // brand-new users don't need a changelog
+  if (document.querySelector('.egg')) return;
+  store.wnSeen = WN_VER; save();
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="What's new" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
+    <span class="label" style="text-align:center">Update</span>
+    <h2 style="text-align:center;margin:0">What’s new</h2>
+    ${WN_ITEMS.map(([t, d]) => `<div style="display:grid;gap:2px"><b>${t}</b><span class="muted" style="font-size:14px">${d}</span></div>`).join('')}
+    <button class="btn primary" id="wnGo" style="width:100%">Nice</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now();
+  el.querySelector('#wnGo').addEventListener('click', () => { if (Date.now() - opened < 500) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); });
+}
+// wait until the welcome and any other popup are gone, then show it
+(function wnWait(n){ if (store.wnSeen === WN_VER || n > 40) return; const busy = greetOpen || document.getElementById('spl') || document.querySelector('.egg') || [...document.querySelectorAll('.welcome, #welcome')].some(w => !w.hidden && getComputedStyle(w).display !== 'none' && w.childElementCount > 0); // fixed popups have no offsetParent, so check display instead
+  if (busy) setTimeout(() => wnWait(n + 1), 1000); else setTimeout(() => { const still = greetOpen || document.getElementById('spl') || [...document.querySelectorAll('.welcome, #welcome')].some(w => !w.hidden && getComputedStyle(w).display !== 'none' && w.childElementCount > 0); if (!still) whatsNew(); else wnWait(n + 1); }, 2500); })(0);
 </script>
 
 </body></html>
