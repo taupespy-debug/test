@@ -2597,7 +2597,7 @@ function previewProfile(i){
 const HIT = { on:false, start:0, last:null, hits:[], supported:null, base:0, peak:0, loop:null, inflight:false, live:0 };
 const HIT_DELAY = 1000; // counter starts 1s after the pull is detected
 const HIT_IDLE = .03; // typical sensor value with nobody pulling
-function hitReset(){ HIT.pbase = null; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.base = HIT_IDLE; HIT.live = 0; }
+function hitReset(){ HIT.pbase = null; HIT.diaAt = 0; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.base = HIT_IDLE; HIT.live = 0; }
 function hitSample(v, now){
   // v = inhale strength (0..1). Hysteresis so a shaky draw counts as one hit.
   // learn the resting level only from quiet samples, so a pull that's already going when Ready hits still counts
@@ -2668,7 +2668,7 @@ function hitLoopStart(){
         v = Math.abs(v - HIT.pbase) * 4;
       }
       // Proxy: the inhale reading only counts while dynamic inhale is live (dia > 0). Otherwise dif freezes on its last value.
-      if (isFinite(v) && isProxy() && !store.inhOld){ let a = 1; try { a = await ble.f32('/p/app/led/dia'); } catch(e){} if (!(a > 0)) v = 0; }
+      if (isFinite(v) && isProxy() && !store.inhOld){ const t = performance.now(); if (!HIT.diaAt || t - HIT.diaAt > 1000){ HIT.diaAt = t; try { HIT.dia = await ble.f32('/p/app/led/dia'); } catch(e){ HIT.dia = 1; } } if (!(HIT.dia > 0)) v = 0; } // dia only checked once a second, so the inhale reading stays fast
       if (isFinite(v)) hitSample(clamp(v, 0, 1), performance.now());
     }
     catch(e){ if (e && e.status){ HIT.supported = false; hitLoopStop(); } }
@@ -3042,11 +3042,13 @@ async function poll(){
       if ((linkDown && failStreak >= 2) || failStreak >= 8){ failStreak = 0; forceReconnect(); return; }
     }
     try { S.tempC = await ble.f32('/p/app/htr/temp'); } catch(e){ try { S.tempC = await ble.f32('/p/htr/temp'); } catch(e2){} }
-    if (S.state >= 7 && S.state <= 9){
-      try { S.elapsed = await ble.f32('/p/app/stat/elap'); S.total = await ble.f32('/p/app/stat/tott'); } catch(e){}
-      try { const t = await ble.f32('/p/app/htr/tcmd'); if (t > 100 && t < 400) S.liveTargetC = t; } catch(e){}
+    // while Ready, keep the Bluetooth line clear for the inhale sensor: read the timer every other tick and skip the rest
+    const hitting = S.state === 8 && HIT.loop, odd = (slowTick & 1) === 1;
+    if (S.state >= 7 && S.state <= 9 && (!hitting || odd)){
+      try { S.elapsed = await ble.f32('/p/app/stat/elap'); if (!hitting || !S.total) S.total = await ble.f32('/p/app/stat/tott'); } catch(e){}
+      if (!hitting){ try { const t = await ble.f32('/p/app/htr/tcmd'); if (t > 100 && t < 400) S.liveTargetC = t; } catch(e){} }
     }
-    if (Date.now() > hcsHold){ try { const a = await ble.u8('/p/app/hcs'); if (a <= 3 && a !== S.active){ S.active = a; applyProfileBright(a); if (view === 'prof') drawProfiles(); } } catch(e){} }
+    if (Date.now() > hcsHold && !hitting){ try { const a = await ble.u8('/p/app/hcs'); if (a <= 3 && a !== S.active){ S.active = a; applyProfileBright(a); if (view === 'prof') drawProfiles(); } } catch(e){} }
     trackSession(prev, S.state);
     if (++slowTick % 14 === 0) await slowPoll();
   } finally { busy = false; render(); }
