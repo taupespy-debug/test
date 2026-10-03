@@ -3187,6 +3187,7 @@ async function modeCmd(code){
   else needLive('use it');
 }
 async function selectProfile(i){
+  if (S.mode === 'live' && (S.state === 7 || S.state === 8)){ if (i !== S.active) toast('You can switch profiles after this session'); return; } // no switching mid-session
   S.active = i; hcsHold = Date.now() + 1500; render();
   if (S.mode === 'live'){ try { await ble.write('/p/app/hcs', new Uint8Array([i])); applyProfileBright(i); previewProfile(i); } catch(e){ toast('Could not switch profile'); } }
 }
@@ -3669,7 +3670,7 @@ function drawHome(){
   if (live && heating) holdWake(); else releaseWake(); $('#bStop').disabled = !heating; $('#bBoost').disabled = !running;
   { const act = $('#bStart').parentElement, run = live && running; if (act.classList.contains('run') !== run){ act.classList.toggle('run', run); act.classList.remove('morph'); void act.offsetWidth; act.classList.add('morph'); } }
 
-  if (!$('#homeChips').classList.contains('gd-on')) setHTML($('#homeChips'), S.profiles.map((q,i) => `<button class="pchip" data-p="${i}" aria-pressed="${i===S.active}"><b><span class="sw" style="background:${q.pal && q.pal.length > 1 ? `conic-gradient(${q.pal.concat(q.pal[0]).join(',')})` : q.color}"></span>${esc(q.name)}</b><span>${fmtT(q.tempC)}°</span></button>`).join(''));
+  if (!$('#homeChips').classList.contains('gd-on')) setHTML($('#homeChips'), S.profiles.map((q,i) => `<button class="pchip" data-p="${i}" aria-pressed="${i===S.active}" ${live && running && i !== S.active ? 'disabled style="opacity:.4"' : ''}><b><span class="sw" style="background:${q.pal && q.pal.length > 1 ? `conic-gradient(${q.pal.concat(q.pal[0]).join(',')})` : q.color}"></span>${esc(q.name)}</b><span>${fmtT(q.tempC)}°</span></button>`).join(''));
 
   const n = sinceClean(), every = store.cleanEvery, pct = clamp(n/every, 0, 1);
   $('#cleanTxt').textContent = `${n} / ${every}`;
