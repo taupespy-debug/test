@@ -2604,7 +2604,7 @@ function hitSample(v, now){
   if (!HIT.on){ const b = HIT.base || HIT_IDLE; if (v < b + .05) HIT.base = Math.min(.08, b * .9 + v * .1); }
   const up = Math.max(.12, HIT.base + .1), down = Math.max(.06, HIT.base + .04);
   if (S.state !== 8){ if (HIT.on){ HIT.on = false; const secs = (now - HIT.start) / 1000; if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); if (cur) cur.hits = HIT.hits.slice(); } } render(); return; } // not Ready: close any hit that was still open
-  if (!HIT.on && v >= up){ HIT.on = true; HIT.start = now + HIT_DELAY; HIT.peak = v; HIT.party = false; buzz(15); }
+  if (!HIT.on && v >= up){ HIT.on = true; HIT.start = now + HIT_DELAY; HIT.peak = v; HIT.party = false; buzz(15); if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
   else if (HIT.on){
     HIT.peak = Math.max(HIT.peak, v); HIT.live = Math.max(0, (now - HIT.start) / 1000);
     if (!HIT.party && store.bigHit !== false && HIT.live >= (+store.bigHitSecs || 8)){ HIT.party = true; bigHit(); }
@@ -2708,6 +2708,17 @@ function blinker(secs){
       { opacity:0, transform:'translate(-50%,-50%) scale(1)' }
     ], { duration:2600, delay:120, easing:'cubic-bezier(.2,.8,.3,1)' });
   } catch(e){ toast(`Blinker! ${secs.toFixed(1)}s`); }
+}
+// smooth hit timer: count on screen every frame instead of waiting for the next sensor reading
+let hitRaf = 0;
+function hitTick(){
+  hitRaf = 0; if (!HIT.on) return;
+  HIT.live = Math.max(0, (performance.now() - HIT.start) / 1000);
+  const t = HIT.live.toFixed(1);
+  document.querySelectorAll('.hit-live').forEach(el => { const sm = el.querySelector('small'); el.textContent = t + 's'; if (sm) el.prepend(sm); });
+  const ck = document.querySelector('#ckStatus'); if (ck && S.state === 8) ck.textContent = 'HIT ' + t;
+  if (!HIT.party && store.bigHit !== false && HIT.live >= (+store.bigHitSecs || 8)){ HIT.party = true; bigHit(); }
+  hitRaf = requestAnimationFrame(hitTick);
 }
 function hitText(){
   if (S.state !== 8 && !(S.state === 9 && HIT.last)) return '';
