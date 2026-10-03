@@ -2299,7 +2299,23 @@ const toHex = u => [...u].map(x=>x.toString(16).padStart(2,'0')).join('');
 function cmpBytes(a,b){ for (let i=0;i<Math.min(a.length,b.length);i++) if (a[i]!==b[i]) return a[i]-b[i]; return a.length-b.length; }
 const hexBytes = h => new Uint8Array([1,3,5].map(i => parseInt(h.slice(i,i+2),16)));
 const SINGLE_OFFSETS = [0,0,0,0,0,0,65536,0,0,65536,0,0,65536,65536,0,0,65536,65536,65536,0];
-const solidPayload = hex => cbor({ lamp:{ name:'pikaled2', param:{ bright:255, speed:64, anim:1, plNum:0, plDenom:1, offset: S.series === 'toad' ? Array(12).fill(0) : SINGLE_OFFSETS, color:hexBytes(hex), colorLen:32 } } });
+let PROXY_TPL = null; // the Proxy's own light blob, used as the template for previews
+async function loadProxyTpl(){
+  if (!isProxy() || PROXY_TPL) return;
+  for (const path of ['/p/app/thc/colr', `/u/app/hc/${S.active || 0}/colr`]){
+    try { const t = cborDecode(await ble.readAll(path)); if (t && t.lamp && t.lamp.param){ PROXY_TPL = t; return; } } catch(e){}
+  }
+}
+function proxySolid(hex){
+  // byte strings come back from the decoder as {$b:'hex'}; turn them back into bytes for writing
+  const fix = v => Array.isArray(v) ? v.map(fix) : v instanceof Uint8Array ? new Uint8Array(v) : v && typeof v === 'object' ? (typeof v.$b === 'string' ? new Uint8Array(v.$b.match(/../g) ? v.$b.match(/../g).map(h => parseInt(h, 16)) : []) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fix(x)]))) : v;
+  const t = fix(PROXY_TPL), p = t.lamp.param, rgb = hexBytes(hex);
+  if (p.color instanceof Uint8Array && p.color.length >= 3){ for (let i = 0; i < p.color.length; i++) p.color[i] = rgb[i % 3]; }
+  else p.color = rgb;
+  if ('anim' in p) p.anim = 1;
+  return cbor(t);
+}
+const solidPayload = hex => (isProxy() && PROXY_TPL) ? proxySolid(hex) : cbor({ lamp:{ name:'pikaled2', param:{ bright:255, speed:64, anim:1, plNum:0, plDenom:1, offset: S.series === 'toad' ? Array(12).fill(0) : SINGLE_OFFSETS, color:hexBytes(hex), colorLen:32 } } });
 const rgbt = hex => { const c = hexBytes(hex); return new Uint8Array([c[0],c[1],c[2],0,0,0,0,0]); };
 
 /* ================= device controller ================= */
@@ -2455,7 +2471,7 @@ async function afterConnect(quick){
     })();
     return;
   }
-  S.mode = 'live'; S.name = ble.dev.name || 'Peak Pro'; failStreak = 0; S.devName = null; S.edition = null; // don't carry the last device's name over
+  S.mode = 'live'; S.name = ble.dev.name || 'Peak Pro'; failStreak = 0; S.devName = null; S.edition = null; PROXY_TPL = null; // don't carry the last device's name over
   await detectLedApi();
   try { S.state = await ble.u8('/p/app/stat/id'); } catch(e){}
   connectIntro(); // the logo lights up now while the rest loads
@@ -2475,6 +2491,7 @@ async function afterConnect(quick){
     try { await readProfiles(); render(); if (view === 'prof') drawProfiles(); } catch(e){}
     try { await applyProfileBright(S.active); } catch(e){}
     try { await readDeviceInfo(); render(); rememberDevice(); save(); } catch(e){}
+    try { await loadProxyTpl(); } catch(e){}
     try { await readSerial(); } catch(e){}
     try { await readBatteryDetail(); } catch(e){}
     if (store.cleanBaseOdo == null && S.odo != null){ store.cleanBaseOdo = S.odo - (store.localSince || 0); save(); }
@@ -2523,7 +2540,7 @@ function previewProfile(i){
 const HIT = { on:false, start:0, last:null, hits:[], supported:null, base:0, peak:0, loop:null, inflight:false, live:0 };
 const HIT_DELAY = 1000; // counter starts 1s after the pull is detected
 const HIT_IDLE = .03; // typical sensor value with nobody pulling
-function hitReset(){ HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.base = HIT_IDLE; HIT.live = 0; }
+function hitReset(){ HIT.pbase = null; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.base = HIT_IDLE; HIT.live = 0; }
 function hitSample(v, now){
   // v = inhale strength (0..1). Hysteresis so a shaky draw counts as one hit.
   // learn the resting level only from quiet samples, so a pull that's already going when Ready hits still counts
@@ -2586,7 +2603,15 @@ function hitLoopStart(){
   HIT.loop = setInterval(async () => {
     if (S.mode !== 'live' || (S.state !== 8 && S.state !== 7)){ hitLoopStop(); return; }
     if (HIT.inflight) return; HIT.inflight = true;
-    try { const v = await ble.f32('/p/app/led/dif'); HIT.supported = true; if (isFinite(v)) hitSample(clamp(v, 0, 1), performance.now()); }
+    try {
+      let v = await ble.f32('/p/app/led/dif'); HIT.supported = true;
+      if (isFinite(v) && isProxy()){
+        if (HIT.pbase == null || S.state === 7) HIT.pbase = HIT.pbase == null ? v : HIT.pbase * .8 + v * .2;           // learn the resting level while heating
+        else if (!HIT.on && Math.abs(v - HIT.pbase) < .02) HIT.pbase = HIT.pbase * .97 + v * .03;                    // drift slowly when quiet
+        v = Math.abs(v - HIT.pbase) * 4;
+      }
+      if (isFinite(v)) hitSample(clamp(v, 0, 1), performance.now());
+    }
     catch(e){ if (e && e.status){ HIT.supported = false; hitLoopStop(); } }
     finally { HIT.inflight = false; }
   }, 160);
@@ -4669,6 +4694,7 @@ async function devInspector(){
   const lines = [`series=${S.series} api=${S.api} name=${S.devName || S.name}`];
   for (const path of P){
     try {
+      if (/colr$/.test(path)){ const full = await ble.readAll(path); let j = ''; try { j = JSON.stringify(cborDecode(full), (k, v) => v instanceof Uint8Array ? [...v] : v); } catch(e){ j = 'decode failed'; } lines.push(path + '  len=' + full.length + '  ' + j); el.querySelector('#diOut').textContent = lines.join('\n'); continue; }
       const r = await ble.read(path, 32), dv = new DataView(r.buffer, r.byteOffset, r.length), hex = [...r].map(b => b.toString(16).padStart(2, '0')).join(' ');
       const parts = [`len=${r.length}`, `hex=${hex}`];
       if (r.length >= 1) parts.push(`u8=${r[0]}`);
