@@ -3081,7 +3081,7 @@ function trackSession(prev, st){
   if (prev === 8 && st !== 8 && S.mode === 'live' && !zoneLive.on){ clearTimeout(previewTimer); setTimeout(() => { ledJob(previewClear); if (LT.on) ltShowCurrent(); }, 900); }
   const tF = c2f(S.tempC);
   if (st === 7 && prev !== 7 && !cur){
-    cur = { t:Date.now(), p:S.active, name:S.profiles[S.active].name, target:Math.round(c2f(S.profiles[S.active].tempC)), peak:tF, hit:false, batt:S.battery };
+    cur = { t:Date.now(), p:S.active, name:S.profiles[S.active].name, target:Math.round(c2f(S.profiles[S.active].tempC)), peak:tF, hit:false, batt:S.battery, startF:Math.round(tF) };
   }
   if (cur){
     cur.peak = Math.max(cur.peak, tF);
@@ -3090,7 +3090,11 @@ function trackSession(prev, st){
       const ranFor = cur.readyAt ? (Date.now() - cur.readyAt) / 1000 : 0;
       S.cyclesSinceOdo = (S.cyclesSinceOdo || 0) + 1;
       const gotHit = (cur.hits || HIT.hits || []).some(h => h >= 1);
-      if (cur.hit && (ranFor >= 20 || gotHit)){ logSession({ t:cur.t, p:cur.p, name:cur.name, target:cur.target, peak:Math.round(cur.peak), dur:Math.round((Date.now()-cur.t)/1000), batt:cur.batt, hits:(cur.hits || HIT.hits).slice(0, 20), vapor:(S.profiles[cur.p] || {}).vapor, sc:sinceClean() + 1, run: cur.readyAt ? Math.round((Date.now() - cur.readyAt) / 1000) : null }); }
+      // ranked cool-down: the chamber has to drop 5% below where the last session ended before a new one counts
+      const endF = store.lastEndF, warm = !!(endF && cur.startF > endF * .95);
+      store.lastEndF = Math.round(tF);
+      if (cur.hit && (ranFor >= 20 || gotHit) && warm) setTimeout(() => toast(`Not counted for ranked. Let your ${devWord()} cool down a bit before the next session.`), 1500);
+      if (cur.hit && (ranFor >= 20 || gotHit)){ logSession({ warm: warm || undefined, startF: cur.startF, t:cur.t, p:cur.p, name:cur.name, target:cur.target, peak:Math.round(cur.peak), dur:Math.round((Date.now()-cur.t)/1000), batt:cur.batt, hits:(cur.hits || HIT.hits).slice(0, 20), vapor:(S.profiles[cur.p] || {}).vapor, sc:sinceClean() + 1, run: cur.readyAt ? Math.round((Date.now() - cur.readyAt) / 1000) : null }); }
       cur = null;
     }
   }
@@ -3246,6 +3250,7 @@ async function writeBright(b){
 }
 async function applyProfileBright(i){
   const b = brightFor(i); if (!b || S.mode !== 'live') return;
+  if (Date.now() < introBrightUntil) return; // the intro puts it back when it ends
   if (Array.isArray(store.bright) && b.join() === store.bright.join()) return; // already showing
   try { await writeBright(b); save(); } catch(e){}
 }
@@ -3948,7 +3953,7 @@ const RANK_TIERS = [ { n:'Ember', min:0, c:'#ff6a3d' }, { n:'Flame', min:50, c:'
 const RANK_DIRTY = 120, RANK_DAY_SESS = Infinity; // every session after the first earns its point, no daily limit
 function rankFor(sessions, when){
   const d = new Date(when || Date.now()), m0 = new Date(d.getFullYear(), d.getMonth(), 1).getTime(), m1 = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
-  const ss = sessions.filter(s => s.t >= m0 && s.t < m1 && !(typeof s.run === 'number' && s.run < 20)).sort((a, b) => a.t - b.t); // ranked only counts sessions that ran 20s+
+  const ss = sessions.filter(s => s.t >= m0 && s.t < m1 && !(typeof s.run === 'number' && s.run < 20) && !s.warm).sort((a, b) => a.t - b.t); // ranked only counts sessions that ran 20s+ and started after the chamber cooled 5%
   const r = { rp:0, sessions:0, firsts:0, blinkers:0, extreme:0, dirty:0, sessPts:0, firstPts:0, blinkPts:0 };
   const seen = new Map();
   for (const s of ss){
@@ -4903,7 +4908,7 @@ async function devInspector(){
   if (S.mode !== 'live'){ toast('Connect your device first'); return; }
   const P = ['/p/bat/soc','/p/bat/chg/stat','/p/bat/volt','/p/bat/chg/etf','/p/app/htr/temp','/p/htr/temp','/p/htr/tcmd','/p/app/htr/tcmd','/p/app/stat/id','/p/app/stat/elap','/p/app/stat/tott','/p/app/hcs','/p/htr/chmt',
     '/u/app/hc/0/name','/u/app/hc/0/temp','/u/app/hc/0/time','/u/app/hc/0/btmp','/u/app/hc/0/btim','/u/app/hc/0/intn','/u/app/hc/1/temp','/u/app/hc/1/time',
-    '/p/app/led/pclr','/p/app/thc/colr','/u/app/hc/0/colr','/u/app/hc/1/colr','/u/app/hc/2/colr','/u/app/hc/3/colr','/p/app/ltrn/colr','/u/app/hc/0/phcl','/p/app/odom/0/nc','/p/app/info/dtot','/p/app/odom/0/tm','/p/app/led/dif','/p/sys/fw/ver','/p/sys/fw/api','/p/sys/hw/mdcd','/u/sys/name','/u/app/ui/lbrt','/p/app/ltrn/time'];
+    '/p/app/led/pclr','/p/app/thc/colr','/u/app/hc/0/colr','/u/app/hc/1/colr','/u/app/hc/2/colr','/u/app/hc/3/colr','/p/app/ltrn/colr','/u/app/hc/0/phcl','/p/app/odom/0/nc','/p/app/info/dtot','/p/app/odom/0/tm','/p/app/led/dif','/p/sys/fw/ver','/p/sys/fw/api','/p/sys/hw/mdcd','/u/sys/name','/u/app/ui/lbrt','/p/app/ltrn/time','/p/htr/tun/stdt','/p/htr/tun/sthc','/p/htr/tun/bct','/p/htn/mbct'];
   const el = document.createElement('div'); el.className = 'egg';
   el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:86vh;overflow:auto;text-align:left;justify-items:stretch"><h2>Device inspector</h2><p id="diStat">Reading…</p><pre id="diOut" style="margin:0;font:11px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;color:var(--fg)"></pre><button class="btn primary" id="diCopy">Copy results</button><button class="btn" id="diClose">Close</button></div>`;
   document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
@@ -5678,8 +5683,9 @@ const INTRO_ZONES = { motion:'still', tempoFrac:.5, zones:[
   { c:'#ffffff', c2:'#64007d', fx:'fade',  sp:.25, bias:.25 },    // logo bottom: mostly purple, a quick flash of white
   { c:'#000000', fx:'off' },                            // base right: off
   { c:'#000000', fx:'off' } ] };                        // glass left: off  (only the logo lights up)
-const INTRO_PROXY = { motion:'still', tempoFrac:.5, zones: Array.from({ length: 6 }, () => ({ c:'#ffffff', c2:'#64007d', fx:'fade', sp:.25, bias:.25 })) }; // Proxy ring: purple, with a white sweep going around
+const INTRO_PROXY = { motion:'still', tempoFrac:.5, zones: Array.from({ length: 6 }, () => ({ c:'#ffffff', c2:'#b4148c', fx:'fade', sp:.25, bias:.25 })) }; // Proxy ring: pinkish purple, with a white sweep going around
 let introDone = false;
+let introBrightUntil = 0; // Proxy intro holds full brightness until then
 function connectIntro(){
   if (introDone || S.mode !== 'live' || S.api === 2 ||
       (S.state >= 7 && S.state <= 9) || zoneLive.on) return;
@@ -5688,6 +5694,9 @@ function connectIntro(){
   meta.env = { in: 500, out: 4300, outMs: 650 }; // 5 seconds: glide on fast, glide off at the end
   zPh.length = 0; zClock.last = 0; if (isProxy()) meta.zones.forEach((z, i) => { zPh[i] = .5 + i / 12; }); else zPh[3] = .5; // start on purple
   if (!zoneLiveStart(meta, true)) return;
+  // Proxy: play the intro at full brightness, then put the user's brightness back
+  if (isProxy()){ introBrightUntil = Date.now() + 5150; const full = new Uint8Array(4); new DataView(full.buffer).setInt32(0, 256, true); ble.write('/u/app/ui/lbrt', full).catch(() => {});
+    setTimeout(() => { if (S.mode !== 'live' || !isProxy()) return; const b = brightFor(S.active) || store.bright; if (b) writeBright(b).catch(() => {}); }, 5150); }
   setTimeout(() => { if (zoneLive.on && zoneLive.meta === meta) zoneLiveStop(true); }, 5050); // leave it alone if the zone editor took over
 }
 
@@ -5763,6 +5772,60 @@ function moodTile(ref, idx, group){
   return `<button class="mood" data-mg="${group}" data-mi="${idx}" aria-pressed="${!!on}"><i class="mood-sw" style="${swatchStyle(ref)}"></i>${group === 'm' ? '<span class="medit">Edit</span>' : ''}<b>${esc(ref.name)}</b><span>${esc(tplName)}</span></button>`;
 }
 function sameMood(a, b){ return a && b && a.kind === b.kind && (a.kind === 'excl' ? a.id === b.id : (a.id && a.id === b.id) || (a.tag === b.tag && JSON.stringify(a.meta) === JSON.stringify(b.meta))); }
+/* ---- randomizer (test build): random but good-looking color combos and effects ---- */
+const RND = { cur: null, hist: [] };
+const RND_FX = [ // effect, colors min..max, tempo range, extra
+  { tag:'pikaled2-fade-mood-light', n:[2,4], t:[.3,.65], w:3 },
+  { tag:'pikaled2-spin-mood-light', n:[2,4], t:[.3,.6], w:3 },
+  { tag:'pikaled2-split-gradient-mood-light', n:[2,3], t:[.25,.55], w:2 },
+  { tag:'pikaled2-vertical-slideshow-mood-light', n:[2,4], t:[.3,.55], w:2 },
+  { tag:'pikaled2-disco-mood-light', n:[3,5], t:[.4,.7], w:1, bold:true },
+  { tag:'migration-confetti-mood-light', n:[3,5], t:[.3,.55], d:[4,8], w:2, bold:true },
+  { tag:'migration-lava-lamp-mood-light', n:[3,3], t:[.2,.45], d:[1,4], w:2, lava:true },
+  { tag:'emberline-fx-breathe', n:[1,2], t:[.3,.55], w:1 },
+  { tag:'emberline-fx-wave', n:[2,3], t:[.35,.6], w:1 },
+  { tag:'emberline-fx-comet', n:[1,2], t:[.35,.6], w:1 }
+];
+const RND_WORDS = [['Neon','Velvet','Cosmic','Electric','Midnight','Solar','Frozen','Candy','Molten','Lunar','Toxic','Crystal','Golden','Ghost','Ultra','Hyper','Dream','Wild'],
+  ['Drift','Bloom','Pulse','Haze','Storm','Wave','Glow','Rush','Tide','Flare','Mist','Orbit','Ember','Prism','Static','Fizz','Nova','Daze']];
+const rr = (a, b) => a + Math.random() * (b - a), ri = (a, b) => Math.floor(rr(a, b + 1)), pick = a => a[Math.floor(Math.random() * a.length)];
+function hsl(h, sat, l){ h = ((h % 360) + 360) % 360; sat /= 100; l /= 100; const k = n => (n + h / 30) % 12, a = sat * Math.min(l, 1 - l), f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return '#' + [f(0), f(8), f(4)].map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join(''); }
+// LED-friendly color: strong saturation, and yellows/greens a bit brighter so they don't go muddy
+const ledColor = (h, l) => { h = ((h % 360) + 360) % 360; const lift = h > 35 && h < 160 ? 6 : 0; return hsl(h, rr(85, 100), Math.min(62, (l ?? rr(48, 56)) + lift)); };
+function rndPalette(n, lava, bold){
+  const base = Math.random() * 360;
+  if (lava){ // dark base, bright blobs, like Puffco's lava lamps. Deep yellows/oranges turn brown, so those get a deep red base instead
+    const h = base, dh = (h > 25 && h < 100) ? 345 : h; return [hsl(dh, 100, rr(12, 17)), ledColor(h + rr(10, 25)), ledColor(h + rr(35, 55), 60)]; }
+  const scheme = bold ? pick(['triad', 'split', 'comp', 'rainbow']) : pick(['analog', 'analog', 'comp', 'triad', 'split', 'mono', 'rainbow']);
+  let hues;
+  if (scheme === 'rainbow'){ const step = rr(300, 360) / n; hues = Array.from({ length: n }, (_, i) => base + i * step); }
+  else hues = ({ analog: [0, 42, 84, -42, 126, -84], comp: [0, 180, 30, 210, -30, 150], triad: [0, 120, 240, 40, 160, 280], split: [0, 150, 210, 40, 190, 320], mono: [0, 0, 0, 0, 0, 0] })[scheme].slice(0, n).map(o => base + o + (scheme === 'mono' ? 0 : rr(-6, 6)));
+  const out = scheme === 'mono' ? hues.map((h, i) => ledColor(h + i * 10, [54, 34, 64, 44, 60, 40][i])) : hues.map(h => ledColor(h));
+  if (n >= 3 && Math.random() < .15) out[ri(1, n - 1)] = '#ffffff'; // now and then a white accent
+  return out;
+}
+function rndMood(){
+  const pool = RND_FX.filter(f => MOODS.tpl[f.tag]), bag = []; pool.forEach(f => { for (let i = 0; i < f.w; i++) bag.push(f); });
+  let f = pick(bag); if (RND.cur && bag.length > 1 && f.tag === RND.cur.tag && Math.random() < .7) f = pick(bag); // mix it up
+  const n = ri(f.n[0], f.n[1]), meta = { userColors: rndPalette(n, f.lava, f.bold), tempoFrac: Math.round(rr(f.t[0], f.t[1]) * 100) / 100, dynamicInhale: 0 };
+  if (f.d) meta.density = ri(f.d[0], f.d[1]);
+  return { kind:'tpl', tag: f.tag, name: pick(RND_WORDS[0]) + ' ' + pick(RND_WORDS[1]), meta };
+}
+function rndCard(){
+  const r = RND.cur, t = r ? (MOODS.tpl[r.tag] || {}).name || '' : '';
+  return `<div class="sgroup" id="rndCard"><div class="row between"><span class="label">Randomizer</span><span class="muted" style="font-size:12px">Test build</span></div>
+    ${r ? `<div class="mood" style="pointer-events:none;width:100%;max-width:none"><i class="mood-sw" style="${swatchStyle(r)}"></i><b>${esc(r.name)}</b><span>${esc(t)}${r.meta.userColors.length ? ' · ' + r.meta.userColors.length + ' colors' : ''}</span></div>` : '<p class="muted" style="margin:0">Tap Shuffle for a random color combo and effect.</p>'}
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn primary" id="rndGo" style="flex:1">${r ? 'Shuffle again' : 'Shuffle'}</button>${RND.hist.length > 1 ? '<button class="btn" id="rndBack">Back</button>' : ''}</div>
+    ${r ? `<div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="rndSet" style="flex:1">Set on ${esc(((moodTarget ?? S.active) === 'lantern' ? 'lantern' : (S.profiles[moodTarget ?? S.active] || {}).name || 'profile').slice(0, 10))}</button><button class="btn" id="rndSave" style="flex:1">Save mood</button></div>` : ''}</div>`;
+}
+function rndWire(){
+  const go = $('#rndGo'); if (!go) return;
+  go.onclick = () => { RND.cur = rndMood(); RND.hist.push(RND.cur); if (RND.hist.length > 20) RND.hist.shift(); drawMoods(); previewMood(RND.cur, 6000); };
+  const bk = $('#rndBack'); if (bk) bk.onclick = () => { RND.hist.pop(); RND.cur = RND.hist[RND.hist.length - 1] || null; drawMoods(); if (RND.cur) previewMood(RND.cur, 6000); };
+  const st = $('#rndSet'); if (st) st.onclick = async () => { try { await writeMoodTo(moodTarget ?? S.active, RND.cur); } catch(e){ toast('Could not set it: ' + (e.message || e)); } drawMoods(); };
+  const sv = $('#rndSave'); if (sv) sv.onclick = () => { const m = { id: 'local-' + Date.now(), name: RND.cur.name, tag: RND.cur.tag, meta: JSON.parse(JSON.stringify(RND.cur.meta)) }; store.myMoods.unshift(m); save(); toast(`Saved "${m.name}" to your moods`); drawMoods(); };
+}
 function drawMoods(){
   { const el = $('#moodFor'); if (el){ const t = moodTarget ?? S.active, n = t === 'lantern' ? 'the lantern' : ((S.profiles[t] || {}).name || 'P' + (t + 1)); el.textContent = `Tap a mood to set it on ${n}`; } }
   const box = $('#moodLib'); if (!box) return;
@@ -5770,10 +5833,11 @@ function drawMoods(){
   $('#moodTarget').innerHTML = S.profiles.map((p, i) => `<button data-mt="${i}" aria-pressed="${tgt === i}">${esc(p.name.slice(0, 7))}</button>`).join('') + `<button data-mt="lantern" aria-pressed="${tgt === 'lantern'}">Lantern</button>`;
   const excl = MOODS.excl.filter(x => !isProxy() || x.toad).map(x => ({ kind:'excl', id:x.id, name:x.name }));
   const mine = allMine().map(m => Object.assign({ kind:'tpl' }, m));
-  box.innerHTML =
+  box.innerHTML = rndCard() +
     `<div class="sgroup"><div class="label">Puffco exclusives</div><div class="moods">${excl.map((r, i) => moodTile(r, i, 'x')).join('')}</div></div>` +
     `<div class="sgroup"><div class="row between"><span class="label">Your moods</span><span class="row" style="gap:6px"><button class="btn small" id="bNewMood">New mood</button></span></div><div class="moods">${mine.map((r, i) => moodTile(r, i, 'm')).join('') || '<p class="muted">No saved moods yet.</p>'}</div></div>`;
   $('#bNewMood').onclick = () => openMoodEditor();
+  rndWire();
 }
 function moodFromTile(g, i){
   if (g === 'x'){ const x = MOODS.excl.filter(x => !isProxy() || x.toad)[i]; return { kind:'excl', id:x.id, name:x.name }; }
