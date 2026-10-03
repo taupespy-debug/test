@@ -870,6 +870,12 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:non
 .soc-counts b,.lbp-head .soc-counts b,.soc-id .soc-counts b{display:inline;font-size:15px;color:var(--fg);font-variant-numeric:tabular-nums;font-weight:700}
 .soc-counts span{white-space:nowrap}
 .lbp-head .soc-counts{justify-content:center;margin-top:2px}
+.gear{display:grid;gap:6px}
+.lbp .gear{justify-items:center}
+.gear-list{display:flex;flex-wrap:wrap;gap:6px}
+.lbp .gear-list{justify-content:center}
+.gear-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px 6px 9px;border-radius:99px;background:var(--fill);font-size:14px;font-weight:600}
+.gear-chip svg{width:16px;height:16px;fill:none;stroke:var(--accent);stroke-width:1.8;stroke-linejoin:round}
 .soc-bio{margin:0;font-size:15px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
 .lbp .soc-bio{text-align:center;color:color-mix(in srgb,var(--fg) 88%,transparent)}
 .soc-search{display:flex;align-items:center;gap:8px;background:var(--fill);border-radius:14px;padding:0 12px}
@@ -1180,6 +1186,9 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
 .dm-dev{flex:1;min-width:0;display:flex;align-items:center;gap:12px;padding:10px;background:none;border:0;color:inherit;font:inherit;text-align:left;border-radius:18px}
 .dm-ic{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:color-mix(in srgb,var(--fg) 8%,transparent);flex:none}
 .dm-ic svg{width:22px;height:22px;fill:none;stroke:var(--fg);stroke-width:1.6;stroke-linejoin:round}
+.dm-pic{width:46px;height:54px;border-radius:14px;padding:4px;overflow:hidden;display:flex!important;align-items:center;justify-content:center}
+.dm-pic img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))}
+.dm-row.on .dm-pic{background:color-mix(in srgb,var(--accent) 35%,transparent);box-shadow:inset 0 0 0 1.5px var(--accent)}
 .dm-row.on .dm-ic{background:var(--accent)}.dm-row.on .dm-ic svg{stroke:var(--accent-ink)}
 .dm-t{display:grid;min-width:0}.dm-t b{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dm-t small{font-size:13px;color:var(--muted)}
 .dm-dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 8px var(--good);margin-left:auto;flex:none}
@@ -1668,7 +1677,9 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
     <div class="card" style="display:grid;gap:10px;border:1px dashed var(--accent)">
       <span class="label">Test build tools</span>
       <button class="btn small" id="tbKeepOpen">Show "Keep Emberline open" popup</button>
+      <button class="btn small primary" id="tbProxyLab">Proxy test section</button>
       <button class="btn small" id="tbInspect">Device inspector (connect first)</button>
+      <div class="row" style="gap:6px"><span class="muted" style="font-size:13px;width:100%">Light test: tap each, tell Claude which turned the light red</span><button class="btn small" data-lt="a">A: new format</button><button class="btn small" data-lt="b">B: old format</button><button class="btn small" data-lt="c">C: clear</button></div>
     </div>
     <div class="card" id="looksCard" style="display:grid;gap:10px" hidden>
       <span class="label">Secret looks</span>
@@ -2145,16 +2156,19 @@ class Lorax {
     if (r.length < 4){ const dv0 = new DataView(r.buffer, r.byteOffset, r.length); const v = r.length >= 2 ? dv0.getUint16(0, true) : r.length ? r[0] : 0; this.ints[path] = { scale: 1 }; return v; }
     const dv = new DataView(r.buffer, r.byteOffset, r.length), f = dv.getFloat32(0, true), bits = dv.getUint32(0, true);
     if (bits !== 0 && (!isFinite(f) || Math.abs(f) < 1e-20)){
-      const v = dv.getInt32(0, true), scale = this.intScale(path, v);
-      this.ints[path] = { scale }; return v / scale;
+      const v = dv.getInt32(0, true), scale = this.intScale(path);
+      this.ints[path] = { scale }; return v === -2147483648 ? 0 : v / scale; // that value means "not set"
     }
     return f;
   }
-  intScale(path, v){
-    const a = Math.abs(v);
-    if (/temp|btmp/.test(path)) return a > 20000 ? 100 : a > 1000 ? 10 : 1;   // °C, tenths or hundredths
-    if (/bat\/soc/.test(path)) return a > 1000 ? 100 : a > 100 ? 10 : 1;      // percent
-    if (/elap|tott|time|btim/.test(path)) return a > 6000 ? 1000 : 1;          // seconds or ms
+  intScale(path){
+    // Proxy units (from the device inspector): temps in tenths of °C, times in hundredths of a second,
+    // battery in hundredths of a percent, volts in millivolts
+    if (/temp|btmp|tcmd/.test(path)) return 10;
+    if (/elap|tott|time|btim/.test(path)) return 100;
+    if (/bat\/soc/.test(path)) return 100;
+    if (/volt/.test(path)) return 1000;
+    if (/led\/dif/.test(path)) return 1000;
     return 1;
   }
   async u8(path){ return (await this.read(path, 1))[0]; }
@@ -2362,6 +2376,13 @@ function setConnUI(state, extra){
   pill.className = 'navbtn pill ' + cls; $('#connTxt').textContent = txt;
   drawConnectCard(); render();
 }
+// say "Proxy" instead of "Peak" when that's the device we're talking to (live, or the last one used)
+function devWord(){
+  if (S.series === 'toad') return 'Proxy';
+  if (S.mode !== 'live'){ try { const d = devList().find(x => x.id === store.lastDeviceId); if (d && d.series === 'toad') return 'Proxy'; } catch(e){} }
+  return 'Peak';
+}
+function pk(s){ return devWord() === 'Proxy' ? String(s).replace(/\bPeak(?! Pro)(’s|'s)?\b/g, (m, a) => 'Proxy' + (a || '')) : s; }
 function drawConnectCard(){
   const el = $('#connectCard'); if (!el) return;
   if (C.state === 'live'){ el.hidden = true; return; }
@@ -2383,9 +2404,9 @@ function drawConnectCard(){
       <li>Press the Peak’s button once to wake it</li>
       <li>Keep it within a few feet</li></ul>`;
   el.className = 'card cc ' + C.state;
-  el.innerHTML = `<div class="cc-head"><span class="cc-ic">${busy ? '<i class="spin"></i>' : C.state === 'error' || C.state === 'btoff' || C.state === 'unsupported' ? '!' : '<svg viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg>'}</span><div class="grow"><b>${esc(title)}</b>${msg ? `<p>${esc(msg)}</p>` : ''}</div></div>
+  el.innerHTML = pk(`<div class="cc-head"><span class="cc-ic">${busy ? '<i class="spin"></i>' : C.state === 'error' || C.state === 'btoff' || C.state === 'unsupported' ? '!' : '<svg viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg>'}</span><div class="grow"><b>${esc(title)}</b>${msg ? `<p>${esc(msg)}</p>` : ''}</div></div>
     ${tips}
-    <div class="shop-actions"><button class="btn primary" id="ccBtn" ${busy && C.state !== 'reconnecting' ? 'disabled' : ''}>${btn}</button>${alt}${ble.dev && C.state === 'error' ? '<button class="btn small ghost" id="ccPick">Pick a different device</button>' : ''}</div>`;
+    <div class="shop-actions"><button class="btn primary" id="ccBtn" ${busy && C.state !== 'reconnecting' ? 'disabled' : ''}>${btn}</button>${alt}${ble.dev && C.state === 'error' ? '<button class="btn small ghost" id="ccPick">Pick a different device</button>' : ''}</div>`);
 }
 
 async function startConnect(pickNew, auto){
@@ -2434,7 +2455,7 @@ async function afterConnect(quick){
     })();
     return;
   }
-  S.mode = 'live'; S.name = ble.dev.name || 'Peak Pro'; failStreak = 0;
+  S.mode = 'live'; S.name = ble.dev.name || 'Peak Pro'; failStreak = 0; S.devName = null; S.edition = null; // don't carry the last device's name over
   await detectLedApi();
   try { S.state = await ble.u8('/p/app/stat/id'); } catch(e){}
   connectIntro(); // the logo lights up now while the rest loads
@@ -2453,7 +2474,7 @@ async function afterConnect(quick){
     try { await slowPoll(); render(); } catch(e){}
     try { await readProfiles(); render(); if (view === 'prof') drawProfiles(); } catch(e){}
     try { await applyProfileBright(S.active); } catch(e){}
-    try { await readDeviceInfo(); render(); } catch(e){}
+    try { await readDeviceInfo(); render(); rememberDevice(); save(); } catch(e){}
     try { await readSerial(); } catch(e){}
     try { await readBatteryDetail(); } catch(e){}
     if (store.cleanBaseOdo == null && S.odo != null){ store.cleanBaseOdo = S.odo - (store.localSince || 0); save(); }
@@ -2667,6 +2688,7 @@ function rememberDevice(){
   Object.assign(d, { id, name, label: S.devName || name, series: S.series || 'peach', edition: S.edition || null, last: Date.now() });
   list.sort((a, b) => (b.last || 0) - (a.last || 0));
 }
+const DEV_IMG = { proxy:'data:image/webp;base64,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', peak:'data:image/webp;base64,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' }; // small product cutouts for the device picker
 function devKind(d){ return d.series === 'toad' ? 'Proxy' : `${d.edition ? d.edition + ' ' : ''}Peak Pro`; }
 function currentDevId(){ return S.mode === 'live' && ble.dev ? ble.dev.id : null; }
 function drawDevMenu(){
@@ -2676,7 +2698,7 @@ function drawDevMenu(){
     ${list.length ? list.map((d, i) => {
       const on = cur && (d.id === cur), busy = !on && (C.state === 'connecting' || C.state === 'reconnecting') && store.lastDeviceId === d.id;
       return `<div class="dm-row${on ? ' on' : ''}"><button class="dm-dev" data-dev="${i}">
-        <span class="dm-ic">${d.series === 'toad' ? '<svg viewBox="0 0 24 24"><rect x="8" y="9" width="8" height="12" rx="2"/><path d="M10 9V4h4v5"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M10 3h4l3 10H7z"/><rect x="5" y="13" width="14" height="8" rx="2"/></svg>'}</span>
+        <span class="dm-ic dm-pic"><img alt="" src="${d.series === 'toad' ? DEV_IMG.proxy : DEV_IMG.peak}"></span>
         <span class="dm-t"><b>${esc(d.label || d.name)}</b><small>${esc(devKind(d))}${on ? ' · Connected' : busy ? ' · Connecting…' : ''}</small></span>
         ${on ? '<i class="dm-dot"></i>' : ''}</button>
         <button class="dm-x" data-forget="${i}" aria-label="Forget ${esc(d.label || d.name)}">✕</button></div>`; }).join('') : '<p class="muted" style="margin:6px 10px">No devices yet.</p>'}
@@ -2859,6 +2881,7 @@ async function detectLedApi(){
     const raw = await ble.u32('/p/sys/fw/api');
     S.series = (raw >>> 16) === 1 ? 'toad' : 'peach';   // same as Puffco's app: api series 1 = Proxy
     const api = raw & 0xffff;
+    if (S.series === 'toad'){ S.api = 3; return; } // Proxy counts its api versions separately: it always uses the newer light format
     if (api < 27){ S.api = 2; return; }
   } catch(e){}
   try { await ble.read('/u/app/hc/0/phcl', 8); S.api = 2; } catch(e){ S.api = 3; }
@@ -3823,12 +3846,16 @@ function rankFor(sessions, when){
 // your rank this month: from this phone's sessions, but never below what the leaderboard already has for you
 // (sessions from another phone or site still count)
 function myRank(){
-  const r = rankFor(rankSessions()), me = demo ? null : (LB.me || lbStore().meCache);
-  if (me && me.month === lbMonth() && (me.rp || 0) > r.rp){
-    const rp = me.rp;
-    return Object.assign({}, r, { rp, blinkers: Math.max(r.blinkers, me.blinkers || 0), tier: RANK_TIERS.slice().reverse().find(t => rp >= t.min), next: RANK_TIERS.find(t => t.min > rp) || null, synced: true });
-  }
-  return r;
+  // your rank this month: this phone's sessions, but never below the leaderboard. Points you earn here are
+  // added on top of what the leaderboard already had (sessions from another phone or site still count).
+  const r = rankFor(rankSessions()), me = demo ? null : (LB.me || lbStore().meCache), m = lbMonth(), id = acctId() || 'local';
+  if (!me || me.month !== m) return r;
+  const S0 = me.rp || 0, L = r.rp;
+  let base = store.rpBase && store.rpBase.month === m && store.rpBase.id === id ? store.rpBase : null;
+  let rp = base ? Math.max(L, base.S + (L - base.L)) : L;
+  if (S0 > rp){ base = store.rpBase = { month: m, id, S: S0, L }; rp = S0; save(); } // leaderboard knows more than we do: start counting from there
+  if (rp === L) return r;
+  return Object.assign({}, r, { rp, blinkers: Math.max(r.blinkers, me.blinkers || 0), tier: RANK_TIERS.slice().reverse().find(t => rp >= t.min), next: RANK_TIERS.find(t => t.min > rp) || null, synced: true });
 }
 function drawRank(){ drawRankInner(); applyHaptics(); }
 function drawRankInner(){
@@ -3924,10 +3951,24 @@ async function lbCall(body){
     throw e;
   }
 }
+// the devices you own, shown on your profile ("peak:Onyx", "peak", "proxy")
+function myGear(){
+  const out = [];
+  try { devList().forEach(d => { const k = d.series === 'toad' ? 'proxy' : 'peak' + (d.edition ? ':' + String(d.edition).replace(/[^A-Za-z0-9 ]/g, '').slice(0, 24) : ''); if (!out.includes(k)) out.push(k); }); } catch(e){}
+  return out.slice(0, 6);
+}
+function gearHtml(list){
+  if (!list || !list.length) return '';
+  const ic = k => k === 'proxy'
+    ? '<svg viewBox="0 0 24 24"><path d="M10 3h4l1 5H9z"/><rect x="7" y="8" width="10" height="3" rx="1"/><rect x="7" y="11" width="10" height="10" rx="3"/></svg>'
+    : '<svg viewBox="0 0 24 24"><path d="M10 2h4v9h-4z"/><path d="M8 11h8l1 3H7z"/><rect x="6" y="14" width="12" height="8" rx="2"/></svg>';
+  const name = k => k === 'proxy' ? 'Proxy' : 'Peak Pro' + (k.includes(':') ? ' · ' + k.split(':')[1] : '');
+  return `<div class="gear"><span class="label">Gear</span><div class="gear-list">${list.map(k => `<span class="gear-chip">${ic(k)}${esc(name(k))}</span>`).join('')}</div></div>`;
+}
 function lbPayload(){
   const r = myRank(), m = lbMonth(), me = LB.me && LB.me.month === m ? LB.me : null;
   const rp = Math.max(r.rp, me ? me.rp || 0 : 0), bl = Math.max(r.blinkers, me ? me.blinkers || 0 : 0);
-  return { rp, tier: rp > r.rp && me ? me.tier : r.tier.n, blinkers: bl, month: m };
+  return { rp, tier: rp > r.rp && me ? me.tier : r.tier.n, blinkers: bl, month: m, gear: myGear() };
 }
 async function lbPush(force){
   const L = lbStore(); if (!L.joined || !lbUsesPuffco()) return;
@@ -3998,6 +4039,7 @@ function openPlayer(r){
     <div class="lbp-head">${lbAvatar(r.avatar_url, r.username, 96)}<b>${esc(r.username)}${r.dev ? devBadge(26) : ''}</b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
       <div class="soc-counts"><span><b data-cnt="followers">–</b> followers</span><span><b data-cnt="following">–</b> following</span></div></div>
     ${r.bio ? `<p class="soc-bio">${esc(r.bio)}</p>` : ''}
+    ${gearHtml(LB.me && r.id === LB.me.id ? myGear() : r.gear)}
     ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, r)}">${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}
     ${isMe ? '' : meId ? `<button class="btn soc-follow" data-follow="${r.id}" style="width:100%">Follow</button>`
       : '<p class="muted" style="margin:0;text-align:center;font-size:13px">Make your profile in Social to follow people.</p>'}</div>`;
@@ -4386,7 +4428,7 @@ async function socCounts(pid){
     return { followers: a.length, following: b.length, followerIds: a.map(x => x.follower), followingIds: b.map(x => x.followee) };
   } catch(e){ return { followers: 0, following: 0, followerIds: [], followingIds: [] }; }
 }
-const SOC_COLS = 'id,username,avatar_url,tier,rp,blinkers,dev,showcase,bio,month';
+const SOC_COLS = '*'; // everything public about a player (includes gear once the column exists)
 async function socPlayers(ids){
   if (!ids.length) return [];
   try { return await sbRows(`/rest/v1/players?select=${SOC_COLS}&id=in.(${ids.slice(0, 200).join(',')})`); } catch(e){ return []; }
@@ -4455,6 +4497,7 @@ function drawSocial(){
         <span class="muted"><span style="color:${lbTierColor(myRank().tier.n)};font-weight:700">${myRank().tier.n}</span> · ${myRank().rp} RP</span>
         <div class="soc-counts"><span><b data-cnt="followers">${c ? c.followers : '–'}</b> followers</span><span><b data-cnt="following">${c ? c.following : '–'}</b> following</span></div></div></div>
       ${me.bio ? `<p class="soc-bio">${esc(me.bio)}</p>` : '<p class="muted" style="margin:0;font-size:14px">No bio yet.</p>'}
+      ${gearHtml(myGear())}
       ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, { tier: myRank().tier.n })}">${showBadge(k, undefined, { tier: myRank().tier.n })}<span>${esc(showName(k, { tier: myRank().tier.n }))}</span></div>`).join('')}</div>` : ''}
       <button class="btn" id="socEdit">Edit profile</button>`);
   }
@@ -4560,13 +4603,65 @@ function keepOpenNotice(){
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
   el.querySelector('#koOk').onclick = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
 }
-setTimeout(() => { const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; }, 0);
+setTimeout(() => { const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; const pl = $('#tbProxyLab'); if (pl) pl.onclick = proxyLab; }, 0);
+// test build: one place to check everything on a Proxy, with live raw readings
+function proxyLab(){
+  if (document.querySelector('.plab')) return;
+  const el = document.createElement('div'); el.className = 'egg plab';
+  el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:88vh;overflow:auto;text-align:left;justify-items:stretch;gap:12px">
+    <div class="row between"><h2 style="margin:0">Proxy test</h2><button class="btn small ghost" id="plClose">Close</button></div>
+    <p id="plDev" style="margin:0"></p>
+    <span class="label">Live readings</span>
+    <pre id="plLive" style="margin:0;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;color:var(--fg)">Waiting…</pre>
+    <span class="label">Inhale meter (pull on it during a session)</span>
+    <div style="height:14px;border-radius:99px;background:var(--track);overflow:hidden"><i id="plBar" style="display:block;height:100%;width:0;background:var(--good);transition:width .15s"></i></div>
+    <span class="muted" id="plDif" style="font-size:13px">raw: –  peak: –</span>
+    <span class="label">Lights (watch the ring)</span>
+    <div class="row" style="gap:6px"><button class="btn small" data-lt="a">A: new format red</button><button class="btn small" data-lt="b">B: old format red</button><button class="btn small" data-lt="c">C: clear</button></div>
+    <span class="label">Checklist</span>
+    <div style="display:grid;gap:6px;font-size:15px">${['Battery % matches the Puffco app','Profile temps match the Puffco app','Temp climbs while heating','Countdown works when Ready','Inhale meter moves when you pull','Light test A turns the ring red','Clean meter counts up after a session'].map((t, k) => `<label class="row" style="gap:10px;flex-wrap:nowrap"><input type="checkbox" data-plc="${k}" style="width:20px;height:20px;flex:none">${t}</label>`).join('')}</div>
+    <button class="btn" id="plInspect">Run device inspector</button>
+    <button class="btn primary" id="plCopy">Copy test report</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
+  let peak = 0, log = [];
+  const tick = async () => {
+    if (!document.body.contains(el)) return;
+    const live = S.mode === 'live';
+    el.querySelector('#plDev').textContent = live ? `${S.devName || S.name} · ${S.series === 'toad' ? 'Proxy' : 'Peak'} · light format ${S.api}` : 'Not connected. Connect your Proxy first.';
+    if (live){
+      let dif = null, raw = null;
+      try { const r = await ble.read('/p/app/led/dif', 4); raw = new DataView(r.buffer, r.byteOffset, r.length).getInt32(0, true); dif = await ble.f32('/p/app/led/dif'); } catch(e){}
+      if (raw != null){ peak = Math.max(peak, raw); el.querySelector('#plDif').textContent = `raw: ${raw}  peak: ${peak}  read as: ${dif == null ? '–' : (+dif).toFixed(3)}`; el.querySelector('#plBar').style.width = Math.min(100, (dif || 0) * 100) + '%'; }
+      const txt = [`state: ${S.state} (${STATE_NAMES[S.state] || '?'})`, `temp: ${S.tempC == null ? '–' : S.tempC.toFixed(1) + '°C / ' + Math.round(c2f(S.tempC)) + '°F'}`, `battery: ${S.battery ?? '–'}%  charging: ${S.charging ? 'yes' : 'no'}`, `timer: ${(+S.elapsed || 0).toFixed(1)}s of ${(+S.total || 0).toFixed(1)}s`, `profile: ${(S.profiles[S.active] || {}).name} · ${Math.round(c2f((S.profiles[S.active] || {}).tempC || 0))}°F · ${(S.profiles[S.active] || {}).time}s`, `dab counter: ${S.odo ?? '–'}`].join('\n');
+      el.querySelector('#plLive').textContent = txt;
+      log.push(new Date().toLocaleTimeString() + ' ' + txt.replace(/\n/g, ' | ') + ` | dif raw ${raw}`); if (log.length > 60) log.shift();
+    }
+    setTimeout(tick, 600);
+  };
+  tick();
+  el.querySelector('#plClose').onclick = () => el.remove();
+  el.querySelector('#plInspect').onclick = () => { el.remove(); devInspector(); };
+  el.querySelector('#plCopy').onclick = async () => {
+    const checks = [...el.querySelectorAll('[data-plc]')].map(c => (c.checked ? '[x] ' : '[ ] ') + c.parentElement.textContent.trim());
+    const rep = ['PROXY TEST', el.querySelector('#plDev').textContent, '', ...checks, '', 'Inhale peak raw: ' + peak, '', ...log.slice(-20)].join('\n');
+    try { await navigator.clipboard.writeText(rep); toast('Report copied, paste it to Claude'); } catch(e){ toast('Couldn’t copy'); }
+  };
+}
+document.addEventListener('click', async e => { const b = e.target.closest('[data-lt]'); if (!b) return;
+  if (S.mode !== 'live'){ toast('Connect first'); return; }
+  try {
+    if (b.dataset.lt === 'a') await ble.writeBlob('/p/app/led/pclr', solidPayload('#ff0000'));
+    else if (b.dataset.lt === 'b') await ble.write('/p/app/led/pclr', rgbt('#ff0000'));
+    else { try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(_){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } }
+    toast('Sent ' + b.dataset.lt.toUpperCase());
+  } catch(err){ toast(b.dataset.lt.toUpperCase() + ' failed: ' + (err.message || err)); }
+});
 // test build: read a bunch of device values raw so we can see how this device stores them
 async function devInspector(){
   if (S.mode !== 'live'){ toast('Connect your device first'); return; }
   const P = ['/p/bat/soc','/p/bat/chg/stat','/p/bat/volt','/p/bat/chg/etf','/p/app/htr/temp','/p/htr/temp','/p/htr/tcmd','/p/app/htr/tcmd','/p/app/stat/id','/p/app/stat/elap','/p/app/stat/tott','/p/app/hcs','/p/htr/chmt',
     '/u/app/hc/0/name','/u/app/hc/0/temp','/u/app/hc/0/time','/u/app/hc/0/btmp','/u/app/hc/0/btim','/u/app/hc/0/intn','/u/app/hc/1/temp','/u/app/hc/1/time',
-    '/p/app/odom/0/nc','/p/app/info/dtot','/p/app/odom/0/tm','/p/app/led/dif','/p/sys/fw/ver','/p/sys/fw/api','/p/sys/hw/mdcd','/u/sys/name','/u/app/ui/lbrt','/p/app/ltrn/time'];
+    '/p/app/led/pclr','/p/app/thc/colr','/u/app/hc/0/colr','/u/app/hc/0/phcl','/p/app/odom/0/nc','/p/app/info/dtot','/p/app/odom/0/tm','/p/app/led/dif','/p/sys/fw/ver','/p/sys/fw/api','/p/sys/hw/mdcd','/u/sys/name','/u/app/ui/lbrt','/p/app/ltrn/time'];
   const el = document.createElement('div'); el.className = 'egg';
   el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:86vh;overflow:auto;text-align:left;justify-items:stretch"><h2>Device inspector</h2><p id="diStat">Reading…</p><pre id="diOut" style="margin:0;font:11px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;color:var(--fg)"></pre><button class="btn primary" id="diCopy">Copy results</button><button class="btn" id="diClose">Close</button></div>`;
   document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
