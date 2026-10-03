@@ -2321,7 +2321,14 @@ function lightPalette(blob){
     const hx = v => v && v.$b ? (v.$b.match(/.{6}/g) || []).map(h => '#' + h) : typeof v === 'number' ? ['#' + (v >>> 0 & 0xffffff).toString(16).padStart(6, '0')] : typeof v === 'string' && /^#?[0-9a-f]{6}$/i.test(v) ? ['#' + v.replace('#','')] : [];
     let cols = [];
     if (Array.isArray(meta.userColors)) meta.userColors.forEach(c => cols.push(...hx(c)));
-    if (!cols.length && o && o['0'] && o['0']['1'] && o['0']['1']['0']) cols = hx(o['0']['1']['0']); // Proxy format
+    // Proxy format: {0:{0:<lamp id>, 1:<params>}, 1:<meta>}. Meta 9 = the mood's colors; otherwise the color param for that lamp (pikaled2 = 6, solid = 0, partphy2 = 3)
+    if (!cols.length && o && o['0'] && typeof o['0']['0'] === 'number' && o['0']['1']){
+      const mt = o['1'], prm = o['0']['1'], key = { 0:'6', 1:'0', 2:'3' }[o['0']['0']];
+      if (mt && mt['9'] && mt['9'].$b) cols = hx(mt['9']);
+      if (!cols.length && key && prm[key] && prm[key].$b) cols = hx(prm[key]);
+      if (!cols.length) return { cols: [], name: mt && typeof mt['2'] === 'string' ? mt['2'] : null };
+      return { cols: cols.map(c => c.toLowerCase()).filter((c, i, a) => a.indexOf(c) === i), name: mt && typeof mt['2'] === 'string' ? mt['2'] : null };
+    }
     if (!cols.length && lamp && lamp.param){ const c = lamp.param.color || lamp.param.colors; if (c && c.$b) cols = hx(c); else if (Array.isArray(c)) c.forEach(x => cols.push(...hx(x))); }
     cols = cols.map(c => c.toLowerCase()).filter((c, i, a) => a.indexOf(c) === i);
     return { cols, name: meta.moodName || null };
