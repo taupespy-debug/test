@@ -3120,7 +3120,19 @@ async function saveProfile(i){
     toast(`Saved "${p.name}" to your Peak`);
   } catch(e){ toast('Save failed: ' + e.message); }
 }
+// Proxy: write a light file and read it back, trying each write style until the Proxy keeps it
+async function proxyColr(path, blob){
+  const same = async () => { try { const r = await ble.readAll(path); return r.length === blob.length && r.every((b, k) => b === blob[k]); } catch(e){ return false; } };
+  const tries = [() => ble.write(path, blob, 0, 4), () => ble.writeBlob(path, blob), () => ble.write(path, blob, 0, 1), () => ble.write(path, blob, 0, 0)], errs = [];
+  for (let n = 0; n < tries.length; n++){
+    try { await tries[n](); } catch(e){ errs.push((n + 1) + ':' + (e.message || e)); continue; }
+    if (await same()) return n + 1;
+    errs.push((n + 1) + ':no change');
+  }
+  throw new Error(path.replace('/u/app/hc/', 'P').replace('/colr', '') + ' ' + errs.join(', '));
+}
 async function writeProfileColor(i, hex){
+  if (isProxy()){ const b = proxyBlob(hex); await proxyColr(`/u/app/hc/${i}/colr`, b); if (S.active === i){ try { await proxyColr('/p/app/thc/colr', b); } catch(e){} } return; }
   if (S.api === 2){
     await ble.write(`/u/app/hc/${i}/colr`, rgbt(hex));
     for (const s of ['phcl','accl']){ try { await ble.write(`/u/app/hc/${i}/${s}`, rgbt(hex)); } catch(e){} }
@@ -3140,6 +3152,7 @@ async function setLantern(on){
   } catch(e){ toast('Lantern failed: '+e.message); }
 }
 async function writeLanternColor(hex){
+  if (isProxy()) return proxyColr('/p/app/ltrn/colr', proxyBlob(hex));
   if (S.api === 2) await ble.write('/p/app/ltrn/colr', rgbt(hex));
   else await ble.writeBlob('/p/app/ltrn/colr', solidPayload(hex));
 }
@@ -3172,9 +3185,9 @@ async function applyScheme(sc){
   store.ledScheme = sc.c.slice(); store.lantern = sc.l || sc.c[1]; save();
   sc.c.forEach((c,i) => { S.profiles[i].color = c; S.profiles[i].mood = null; });
   render();
-  if (S.mode !== 'live'){ toast(`${sc.n} saved here. Connect to send it to your Peak.`); return; }
-  toast(`Writing ${sc.n} to your Peak…`);
-  try { for (let i=0;i<4;i++) await writeProfileColor(i, sc.c[i]); if (S.lantern) await writeLanternColor(store.lantern); toast(`${sc.n} applied`); }
+  if (S.mode !== 'live'){ toast(`${sc.n} saved here. Connect to send it to your ${devWord()}.`); return; }
+  toast(`Writing ${sc.n} to your ${devWord()}…`);
+  try { for (let i=0;i<4;i++) await writeProfileColor(i, sc.c[i]); if (S.lantern) await writeLanternColor(store.lantern); toast(`${sc.n} applied`); if (isProxy()) previewProfile(S.active); }
   catch(e){ toast('Color write failed: '+e.message); }
 }
 
@@ -4716,7 +4729,7 @@ async function devInspector(){
   for (const path of P){
     try {
       if (/colr$/.test(path)){ const full = await ble.readAll(path); let j = ''; try { j = JSON.stringify(cborDecode(full), (k, v) => v instanceof Uint8Array ? [...v] : v); } catch(e){ j = 'decode failed'; }
-        if (!j || j === 'decode failed' || full.length > 100) j += '  hex=' + [...full.slice(0, 160)].map(b => b.toString(16).padStart(2, '0')).join(' '); lines.push(path + '  len=' + full.length + '  ' + j); el.querySelector('#diOut').textContent = lines.join('\n'); continue; }
+        if (!j || j === 'decode failed' || full.length > 100) j += '  hex=' + [...full].map(b => b.toString(16).padStart(2, '0')).join(' '); lines.push(path + '  len=' + full.length + '  ' + j); el.querySelector('#diOut').textContent = lines.join('\n'); continue; }
       const r = await ble.read(path, 32), dv = new DataView(r.buffer, r.byteOffset, r.length), hex = [...r].map(b => b.toString(16).padStart(2, '0')).join(' ');
       const parts = [`len=${r.length}`, `hex=${hex}`];
       if (r.length >= 1) parts.push(`u8=${r[0]}`);
