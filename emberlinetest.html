@@ -1681,6 +1681,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
       <button class="btn small" id="tbInspect">Device inspector (connect first)</button>
       <button class="btn small" id="tbColorTest">Proxy color write test (connect first)</button>
       <button class="btn small" id="tbMoodTest">Proxy mood test (connect first)</button>
+      <button class="btn small" id="tbInhale">Inhale sensor test (connect first)</button>
       <div class="row" style="gap:6px;flex-wrap:wrap"><span class="muted" style="font-size:13px;width:100%">Proxy brightness test: tap each, tell Claude how bright it looks</span><button class="btn small" data-pbr="16">16</button><button class="btn small" data-pbr="64">64</button><button class="btn small" data-pbr="128">128</button><button class="btn small" data-pbr="256">256</button><button class="btn small" data-pbr="1024">1024</button><button class="btn small" data-pbr="16384">16384</button><button class="btn small" data-pbr="65280">65280</button></div>
       <div class="row" style="gap:6px"><span class="muted" style="font-size:13px;width:100%">Light test: tap each, tell Claude which turned the light red</span><button class="btn small" data-lt="a">A: new format</button><button class="btn small" data-lt="b">B: old format</button><button class="btn small" data-lt="c">C: clear</button><button class="btn small" data-lt="d">D: own light red</button><button class="btn small" data-lt="e">E: other clear</button></div>
     </div>
@@ -2174,7 +2175,7 @@ class Lorax {
     if (/elap|tott|time|btim/.test(path)) return 100;
     if (/bat\/soc/.test(path)) return 100;
     if (/volt/.test(path)) return 1000;
-    if (/led\/dif/.test(path)) return 1000;
+    if (/led\/di[fa]/.test(path)) return store.inhOld ? 1000 : 4096; // Puffco web app: 4096 = 1.0 (test build can flip back to the old 1000)
     return 1;
   }
   async u8(path){ return (await this.read(path, 1))[0]; }
@@ -2661,7 +2662,7 @@ function hitLoopStart(){
     if (HIT.inflight) return; HIT.inflight = true;
     try {
       let v = await ble.f32('/p/app/led/dif'); HIT.supported = true;
-      if (isFinite(v) && isProxy()){
+      if (isFinite(v) && isProxy() && store.inhOld){
         if (HIT.pbase == null || S.state === 7) HIT.pbase = HIT.pbase == null ? v : HIT.pbase * .8 + v * .2;           // learn the resting level while heating
         else if (!HIT.on && Math.abs(v - HIT.pbase) < .02) HIT.pbase = HIT.pbase * .97 + v * .03;                    // drift slowly when quiet
         v = Math.abs(v - HIT.pbase) * 4;
@@ -4707,7 +4708,7 @@ function keepOpenNotice(){
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
   el.querySelector('#koOk').onclick = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
 }
-setTimeout(() => { const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; const pl = $('#tbProxyLab'); if (pl) pl.onclick = proxyLab; const ct = $('#tbColorTest'); if (ct) ct.onclick = colorTest; const mt = $('#tbMoodTest'); if (mt) mt.onclick = moodTest; }, 0);
+setTimeout(() => { const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; const pl = $('#tbProxyLab'); if (pl) pl.onclick = proxyLab; const ct = $('#tbColorTest'); if (ct) ct.onclick = colorTest; const mt = $('#tbMoodTest'); if (mt) mt.onclick = moodTest; const ih = $('#tbInhale'); if (ih) ih.onclick = inhaleTest; }, 0);
 // test build: one place to check everything on a Proxy, with live raw readings
 function proxyLab(){
   if (document.querySelector('.plab')) return;
@@ -4771,6 +4772,58 @@ document.addEventListener('click', async e => { const b = e.target.closest('[dat
 // test build: try every way of saving a color on the Proxy and read it back, so we see which one sticks
 // test build: send real Puffco Proxy moods as previews in a few different ways, to find the one the Proxy plays
 document.addEventListener('click', async e => { const b = e.target.closest('[data-pbr]'); if (!b) return; if (S.mode !== 'live'){ toast('Connect first'); return; } const v = new Uint8Array(4); new DataView(v.buffer).setInt32(0, +b.dataset.pbr, true); try { await ble.write('/u/app/ui/lbrt', v); toast('Brightness ' + b.dataset.pbr + ' sent'); } catch(err){ toast('Failed: ' + (err.message || err)); } });
+// test build: watch the inhale sensor live, see what the hit counter thinks, and record it for Claude
+function inhaleTest(){
+  if (S.mode !== 'live'){ toast('Connect your device first'); return; }
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:90vh;overflow:auto;text-align:left;justify-items:stretch;gap:10px">
+    <h2>Inhale sensor</h2>
+    <p style="margin:0;font-size:13px">Start a heat cycle. When it says Ready, take a few pulls: short, long, soft, hard. Tap Record first to save it for Claude.</p>
+    <div class="seg" id="ihMode"><button data-ihm="new">New reading</button><button data-ihm="old">Old reading</button></div>
+    <canvas id="ihCv" width="520" height="160" style="width:100%;height:160px;border-radius:12px;background:rgba(255,255,255,.05)"></canvas>
+    <pre id="ihNow" style="margin:0;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;color:var(--fg)"></pre>
+    <button class="btn primary" id="ihRec">Record</button>
+    <button class="btn" id="ihCopy">Copy recording</button>
+    <button class="btn" id="ihClose">Close</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
+  const cv = el.querySelector('#ihCv'), g = cv.getContext('2d'), pts = [], rec = []; let recOn = false, t0 = performance.now(), busy = false;
+  const paintMode = () => el.querySelectorAll('[data-ihm]').forEach(b => b.setAttribute('aria-pressed', (b.dataset.ihm === 'old') === !!store.inhOld));
+  paintMode();
+  el.querySelector('#ihMode').onclick = e => { const b = e.target.closest('[data-ihm]'); if (!b) return; store.inhOld = b.dataset.ihm === 'old'; save(); ble.ints = {}; HIT.pbase = null; paintMode(); toast(store.inhOld ? 'Using the old reading' : 'Using the new reading'); };
+  const STATES = {5:'Idle',6:'Temp select',7:'Preheating',8:'Ready / hitting',9:'Done'};
+  const tick = async () => {
+    if (!el.isConnected || busy) return; busy = true;
+    try {
+      const rd = async path => { try { const r = await ble.read(path, 4); return r.length >= 4 ? new DataView(r.buffer, r.byteOffset, 4).getInt32(0, true) : null; } catch(e){ return null; } };
+      const dif = await rd('/p/app/led/dif'), dia = await rd('/p/app/led/dia');
+      const sc = store.inhOld ? 1000 : 4096, v = dif == null ? 0 : dif / sc, now = performance.now();
+      const up = Math.max(.12, (HIT.base || .03) + .1), down = Math.max(.06, (HIT.base || .03) + .04);
+      pts.push({ t: now, v, on: HIT.on }); while (pts.length && now - pts[0].t > 12000) pts.shift();
+      if (recOn && rec.length < 2000) rec.push([Math.round(now - t0), dif, dia, S.state, HIT.on ? 1 : 0]);
+      el.querySelector('#ihNow').textContent = [
+        `state: ${STATES[S.state] || S.state}   reading: ${store.inhOld ? 'old' : 'new'}`,
+        `raw dif: ${dif}   raw dia: ${dia}`,
+        `inhale: ${v.toFixed(3)}   resting: ${(HIT.base || 0).toFixed(3)}   starts at ${up.toFixed(3)}, ends at ${down.toFixed(3)}`,
+        `hit on: ${HIT.on ? 'YES' : 'no'}   timer: ${HIT.on ? Math.max(0, HIT.live).toFixed(1) + 's' : '-'}   last hit: ${HIT.last != null ? HIT.last + 's' : '-'}   hits: ${HIT.hits.length}`,
+        recOn ? `recording… ${rec.length} samples` : rec.length ? `recorded ${rec.length} samples` : ''
+      ].join('\n');
+      // graph
+      const W = cv.width, H = cv.height, top = Math.max(.5, ...pts.map(p => p.v)) * 1.1, y = val => H - 8 - (val / top) * (H - 16);
+      g.clearRect(0, 0, W, H);
+      g.setLineDash([6, 6]); g.lineWidth = 1;
+      g.strokeStyle = 'rgba(120,255,160,.7)'; g.beginPath(); g.moveTo(0, y(up)); g.lineTo(W, y(up)); g.stroke();
+      g.strokeStyle = 'rgba(255,170,90,.7)'; g.beginPath(); g.moveTo(0, y(down)); g.lineTo(W, y(down)); g.stroke();
+      g.setLineDash([]);
+      pts.forEach((p, i) => { if (!p.on) return; const x = W - (now - p.t) / 12000 * W; g.fillStyle = 'rgba(160,80,255,.18)'; g.fillRect(x, 0, 6, H); });
+      g.strokeStyle = '#c98bff'; g.lineWidth = 2.5; g.beginPath();
+      pts.forEach((p, i) => { const x = W - (now - p.t) / 12000 * W; i ? g.lineTo(x, y(p.v)) : g.moveTo(x, y(p.v)); }); g.stroke();
+    } finally { busy = false; }
+  };
+  const iv = setInterval(tick, 150);
+  el.querySelector('#ihRec').onclick = e => { recOn = !recOn; if (recOn){ rec.length = 0; t0 = performance.now(); } e.target.textContent = recOn ? 'Stop recording' : 'Record again'; };
+  el.querySelector('#ihCopy').onclick = async () => { const txt = `series=${S.series} reading=${store.inhOld ? 'old' : 'new'}\nms,dif,dia,state,hitOn\n` + rec.map(r => r.join(',')).join('\n'); try { await navigator.clipboard.writeText(txt); toast('Copied'); } catch(e){ const pre = el.querySelector('#ihNow'); pre.textContent = txt; const r = document.createRange(); r.selectNodeContents(pre); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected, tap Copy'); } };
+  el.querySelector('#ihClose').onclick = () => { clearInterval(iv); el.remove(); };
+}
 async function moodTest(){
   if (S.mode !== 'live'){ toast('Connect your device first'); return; }
   const el = document.createElement('div'); el.className = 'egg';
