@@ -2496,6 +2496,8 @@ async function afterConnect(quick){
     try { await applyProfileBright(S.active); } catch(e){}
     try { await readDeviceInfo(); render(); rememberDevice(); save(); } catch(e){}
     try { await loadProxyTpl(); } catch(e){}
+    // Proxy: an unfinished preview left on the device shows as rainbow while idle. Its resting value is a single 0, so put that back.
+    if (isProxy()){ try { const pv = await ble.readAll('/p/app/led/pclr'); if (!(pv.length === 1 && pv[0] === 0)) await ble.write('/p/app/led/pclr', new Uint8Array([0]), 0, 4); } catch(e){} }
     try { await readSerial(); } catch(e){}
     try { await readBatteryDetail(); } catch(e){}
     if (store.cleanBaseOdo == null && S.odo != null){ store.cleanBaseOdo = S.odo - (store.localSince || 0); save(); }
@@ -4757,7 +4759,7 @@ async function devInspector(){
   for (const path of P){
     try {
       if (/colr$/.test(path)){ const full = await ble.readAll(path); let j = ''; try { j = JSON.stringify(cborDecode(full), (k, v) => v instanceof Uint8Array ? [...v] : v); } catch(e){ j = 'decode failed'; }
-        if (!j || j === 'decode failed' || full.length > 100) j += '  hex=' + [...full].map(b => b.toString(16).padStart(2, '0')).join(' '); lines.push(path + '  len=' + full.length + '  ' + j); el.querySelector('#diOut').textContent = lines.join('\n'); continue; }
+        if (!j || j === 'decode failed' || full.length > 100) j += '  hex=' + [...full].map(b => b.toString(16).padStart(2, '0')).join(''); lines.push(path + '  len=' + full.length + '  ' + j); el.querySelector('#diOut').textContent = lines.join('\n'); continue; }
       const r = await ble.read(path, 32), dv = new DataView(r.buffer, r.byteOffset, r.length), hex = [...r].map(b => b.toString(16).padStart(2, '0')).join(' ');
       const parts = [`len=${r.length}`, `hex=${hex}`];
       if (r.length >= 1) parts.push(`u8=${r[0]}`);
