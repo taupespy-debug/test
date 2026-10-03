@@ -3150,7 +3150,7 @@ function brightFor(i){
 }
 function brightProf(){ return typeof moodTarget === 'number' && moodTarget >= 0 && moodTarget <= 3 ? moodTarget : S.active; }
 let brEdit = null;
-async function writeBright(b){ await ble.write('/u/app/ui/lbrt', isProxy() ? new Uint8Array([b[0]]) : new Uint8Array(b)); store.bright = b.slice(); }
+async function writeBright(b){ if (isProxy()) return; await ble.write('/u/app/ui/lbrt', new Uint8Array(b)); store.bright = b.slice(); } // Proxy brightness format not confirmed yet, writing the Peak one can scramble its lights
 async function applyProfileBright(i){
   const b = brightFor(i); if (!b || S.mode !== 'live') return;
   if (Array.isArray(store.bright) && b.join() === store.bright.join()) return; // already showing
@@ -4696,7 +4696,7 @@ async function devInspector(){
   if (S.mode !== 'live'){ toast('Connect your device first'); return; }
   const P = ['/p/bat/soc','/p/bat/chg/stat','/p/bat/volt','/p/bat/chg/etf','/p/app/htr/temp','/p/htr/temp','/p/htr/tcmd','/p/app/htr/tcmd','/p/app/stat/id','/p/app/stat/elap','/p/app/stat/tott','/p/app/hcs','/p/htr/chmt',
     '/u/app/hc/0/name','/u/app/hc/0/temp','/u/app/hc/0/time','/u/app/hc/0/btmp','/u/app/hc/0/btim','/u/app/hc/0/intn','/u/app/hc/1/temp','/u/app/hc/1/time',
-    '/p/app/led/pclr','/p/app/thc/colr','/u/app/hc/0/colr','/u/app/hc/0/phcl','/p/app/odom/0/nc','/p/app/info/dtot','/p/app/odom/0/tm','/p/app/led/dif','/p/sys/fw/ver','/p/sys/fw/api','/p/sys/hw/mdcd','/u/sys/name','/u/app/ui/lbrt','/p/app/ltrn/time'];
+    '/p/app/led/pclr','/p/app/thc/colr','/u/app/hc/0/colr','/u/app/hc/1/colr','/u/app/hc/2/colr','/u/app/hc/3/colr','/p/app/ltrn/colr','/u/app/hc/0/phcl','/p/app/odom/0/nc','/p/app/info/dtot','/p/app/odom/0/tm','/p/app/led/dif','/p/sys/fw/ver','/p/sys/fw/api','/p/sys/hw/mdcd','/u/sys/name','/u/app/ui/lbrt','/p/app/ltrn/time'];
   const el = document.createElement('div'); el.className = 'egg';
   el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:86vh;overflow:auto;text-align:left;justify-items:stretch"><h2>Device inspector</h2><p id="diStat">Reading…</p><pre id="diOut" style="margin:0;font:11px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;color:var(--fg)"></pre><button class="btn primary" id="diCopy">Copy results</button><button class="btn" id="diClose">Close</button></div>`;
   document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
