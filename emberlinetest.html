@@ -2497,7 +2497,7 @@ async function afterConnect(quick){
     try { await readDeviceInfo(); render(); rememberDevice(); save(); } catch(e){}
     try { await loadProxyTpl(); } catch(e){}
     // Proxy: an unfinished preview left on the device shows as rainbow while idle. Its resting value is a single 0, so put that back.
-    if (isProxy()){ try { const pv = await ble.readAll('/p/app/led/pclr'); if (!(pv.length === 1 && pv[0] === 0)) await ble.write('/p/app/led/pclr', new Uint8Array([0]), 0, 4); } catch(e){} }
+    if (isProxy()){ try { const pv = await ble.readAll('/p/app/led/pclr'); if (pv.length > 1){ try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(_){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } } } catch(e){} } // same as test C, which turns it back to normal
     try { await readSerial(); } catch(e){}
     try { await readBatteryDetail(); } catch(e){}
     if (store.cleanBaseOdo == null && S.odo != null){ store.cleanBaseOdo = S.odo - (store.localSince || 0); save(); }
@@ -2518,7 +2518,6 @@ async function previewWrite(blobOrHex){
 async function previewClear(){
   if (isProxy() && !pvOn) return; // clearing a preview that isn't there puts the Proxy into its rainbow look
   pvOn = false;
-  if (isProxy()){ try { await ble.write('/p/app/led/pclr', new Uint8Array([0]), 0, 4); } catch(e){ try { await ble.writeBlob('/p/app/led/pclr', new Uint8Array([0])); } catch(_){} } return; } // truncate, or old bytes stay behind // the Proxy's idle preview value is a single 0
   try {
     if (S.api === 2) await ble.write('/p/app/led/pclr', new Uint8Array(8));
     else { try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(e){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } }
@@ -5459,7 +5458,9 @@ function ltTarget(){ return moodTarget ?? S.active; }
 function ltTargetName(){ const t = ltTarget(); return t === 'lantern' ? 'Lantern' : ((S.profiles[t] || {}).name || 'P' + (t + 1)); }
 function ltCanShow(){ return S.mode === 'live' && !(S.state >= 7 && S.state <= 9); }
 function ltWrite(blobOrHex){ if (!ltCanShow()) return; clearTimeout(previewTimer); ledJob(() => previewWrite(blobOrHex).catch(() => {})); }
-function ltShowRef(ref){ let blob; try { blob = S.api === 2 ? (moodColors(ref)[0] || '#ffffff') : moodPayload(ref); } catch(e){ return; } ltWrite(blob); }
+// the Proxy only takes solid colors so far, so a mood shows as its main color there
+function moodSolid(ref){ try { const mc = moodColors(ref).filter((c, k, a) => a.indexOf(c) === k); return pickAccent(mc) || mc[0] || '#ffffff'; } catch(e){ return '#ffffff'; } }
+function ltShowRef(ref){ let blob; try { blob = isProxy() ? moodSolid(ref) : S.api === 2 ? (moodColors(ref)[0] || '#ffffff') : moodPayload(ref); } catch(e){ return; } ltWrite(blob); }
 function ltShowCurrent(){
   if (!LT.on || !ltCanShow()) return;
   if (LT.pending) return ltShowRef(LT.pending);
@@ -5469,8 +5470,9 @@ function ltShowCurrent(){
   ledJob(async () => {
     if (!LT.on || !ltCanShow()) return;
     let blob = null;
-    if (S.api !== 2){ try { const r = await ble.readAll(`/u/app/hc/${t}/colr`); if (r.length > 8 && (r[0] & 0xe0) === 0xa0) blob = r; } catch(e){} }
+    if (S.api !== 2){ try { const r = await ble.readAll(`/u/app/hc/${t}/colr`); if (r.length > 8 && (r[0] & 0xe0) === 0xa0){ blob = r; if (isProxy()) blob.native = true; } } catch(e){} }
     const p = S.profiles[t] || {};
+    if (!blob && isProxy()) blob = p.color || '#ffffff';
     if (!blob){ blob = p.color || '#ffffff'; if (p.mood && S.api !== 2){ try { blob = moodPayload(p.mood); } catch(e){} } }
     try { await previewWrite(blob); } catch(e){}
   });
@@ -5570,7 +5572,13 @@ function swatchStyle(ref){
 }
 async function writeMoodTo(target, ref){
   const name = ref.name || 'Mood';
-  if (isProxy() && S.mode === 'live'){ toast('Custom moods on the Proxy are coming soon. Its own profile lights still work.'); return; } // the Proxy rejects the Peak light format (status 0x16)
+  if (isProxy() && S.mode === 'live'){ // Proxy: solid colors only for now (it rejects the Peak mood format)
+    const hex = moodSolid(ref);
+    if (target === 'lantern'){ store.lanternMood = null; store.lantern = hex; save(); await writeLanternColor(hex); await ble.write('/p/app/ltrn/cmd', new Uint8Array([1])); S.lantern = true; toast(`Lantern set to ${name}'s color`); drawLightsState(); return; }
+    const p = S.profiles[target]; p.mood = null; p.color = hex; p.pal = [hex];
+    try { await writeProfileColor(target, hex); toast(`${p.name} set to ${name}'s color. Animated moods on the Proxy are coming soon.`); } catch(e){ toast('Color write failed: ' + e.message); }
+    render(); return;
+  }
   if (target === 'lantern'){
     store.lanternMood = ref; save();
     if (!needLive('light the lantern')) return;
@@ -5591,8 +5599,8 @@ async function writeMoodTo(target, ref){
   toast(`${name} set on ${p.name}`); render();
 }
 function previewMood(ref, ms){
-  if (S.mode !== 'live' || isProxy() || (S.state >= 7 && S.state <= 9)) return;
-  let blob; try { blob = S.api === 2 ? (moodColors(ref)[0] || '#ffffff') : moodPayload(ref); } catch(e){ return; }
+  if (S.mode !== 'live' || (S.state >= 7 && S.state <= 9)) return;
+  let blob; try { blob = isProxy() ? moodSolid(ref) : S.api === 2 ? (moodColors(ref)[0] || '#ffffff') : moodPayload(ref); } catch(e){ return; }
   clearTimeout(previewTimer);
   ledJob(() => previewWrite(blob).catch(() => {}));
   previewTimer = setTimeout(() => ledJob(previewClear), ms || 4000);
