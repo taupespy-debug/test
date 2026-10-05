@@ -7081,7 +7081,8 @@ async function edShareSend(){
   if (!Object.keys(files).length) return false;
   // anonymous: no account, serial or device id, just the light data (hash only stops duplicate rows)
   const hash = toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(S.edition + JSON.stringify(files)))));
-  await sbJSON('/rest/v1/edition_lights', { method:'POST', headers:{ Prefer:'return=minimal,resolution=ignore-duplicates' }, body: JSON.stringify({ hash, edition:S.edition, series:S.series || (isProxy() ? 'toad' : 'peak'), fw:S.fw || null, api:S.api || null, files }) });
+  try { await sbJSON('/rest/v1/edition_lights', { method:'POST', headers:{ Prefer:'return=minimal' }, body: JSON.stringify({ hash, edition:S.edition, series:S.series || (isProxy() ? 'toad' : 'peak'), fw:S.fw || null, api:S.api || null, files }) }); }
+  catch(e){ if (e.status !== 409) throw e; } // 409 = these exact lights are already saved
   store.edShare = store.edShare || {}; store.edShare[S.edition] = { ok:true, at:Date.now() }; save();
   return true;
 }
