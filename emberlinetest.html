@@ -22,6 +22,30 @@
 @keyframes splUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes splSlide{from{transform:translateX(-110%)}to{transform:translateX(280%)}}
 @media (prefers-reduced-motion:reduce){.spl *,.spl::before{animation:none!important;opacity:1!important}}
+.last-sess{display:grid;gap:8px;padding:12px 14px;border-radius:16px;background:var(--fill,rgba(255,255,255,.06))}
+.ls-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;text-align:center}
+.ls-grid b{display:block;font-size:17px;font-variant-numeric:tabular-nums}.ls-grid span{font-size:11px;color:var(--muted,#a1a1a6)}
+.shareb{position:relative;flex:none;width:48px;height:48px;min-width:48px;padding:0!important;border-radius:50%}
+#shareBtn.shareb svg{position:absolute;left:50%;top:50%;transform:translate(-50%,-52%);margin:0}
+#shareBtn.shareb svg{width:24px!important;height:24px!important;min-width:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.gear-chip.ed{background:linear-gradient(135deg,var(--e1),var(--e2));color:#fff;box-shadow:0 4px 16px color-mix(in srgb,var(--e1) 40%,transparent),inset 0 1px 0 rgba(255,255,255,.25);text-shadow:0 1px 2px rgba(0,0,0,.35)}
+.gear-chip.ed svg{stroke:#fff}
+.gear-chip.ed.light{color:#15151a;text-shadow:none}.gear-chip.ed.light svg{stroke:#15151a}
+.gear-chip.ed small{font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:2px 6px;border-radius:99px;background:rgba(0,0,0,.25);margin-left:2px}
+.gear-chip.ed.light small{background:rgba(0,0,0,.12)}
+.ed-card{border-color:color-mix(in srgb,var(--e1) 75%,transparent)!important;box-shadow:0 0 0 1px color-mix(in srgb,var(--e1) 55%,transparent),0 12px 44px color-mix(in srgb,var(--e1) 30%,transparent)!important;background-image:linear-gradient(165deg,color-mix(in srgb,var(--e1) 48%,transparent),color-mix(in srgb,var(--e2) 18%,transparent) 42%,transparent 72%)!important;border-width:1.5px!important}
+.shuf-card{display:grid;gap:10px}
+.shuf-list{display:grid;gap:8px;overflow:auto;max-height:52vh;padding:2px}
+.shuf-item{display:grid;grid-template-columns:54px 1fr 22px;align-items:center;gap:12px;padding:8px 12px 8px 8px;border-radius:16px;border:1.5px solid transparent;background:var(--fill,rgba(255,255,255,.06));color:inherit;font:inherit;text-align:left}
+.shuf-item .mood-sw{display:block;width:54px;height:36px;border-radius:10px}
+.shuf-item b{display:block;font-size:15px}.shuf-item small{color:var(--muted,#a1a1a6);font-size:12px}
+.shuf-item em{font-style:normal;font-weight:800;color:var(--accent);text-align:center}
+.shuf-item.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.lb-more{width:100%;display:flex;align-items:center;justify-content:center;gap:6px}
+.lb-more svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;transition:transform .25s}
+.lb-more[aria-expanded="true"] svg{transform:rotate(180deg)}
+.lb-you{border-top:1px dashed var(--line,rgba(255,255,255,.12));padding-top:8px}
+.ph-note{display:block;font-size:12px;color:var(--muted);margin-top:2px}.ph-row{gap:10px}.ph-row .colorbtn{flex:none}
 </style></head><body>
 <div class="spl" id="spl" aria-label="Loading Emberline" role="status">
   <div class="spl-in">
@@ -1525,6 +1549,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
 <header>
   <div class="hdr">
     <span class="navbtn batt" id="batt" title="Battery"><i><b style="width:80%"></b></i><span>80%</span><span class="skin-hearts" id="skinHearts" aria-hidden="true"></span></span>
+    <button class="navbtn shareb" id="shareBtn" aria-label="Share Emberline"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="M7.5 7.5L12 3l4.5 4.5"/><path d="M5 12v6.5A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V12"/></svg></button>
     <button class="devsw" id="devSw" aria-haspopup="true" aria-expanded="false"><span class="brand" id="devName">Emberline<small id="devSub">Peak Pro controller</small></span><svg class="devchev" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg></button>
     <button class="navbtn pill off" id="connBtn"><span class="dot"></span><span id="connTxt">Connect</span></button>
   </div>
@@ -1684,6 +1709,8 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
       <button class="btn small" id="tbMoodTest">Proxy mood test (connect first)</button>
       <button class="btn small" id="tbInhale">Inhale sensor test (connect first)</button>
       <button class="btn small" id="tbWhatsNew">Show "What's new" popup</button>
+      <button class="btn small" id="tbLightLab">Apply light files (paste from Supabase)</button>
+      <button class="btn small" id="tbEdShare">Share edition lights now</button>
       <div class="row" style="gap:6px;flex-wrap:wrap"><span class="muted" style="font-size:13px;width:100%">Proxy brightness test: tap each, tell Claude how bright it looks</span><button class="btn small" data-pbr="16">16</button><button class="btn small" data-pbr="64">64</button><button class="btn small" data-pbr="128">128</button><button class="btn small" data-pbr="256">256</button><button class="btn small" data-pbr="1024">1024</button><button class="btn small" data-pbr="16384">16384</button><button class="btn small" data-pbr="65280">65280</button></div>
       <div class="row" style="gap:6px"><span class="muted" style="font-size:13px;width:100%">Light test: tap each, tell Claude which turned the light red</span><button class="btn small" data-lt="a">A: new format</button><button class="btn small" data-lt="b">B: old format</button><button class="btn small" data-lt="c">C: clear</button><button class="btn small" data-lt="d">D: own light red</button><button class="btn small" data-lt="e">E: other clear</button></div>
     </div>
@@ -2551,6 +2578,9 @@ async function afterConnect(quick){
     try { await readProfiles(); render(); if (view === 'prof') drawProfiles(); } catch(e){}
     try { await applyProfileBright(S.active); } catch(e){}
     try { await readDeviceInfo(); render(); rememberDevice(); save(); } catch(e){}
+    setTimeout(() => { try { edShareAsk(); } catch(e){} }, 9000); // limited edition owners: offer to share the edition's lights
+    // mood shuffle catch-up: if the Puffco did sessions while Emberline was closed (dab count went up), pick fresh moods now
+    try { if (store.shuffle && S.odo != null){ if (store.shufOdo != null && S.odo > store.shufOdo){ Object.keys(store.shuffle).forEach(k => { if (store.shuffle[k].on) setTimeout(() => shuffleNext(+k), 1500 + 600 * k); }); } store.shufOdo = S.odo; save(); } } catch(e){}
     { const g = myGear().join(); if (g && g !== store.gearSent){ store.gearSent = g; save(); try { await lbPush(true); } catch(e){} } } // share your gear on your profile as soon as a new device connects
     try { await loadProxyTpl(); } catch(e){}
     // Proxy: an unfinished preview left on the device shows as rainbow while idle. Its resting value is a single 0, so put that back.
@@ -3067,8 +3097,12 @@ async function poll(){
     try { S.tempC = await ble.f32('/p/app/htr/temp'); } catch(e){ try { S.tempC = await ble.f32('/p/htr/temp'); } catch(e2){} }
     // while Ready, keep the Bluetooth line clear for the inhale sensor: read the timer every other tick and skip the rest
     const hitting = S.state === 8 && HIT.loop, odd = (slowTick & 1) === 1;
-    if (S.state >= 7 && S.state <= 9 && (!hitting || odd)){
-      try { S.elapsed = await ble.f32('/p/app/stat/elap'); if (!hitting || !S.total) S.total = await ble.f32('/p/app/stat/tott'); } catch(e){}
+    if (S.state !== prev){ S.elapsed = 0; S.elapsedAt = performance.now(); S.totalFor = -1; if (S.state === 8) S.total = (S.profiles[S.active] || {}).time || S.total; } // new phase: don't show the last phase's timer
+    if (S.state >= 7 && S.state <= 9 && (!hitting || odd || S.totalFor !== S.state)){
+      try {
+        S.elapsed = await ble.f32('/p/app/stat/elap'); S.elapsedAt = performance.now();
+        if (!hitting || S.totalFor !== S.state || slowTick % 8 === 1){ const t = await ble.f32('/p/app/stat/tott'); if (t > 0){ S.total = t; S.totalFor = S.state; } } // the preheat total isn't the session total
+      } catch(e){}
       if (!hitting){ try { const t = await ble.f32('/p/app/htr/tcmd'); if (t > 100 && t < 400) S.liveTargetC = t; } catch(e){} }
     }
     if (Date.now() > hcsHold && !hitting){ try { const a = await ble.u8('/p/app/hcs'); if (a <= 3 && a !== S.active){ S.active = a; applyProfileBright(a); if (view === 'prof') drawProfiles(); } } catch(e){} }
@@ -3077,11 +3111,34 @@ async function poll(){
   } finally { busy = false; render(); }
 }
 
+document.addEventListener('input', e => { const t = e.target.closest && e.target.closest('[data-ph]'); if (t) t.parentElement.style.cssText = 'background:' + t.value; });
+document.addEventListener('change', e => { const t = e.target.closest && e.target.closest('[data-ph]'); if (!t) return; const i = +t.dataset.ph; phSet(i, t.value); drawProfiles(); toast(`Preheat color set for ${S.profiles[i].name}`); });
+/* preheat color: shows a different light while heating, then puts the profile light back */
+const phVal = i => ((store.preheat || [])[i]) || null;
+const phColor = i => { const v = phVal(i); return typeof v === 'string' ? v : null; };
+const phMood = i => { const v = phVal(i); return v && typeof v === 'object' ? v : null; };
+const phIdx = t => typeof t === 'string' && t.startsWith('ph:') ? +t.slice(3) : -1;
+function phLabel(i){ const m = phMood(i); return m ? `${esc(m.name || 'Mood')} while heating` : phColor(i) ? 'This color while heating' : 'Off, uses the profile light'; }
+function phSwatch(i){ const m = phMood(i), c = phColor(i); return m ? swatchStyle(m) : c ? 'background:' + c : 'background:transparent;border:2px dashed var(--muted)'; }
+function phHex(i){ const m = phMood(i); if (m){ try { return moodSolid(m); } catch(e){ return '#ffffff'; } } return phColor(i); }
+function phSet(i, hex){ store.preheat = store.preheat || []; store.preheat[i] = hex; save(); if (S.mode === 'live' && S.api === 2) ledJob(() => ble.write(`/u/app/hc/${i}/phcl`, rgbt(phHex(i) || S.profiles[i].color)).catch(() => {})); }
+let phOn = false;
+function phStart(){
+  const v = phVal(S.active); if (!v || S.api === 2 || S.mode !== 'live' || phOn) return; // original Peak does this on its own
+  // shown through the preview channel: the profile light stays untouched, so clearing it at Ready is instant (no white flash from rewriting the light file)
+  let blob; try { blob = typeof v === 'string' ? v : moodPayload(v); } catch(e){ return; }
+  if (isProxy() && typeof blob !== 'string') blob.native = true;
+  phOn = true; clearTimeout(previewTimer);
+  ledJob(() => previewWrite(blob).catch(() => { phOn = false; }));
+}
+function phEnd(){ if (!phOn) return; phOn = false; ledJob(previewClear); }
+
 /* session tracking from state transitions */
 let cur = null;
 function trackSession(prev, st){
   checkWarn();
-  if (st === 7 && prev !== 7){ hitReset(); hitLoopStart(); } // start listening during preheat so hits count the moment it's Ready
+  if (st === 7 && prev !== 7){ hitReset(); hitLoopStart(); phStart(); }
+  if (prev === 7 && st !== 7) phEnd(); // start listening during preheat so hits count the moment it's Ready
   if (st === 8 && prev !== 8){ if (prev !== 9 && prev !== 7) hitReset(); hitLoopStart(); }
   if (prev === 8 && st !== 8 && S.mode === 'live' && !zoneLive.on){ clearTimeout(previewTimer); setTimeout(() => { ledJob(previewClear); if (LT.on) ltShowCurrent(); }, 900); }
   const tF = c2f(S.tempC);
@@ -3100,6 +3157,7 @@ function trackSession(prev, st){
       store.lastEndF = Math.round(tF);
       if (cur.hit && (ranFor >= 20 || gotHit) && warm) setTimeout(() => toast(`Not counted for ranked. Let your ${devWord()} cool down a bit before the next session.`), 1500);
       if (cur.hit && (ranFor >= 20 || gotHit)){ logSession({ warm: warm || undefined, startF: cur.startF, t:cur.t, p:cur.p, name:cur.name, target:cur.target, peak:Math.round(cur.peak), dur:Math.round((Date.now()-cur.t)/1000), batt:cur.batt, hits:(cur.hits || HIT.hits).slice(0, 20), vapor:(S.profiles[cur.p] || {}).vapor, sc:sinceClean() + 1, run: cur.readyAt ? Math.round((Date.now() - cur.readyAt) / 1000) : null }); }
+      { const pi = cur.p; if (store.shuffle && store.shuffle[pi] && store.shuffle[pi].on) setTimeout(() => shuffleNext(pi), 2500); } // mood shuffle: next mood for this profile
       cur = null;
     }
   }
@@ -3206,6 +3264,7 @@ async function saveProfile(i){
       else await writeProfileColor(i, p.color);
       p.lightDirty = false;
     }
+    if (S.api === 2){ try { await ble.write(`/u/app/hc/${i}/phcl`, rgbt(phHex(i) || p.color)); } catch(e){} }
     if (S.active === i) await ble.write('/p/app/hcs', new Uint8Array([i]));
     store.profSaved = store.profSaved || []; store.profSaved[i] = true; save();
     toast(`Saved "${p.name}" to your ${devWord()}`);
@@ -3615,8 +3674,9 @@ function chargeLine(){
 function draw(){
   // header
   $('#devName').firstChild.textContent = S.mode === 'live' ? (S.devName || S.name) : 'Emberline';
-    $('#devSub').textContent = S.mode === 'live' ? (isProxy() ? `Proxy${S.charging ? ' · charging' : ''}` : `${S.edition ? S.edition + ' ' : ''}Peak Pro · ${CHAMBERS[S.chamber] ?? 'Chamber ?'}${S.charging ? ' · charging' : ''}`) : S.mode === 'demo' ? `Demo mode · ${isProxy() ? 'Proxy' : CHAMBERS[S.chamber] ?? '3D Chamber'}` : 'Not connected';
+    $('#devSub').textContent = S.mode === 'live' ? (isProxy() ? `Proxy${S.charging ? ' · charging' : ''}` : `${S.edition ? S.edition + ' ' : ''}${['Opal', 'Indiglow', 'Guardian'].includes(S.edition) ? 'Peak' : 'Peak Pro'} · ${CHAMBERS[S.chamber] ?? 'Chamber ?'}${S.charging ? ' · charging' : ''}`) : S.mode === 'demo' ? `Demo mode · ${isProxy() ? 'Proxy' : CHAMBERS[S.chamber] ?? '3D Chamber'}` : 'Not connected';
   const bt = $('#batt'); bt.style.visibility = 'visible'; bt.hidden = !(S.mode === 'live' && S.battery != null); // hidden takes no space, so the device name gets the room
+  { const sb = $('#shareBtn'); if (sb) sb.hidden = !bt.hidden; } // share sits where the battery goes when nothing's connected
   bt.querySelector('b').style.width = (S.battery || 0) + '%';
   bt.querySelector('b').style.background = S.battery < 20 ? 'var(--bad)' : S.battery < 40 ? 'var(--warn)' : 'var(--good)';
   bt.querySelector('span').textContent = S.battery + '%';
@@ -3642,7 +3702,7 @@ function drawHome(){
     else delete wrap.dataset.exit;
     wrap.dataset.mode = mode;
   }
-  if (mode === 'ready'){ const t = $('#lgTime'), l = Math.max(0, Math.round(S.total - S.elapsed)) + 's'; if (t.textContent !== l) t.textContent = l; }
+  if (mode === 'ready'){ const t = $('#lgTime'), l = Math.max(0, Math.round(S.total - liveElapsed())) + 's'; if (t.textContent !== l) t.textContent = l; }
   $('.ambient').classList.toggle('session', mode !== 'idle');
   const cl = $('#cluster'); if (cl.dataset.mode !== mode){ cl.dataset.mode = mode; $('#ckStage').dataset.mode = mode; }
   cl.style.setProperty('--pc', p.color);
@@ -3662,7 +3722,7 @@ function drawHome(){
   const st = $('#gState'); st.textContent = live ? (STATE_NAMES[S.state] || 'Idle') : C.state === 'reconnecting' ? 'Reconnecting' : 'Not connected';
   st.className = 'state-chip' + (live && (S.state === 7 || S.state === 9) ? ' heat' : live && S.state === 8 ? ' ready' : '');
   { const b = $('#bStart'), t = live ? 'Start' : 'Connect', n = [...b.childNodes].find(x => x.nodeType === 3); if (n){ if (n.nodeValue !== t) n.nodeValue = t; } else b.prepend(t); }
-  const left = Math.max(0, Math.round(S.total - S.elapsed));
+  const left = Math.max(0, Math.round(S.total - liveElapsed()));
   setHTML($('#gTimer'), S.state === 8 ? `${left}s left` : S.state === 7 ? 'Heating up…' : live && S.charging ? chargeLine() : '&nbsp;');
   { const h = hitText(), g = $('#gHit'); if (g.innerHTML !== h) g.innerHTML = h; }
   const heating = S.state >= 7 && S.state <= 9, running = S.state === 7 || S.state === 8; // 9 = just finished: you can start the next one right away
@@ -3716,6 +3776,7 @@ function drawProfilesInner(){
         <div class="field"><div class="row between"><span class="muted">Adds time</span><span class="val" id="pbtv${i}">+${p.boostT}s</span></div>
           <input type="range" id="pbt${i}" data-i="${i}" min="0" max="60" step="5" value="${p.boostT}"></div>
       </div>
+      <div class="row ph-row" style="margin:2px 0 10px"><span class="grow" style="min-width:0"><span class="muted">Preheat light</span><small class="ph-note">${phLabel(i)}</small></span>${phVal(i) ? `<button class="btn small ghost" data-phoff="${i}">Off</button>` : ''}<button class="btn small" data-phmood="${i}">Moods</button><span class="colorbtn" style="${phSwatch(i)}"><input type="color" data-ph="${i}" value="${phColor(i) || '#ff3b30'}" aria-label="Preheat color for ${esc(p.name)}"></span></div>
       <div class="row between"><span class="muted" style="font-size:13px">${i===S.active ? 'Active profile' : ''}</span><button class="btn small primary" data-save="${i}">Save to ${devWord()}</button></div>
     </div>`).join('');
 }
@@ -4006,6 +4067,19 @@ function myRank(){
   return Object.assign({}, r, { rp, blinkers: Math.max(r.blinkers, me.blinkers || 0), tier: RANK_TIERS.slice().reverse().find(t => rp >= t.min), next: RANK_TIERS.find(t => t.min > rp) || null, synced: true });
 }
 function drawRank(){ drawRankInner(); applyHaptics(); }
+// "Last session" box on the rank card: what you did and what it was worth
+function lastSessionHtml(){
+  const all = rankSessions().slice().sort((a, b) => a.t - b.t), s = all[all.length - 1]; if (!s) return '';
+  const hits = s.hits || [], best = hits.length ? Math.max(...hits) : 0, blinks = hits.filter(h => h >= 8).length;
+  const m0 = new Date(); m0.setDate(1); m0.setHours(0, 0, 0, 0);
+  let rp = 0; try { if (s.t >= m0.getTime()) rp = rankFor(all).rp - rankFor(all.slice(0, -1)).rp; } catch(e){}
+  const mins = Math.round((Date.now() - s.t) / 60000), when = mins < 1 ? 'just now' : mins < 60 ? mins + 'm ago' : mins < 1440 ? Math.round(mins / 60) + 'h ago' : new Date(s.t).toLocaleDateString([], { month:'short', day:'numeric' });
+  const len = typeof s.run === 'number' ? s.run : s.dur || 0;
+  const why = s.warm ? 'Not counted: started before your chamber cooled' : typeof s.run === 'number' && s.run < 20 ? 'Not counted: shorter than 20s' : s.t < m0.getTime() ? 'From last month' : '';
+  return `<div class="last-sess"><div class="row between"><span class="label">Last session</span><span class="muted" style="font-size:12px">${esc(s.name || 'Session')} · ${when}</span></div>
+    <div class="ls-grid"><div><b>${rp > 0 ? '+' + rp : rp}</b><span>RP</span></div><div><b>${hits.length}</b><span>hit${hits.length === 1 ? '' : 's'}</span></div><div><b>${best ? best.toFixed(1) + 's' : '-'}</b><span>best hit</span></div><div><b>${blinks}</b><span>blinker${blinks === 1 ? '' : 's'}</span></div><div><b>${len ? len + 's' : '-'}</b><span>length</span></div></div>
+    ${why ? `<p class="muted" style="margin:0;font-size:12px">${why}</p>` : ''}</div>`;
+}
 function drawRankInner(){
   const el = $('#rankCard'); if (!el) return;
   const r = myRank(), t = r.tier, nx = r.next;
@@ -4025,6 +4099,7 @@ function drawRankInner(){
       ${r.extreme ? `<div><span>Extreme bonus (included above)</span><b>+${r.extreme}</b></div>` : ''}
       ${r.dirty ? `<div class="neg"><span>Dabs past ${RANK_DIRTY} without cleaning · ${r.dirty}</span><b>−${r.dirty}</b></div>` : ''}
     </div>
+    ${lastSessionHtml()}
     ${dirtyNow ? `<div class="banner warn" style="padding:10px 14px;font-size:14px"><div class="grow"><b>Losing points</b>Every dab costs 1 RP until you clean.</div></div>` : ''}
     ${(() => { const h = badgeHistory(), dev = LB.me && LB.me.dev; if (!h.length && !dev) return '';
         return `<div class="rb-shelf-wrap"><span class="label">Your badges</span><div class="rb-shelf">${dev ? `<div class="rb-item" data-bv="dev">${devBadge(54)}<span>Developer</span></div>` : ''}${h.map(b => `<div class="rb-item" data-bv="${b.y}-${String(b.m + 1).padStart(2, '0')}:${b.t}">${rankBadge(b.m, b.t, 58, b.y)}<span>${RB_MONTHS[b.m].slice(0, 3)} · ${RB_TIERS[b.t].n}</span></div>`).join('')}</div></div>`; })()}
@@ -4102,16 +4177,34 @@ async function lbCall(body){
 // the devices you own, shown on your profile ("peak:Onyx", "peak", "proxy")
 function myGear(){
   const out = [];
-  try { devList().forEach(d => { const k = d.series === 'toad' ? 'proxy' : 'peak' + (d.edition ? ':' + String(d.edition).replace(/[^A-Za-z0-9 ]/g, '').slice(0, 24) : ''); if (!out.includes(k)) out.push(k); }); } catch(e){}
+  try { devList().forEach(d => { const k = d.series === 'toad' ? 'proxy' + (d.edition && d.edition !== 'Onyx' ? ':' + String(d.edition).replace(/[^A-Za-z0-9 ]/g, '').slice(0, 24) : '') : 'peak' + (d.edition ? ':' + String(d.edition).replace(/[^A-Za-z0-9 ]/g, '').slice(0, 24) : ''); if (!out.includes(k)) out.push(k); }); } catch(e){}
   return out.slice(0, 6);
 }
+// special edition colors, matched to the Puffco web app's edition themes
+const EDITION_STYLE = {
+  Desert:{ c:['#B29F8D', '#7d6a58'] }, Flourish:{ c:['#467352', '#2c5236'] }, Storm:{ c:['#3856AB', '#8099FF'] },
+  Daybreak:{ c:['#DEA26C', '#7D1E20'] }, Plasma:{ c:['#CC00FF', '#F66300'] }, Glacier:{ c:['#D8F8FA', '#65B9C8'], light:true },
+  Pearl:{ c:['#E8E8E8', '#B3B3B3'], light:true }, Opal:{ c:['#C1C1C1', '#838383'], light:true }, Indiglow:{ c:['#5C71CF', '#701F78'] },
+  Guardian:{ c:['#8a8a8a', '#4a4a4a'] }, Haze:{ c:['#C3C7E8', '#7A7D91'], light:true }, Pine:{ c:['#3f5b45', '#22342a'] }
+};
+// tint a profile card with the owner's special edition (limited editions first)
+function edCard(el, gear){
+  if (!el) return; const eds = (gear || []).map(k => k.includes(':') ? k.split(':')[1] : '').filter(e => EDITION_STYLE[e]);
+  const e = eds.find(x => LIMITED_ED.includes(x)) || eds[0], st = e && EDITION_STYLE[e];
+  el.classList.toggle('ed-card', !!st);
+  if (st){ el.style.setProperty('--e1', st.c[0]); el.style.setProperty('--e2', st.c[1]); } else { el.style.removeProperty('--e1'); el.style.removeProperty('--e2'); }
+}
+const LIMITED_ED = ['Opal', 'Indiglow', 'Guardian', 'Desert', 'Flourish', 'Storm', 'Daybreak', 'Plasma', 'Glacier'];
 function gearHtml(list, empty){
   if (!list || !list.length) return empty ? '<div class="gear"><span class="label">Gear</span><span class="muted" style="font-size:13px">Not shared yet</span></div>' : '';
-  const ic = k => k === 'proxy'
+  const ic = k => k.startsWith('proxy')
     ? '<svg viewBox="0 0 24 24"><path d="M10 3h4l1 5H9z"/><rect x="7" y="8" width="10" height="3" rx="1"/><rect x="7" y="11" width="10" height="10" rx="3"/></svg>'
     : '<svg viewBox="0 0 24 24"><path d="M10 2h4v9h-4z"/><path d="M8 11h8l1 3H7z"/><rect x="6" y="14" width="12" height="8" rx="2"/></svg>';
-  const name = k => k === 'proxy' ? 'Proxy' : 'Peak Pro' + (k.includes(':') ? ' · ' + k.split(':')[1] : '');
-  return `<div class="gear"><span class="label">Gear</span><div class="gear-list">${list.map(k => `<span class="gear-chip">${ic(k)}${esc(name(k))}</span>`).join('')}</div></div>`;
+  const ed = k => k.includes(':') ? k.split(':')[1] : '';
+  const name = k => (k.startsWith('proxy') ? 'Proxy' : ['Opal', 'Indiglow', 'Guardian'].includes(ed(k)) ? 'Peak' : 'Peak Pro') + (ed(k) ? ' · ' + ed(k) : ''); // Opal, Indiglow and Guardian are original Peaks
+  const chip = k => { const st = EDITION_STYLE[ed(k)]; if (!st) return `<span class="gear-chip">${ic(k)}${esc(name(k))}</span>`;
+    return `<span class="gear-chip ed${st.light ? ' light' : ''}" style="--e1:${st.c[0]};--e2:${st.c[1]}">${ic(k)}${esc(name(k))}${LIMITED_ED.includes(ed(k)) ? '<small>Limited</small>' : ''}</span>`; };
+  return `<div class="gear"><span class="label">Gear</span><div class="gear-list">${list.map(chip).join('')}</div></div>`;
 }
 function lbPayload(){
   // test build: never change RP on the leaderboard, only send what the server already has
@@ -4123,6 +4216,8 @@ function lbPayload(){
 }
 async function lbPush(force){
   const L = lbStore(); if (!L.joined || !lbUsesPuffco()) return;
+  // never push before we know what the server has (a new phone or computer would send 0 RP)
+  if (!LB.me){ try { await lbRestore(); } catch(e){} if (!LB.me) return; }
   if (!force && Date.now() - LB.lastPush < 60000) return;
   LB.lastPush = Date.now();
   try { const r = await lbCall(lbPayload()); if (r && r.player){ LB.me = r.player; lbStore().meCache = r.player; save(); } } catch(e){}
@@ -4194,12 +4289,12 @@ function openPlayer(r){
     ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, r)}">${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}
     ${isMe ? '' : meId ? `<button class="btn soc-follow" data-follow="${r.id}" style="width:100%">Follow</button>`
       : '<p class="muted" style="margin:0;text-align:center;font-size:13px">Make your profile in Social to follow people.</p>'}</div>`;
-  socPaintFollow(r.id); el.hidden = false; applyHaptics();
+  edCard(el.querySelector('.wl-card'), isMe ? myGear() : r.gear); socPaintFollow(r.id); el.hidden = false; applyHaptics();
   const fillCounts = () => socCounts(r.id).then(c => { if (el.hidden) return; el.querySelectorAll('[data-cnt]').forEach(b => { b.textContent = c[b.dataset.cnt]; }); });
   fillCounts();
   // grab their latest row so gear shows even if the list we opened from is old
   if (!isMe && r.id) sbRows(`/rest/v1/players?select=${SOC_COLS}&id=eq.${r.id}`).then(rows => { const f = rows && rows[0]; if (!f || el.hidden) return;
-    if (Array.isArray(f.gear)){ r.gear = f.gear; const g = el.querySelector('#lbpGear'); if (g) g.innerHTML = gearHtml(f.gear, true); } }).catch(() => {});
+    if (Array.isArray(f.gear)){ r.gear = f.gear; const g = el.querySelector('#lbpGear'); if (g) g.innerHTML = gearHtml(f.gear, true); edCard(el.querySelector('.wl-card'), f.gear); } }).catch(() => {});
   el.onclick = async e => {
     if (e.target === el || e.target.id === 'lbpClose'){ el.hidden = true; return; }
     const f = e.target.closest('[data-follow]'); if (f){ e.stopPropagation(); const was = SOC.following.has(r.id);
@@ -4547,6 +4642,7 @@ function spbStatus(){
   out.discord = { got: aw.includes('discord') };
   out.bughunter = { got: aw.includes('bughunter') };
   out.secret = { got: ss.some(x => { const d = new Date(x.t); return (d.getHours() % 12) === 4 && d.getMinutes() === 20; }) };
+  aw.forEach(id => { out[id] = Object.assign({}, out[id], { got: true }); }); // badges given by hand in Supabase (players.awards) always count
   return out;
 }
 function drawBadgeBook(){
@@ -4593,19 +4689,21 @@ async function socLoad(){
   const me = LB.me;
   if (!me || !me.id){ if (lbUsesPuffco() && !LB.me) { const p = await lbRestore(); if (p) return socLoad(); } return; }
   const c = await socCounts(me.id);
-  SOC.myCounts = c; SOC.following = new Set(c.followingIds); SOC.loaded = true;
+  SOC.myCounts = c; SOC.following = new Set(c.followingIds); SOC.followerSet = new Set(c.followerIds); SOC.loaded = true;
   socSetMyCounts(); drawBadgeBook();
   SOC.followingRows = await socPlayers(c.followingIds);
   socDrawFollowing(); socPaintAllFollow();
 }
 // flip every Follow button for this person in place (no redraw, so nothing jumps)
+// you follow them and they follow you = Friends
+function followLabel(id){ const on = SOC.following.has(id), back = SOC.followerSet && SOC.followerSet.has(id); return on && back ? 'Friends' : on ? 'Following' : back ? 'Follow back' : 'Follow'; }
 function socPaintFollow(id){
   const on = SOC.following.has(id);
   document.querySelectorAll(`[data-follow="${id}"]`).forEach(btn => {
     const sw = btn.querySelector(':scope > .hz');
     btn.classList.toggle('primary', !on); btn.classList.toggle('on', on);
     [...btn.childNodes].forEach(n => { if (n.nodeType === 3) n.remove(); });
-    btn.insertBefore(document.createTextNode(on ? 'Following' : 'Follow'), sw || null);
+    btn.insertBefore(document.createTextNode(followLabel(id)), sw || null);
   });
 }
 function socPaintAllFollow(){ new Set([...document.querySelectorAll('[data-follow]')].map(b => b.dataset.follow)).forEach(socPaintFollow); }
@@ -4634,7 +4732,7 @@ function socRow(r){
   const meId = LB.me && LB.me.id, on = SOC.following.has(r.id);
   return `<div class="soc-row" data-soc="${r.id}" role="button" tabindex="0">${lbAvatar(r.avatar_url, r.username, 42)}
     <span class="soc-name"><b>${esc(r.username)}${r.dev ? devBadge(18) : ''}</b><small style="color:${lbTierColor(r.tier)}">${esc(r.tier || 'Ember')}${r.bio ? ` <span class="muted">· ${esc(r.bio.slice(0, 40))}${r.bio.length > 40 ? '…' : ''}</span>` : ''}</small></span>
-    ${meId && r.id !== meId ? `<button class="btn small ${on ? 'on' : 'primary'} soc-follow" data-follow="${r.id}">${on ? 'Following' : 'Follow'}</button>` : ''}</div>`;
+    ${meId && r.id !== meId ? `<button class="btn small ${on ? 'on' : 'primary'} soc-follow" data-follow="${r.id}">${followLabel(r.id)}</button>` : ''}</div>`;
 }
 function drawSocial(){
   const meEl = $('#socMe'); if (!meEl) return;
@@ -4656,6 +4754,7 @@ function drawSocial(){
       ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, { tier: myRank().tier.n })}">${showBadge(k, undefined, { tier: myRank().tier.n })}<span>${esc(showName(k, { tier: myRank().tier.n }))}</span></div>`).join('')}</div>` : ''}
       <button class="btn" id="socEdit">Edit profile</button>`);
   }
+  edCard(meEl, me && me.username ? myGear() : []);
   // search results
   const res = $('#socResults');
   if (res){
@@ -4697,6 +4796,10 @@ document.addEventListener('click', e => {
   if (e.target.closest('#socEdit') || e.target.closest('#socCreate')){ LB.edit = true; LB.err = ''; drawLeaderboard(); setTimeout(() => { const c = $('#lbCard'); if (c) c.scrollIntoView({ behavior:'smooth', block:'start' }); }, 60); }
 });
 function lbRowHtml(r, i, meId){ return `<div class="lb-row${r.id === meId ? ' me' : ''}" data-lbi="${i}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier)}</small>${(r.showcase || []).length ? `<span class="lb-show">${r.showcase.map(k => showBadge(k, undefined, r)).join('')}</span>` : ''}</span><span class="lb-medal">${rankBadge(new Date().getMonth(), rbTierIdx(r.tier), 34)}</span><b>${r.rp}<small> RP</small></b></div>`; }
+// leaderboard shows the top 5 (plus you) until you open the rest
+const LB_SHOW = 5;
+function lbMoreBtn(n){ if (n <= LB_SHOW) return ''; return `<button class="btn lb-more" data-lbmore aria-expanded="${!!LB.expand}">${LB.expand ? 'Show less' : `Show all ${n}`}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg></button>`; }
+document.addEventListener('click', e => { if (!e.target.closest('[data-lbmore]')) return; LB.expand = !LB.expand; drawLeaderboard(); if (!LB.expand){ const c = $('#lbCard'); if (c) c.scrollIntoView({ behavior:'smooth', block:'start' }); } });
 function drawLeaderboard(){
   const el = $('#lbCard'); if (!el) return;
   const L = lbStore(), puff = lbUsesPuffco(), joined = L.joined && puff && !LB.edit;
@@ -4704,7 +4807,7 @@ function drawLeaderboard(){
     const rows = LB.rows || [];
     el.innerHTML = `<div class="row between"><span class="label">Leaderboard · ${new Date().toLocaleDateString([], { month:'long' })}</span></div>
       <div class="banner" style="padding:12px 14px"><div class="grow"><b>Ranked uses your Puffco login</b>Sign in with your Puffco account to join, pick a username and add a photo.</div><button class="btn small primary" id="lbGoSign">Sign in</button></div>
-      ${rows.length ? `<div class="lb-list">${rows.slice(0, 25).map((r, i) => lbRowHtml(r, i, null)).join('')}</div>` : (LB.rows == null ? '<p class="muted" style="margin:0">Loading…</p>' : '<p class="muted" style="margin:0">Nobody is ranked yet this month.</p>')}`;
+      ${rows.length ? `<div class="lb-list">${rows.slice(0, LB.expand ? 100 : LB_SHOW).map((r, i) => lbRowHtml(r, i, null)).join('')}</div>${lbMoreBtn(rows.length)}` : (LB.rows == null ? '<p class="muted" style="margin:0">Loading…</p>' : '<p class="muted" style="margin:0">Nobody is ranked yet this month.</p>')}`;
     return;
   }
   if (!joined){
@@ -4728,8 +4831,9 @@ function drawLeaderboard(){
   const row = (r, i) => lbRowHtml(r, i, meId);
   el.innerHTML = `<div class="row between"><span class="label">Leaderboard · ${new Date().toLocaleDateString([], { month:'long' })}</span><button class="btn small ghost" id="lbEdit">Edit profile</button></div>
     ${LB.err ? `<p class="acct-err">${esc(LB.err)}</p>` : ''}
-    ${LB.rows == null ? '<p class="muted" style="margin:0">Loading…</p>' : rows.length ? `<div class="lb-list">${rows.slice(0, 25).map(row).join('')}</div>` : '<p class="muted" style="margin:0">Nobody has points yet this month. Take a dab to get on the board.</p>'}
-    ${mine >= 25 ? `<div class="lb-list">${row(rows[mine], mine)}</div>` : ''}
+    ${LB.rows == null ? '<p class="muted" style="margin:0">Loading…</p>' : rows.length ? `<div class="lb-list">${rows.slice(0, LB.expand ? 100 : LB_SHOW).map(row).join('')}</div>` : '<p class="muted" style="margin:0">Nobody has points yet this month. Take a dab to get on the board.</p>'}
+    ${mine >= (LB.expand ? 100 : LB_SHOW) ? `<div class="lb-list lb-you">${row(rows[mine], mine)}</div>` : ''}
+    ${lbMoreBtn(rows.length)}
     <p class="muted" style="margin:0;font-size:12px">Updates live. Resets on the 1st.</p>
     ${acct() && acct().email ? `<p class="muted lb-linked">@${esc((LB.me && LB.me.username) || L.username || '')} is linked to ${esc(acct().email)}</p>` : ''}`;
 }
@@ -4758,7 +4862,7 @@ function keepOpenNotice(){
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
   el.querySelector('#koOk').onclick = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
 }
-setTimeout(() => { const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; const pl = $('#tbProxyLab'); if (pl) pl.onclick = proxyLab; const ct = $('#tbColorTest'); if (ct) ct.onclick = colorTest; const mt = $('#tbMoodTest'); if (mt) mt.onclick = moodTest; const ih = $('#tbInhale'); if (ih) ih.onclick = inhaleTest; const wn = $('#tbWhatsNew'); if (wn) wn.onclick = () => whatsNew(true); }, 0);
+setTimeout(() => { const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; const pl = $('#tbProxyLab'); if (pl) pl.onclick = proxyLab; const ct = $('#tbColorTest'); if (ct) ct.onclick = colorTest; const mt = $('#tbMoodTest'); if (mt) mt.onclick = moodTest; const ih = $('#tbInhale'); if (ih) ih.onclick = inhaleTest; const wn = $('#tbWhatsNew'); if (wn) wn.onclick = () => whatsNew(true); const ll = $('#tbLightLab'); if (ll) ll.onclick = lightLab; const es = $('#tbEdShare'); if (es) es.onclick = () => { if (S.mode !== 'live') return toast('Connect first'); if (!edIsLimited()) return toast(`${S.edition || 'This device'} is not a limited edition`); edShareAsk(true); }; }, 0);
 // test build: one place to check everything on a Proxy, with live raw readings
 function proxyLab(){
   if (document.querySelector('.plab')) return;
@@ -4897,6 +5001,59 @@ async function moodTest(){
   }
   el.querySelector('#mtStat').textContent = 'Done. Tell Claude which step numbers animated, then tap Copy and paste.';
   el.querySelector('#mtCopy').onclick = async () => { try { await navigator.clipboard.writeText(L.join('\n')); toast('Copied'); } catch(e){ const r = document.createRange(); r.selectNodeContents(el.querySelector('#mtOut')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected, tap Copy'); } };
+}
+/* paste light files (a Supabase edition_lights row, its files, or one hex blob) and try them on your device */
+function lightLab(){
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:88vh;overflow:auto;text-align:left;justify-items:stretch;gap:10px">
+    <h2 style="margin:0">Apply light files</h2>
+    <p class="muted" style="margin:0;font-size:13px">Paste a row from edition_lights (or just its files, or one hex blob). Proxy files only work on a Proxy, Peak Pro files only on a Peak Pro.</p>
+    <textarea id="llIn" rows="5" style="width:100%;font:11px ui-monospace,Menlo,monospace;background:var(--surface);color:var(--fg);border-radius:10px;padding:8px;border:1px solid var(--line,#333)" placeholder='{"files":{"/u/app/hc/0/colr":"a2..."}}'></textarea>
+    <button class="btn primary" id="llGo">Load</button>
+    <div id="llList" style="display:grid;gap:8px"></div>
+    <button class="btn" id="llClose">Close</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
+  el.querySelector('#llClose').onclick = () => { if (S.mode === 'live') ledJob(previewClear); el.remove(); };
+  let items = [];
+  const fromHex = h => new Uint8Array((h.replace(/[^0-9a-f]/gi, '').match(/../g) || []).map(x => parseInt(x, 16)));
+  const kind = u => { if (u.length === 8) return 'solid ' + '#' + toHex(u.slice(0, 3)); try { const t = cborDecode(u); if (t && t.lamp) return 'mood: ' + (t.lamp.name || 'lamp'); if (t && typeof t === 'object' && t[0] && t[0][0] != null) return 'Proxy mood (lamp ' + t[0][0] + ')'; } catch(e){} return 'data'; };
+  const blobFor = u => { const b = new Uint8Array(u); if (isProxy()) b.native = true; return b; };
+  el.querySelector('#llGo').onclick = () => {
+    const raw = el.querySelector('#llIn').value.trim(); items = [];
+    try {
+      if (raw.startsWith('{') || raw.startsWith('[')){
+        let j = JSON.parse(raw); if (Array.isArray(j)) j = j[0]; if (j.files) j = typeof j.files === 'string' ? JSON.parse(j.files) : j.files;
+        for (const [p, h] of Object.entries(j)) if (typeof h === 'string' && h) items.push({ p, u: fromHex(h) });
+      } else if (raw) items.push({ p:'pasted', u: fromHex(raw) });
+    } catch(e){ toast('Could not read that: ' + e.message); }
+    items = items.filter(x => x.u.length && /colr|pasted|phcl|accl/.test(x.p)); // the playable ones
+    el.querySelector('#llList').innerHTML = items.length ? items.map((x, n) => `<div class="card" style="padding:10px;display:grid;gap:6px">
+      <b style="font-size:13px">${esc(x.p)}</b><span class="muted" style="font-size:12px">${x.u.length} bytes · ${esc(kind(x.u))}</span>
+      <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn small primary" data-llpv="${n}">Preview</button>${[0,1,2,3].map(i => `<button class="btn small" data-llp="${n}:${i}">Set P${i + 1}</button>`).join('')}<button class="btn small" data-lll="${n}">Lantern</button></div></div>`).join('') : '<p class="muted">Nothing playable found.</p>';
+  };
+  el.querySelector('#llList').onclick = async e => {
+    if (S.mode !== 'live'){ toast('Connect your device first'); return; }
+    const pv = e.target.closest('[data-llpv]'), sp = e.target.closest('[data-llp]'), ln = e.target.closest('[data-lll]');
+    try {
+      if (pv){ const x = items[+pv.dataset.llpv]; clearTimeout(previewTimer);
+        await ledJob(() => x.u.length === 8 ? previewWrite('#' + toHex(x.u.slice(0, 3))) : previewWrite(blobFor(x.u)));
+        previewTimer = setTimeout(() => ledJob(previewClear), 8000); toast('Showing for 8 seconds'); }
+      if (sp){ const [n, i] = sp.dataset.llp.split(':').map(Number), x = items[n];
+        await ledJob(async () => {
+          if (x.u.length === 8){ await writeProfileColor(i, '#' + toHex(x.u.slice(0, 3))); return; }
+          if (isProxy()) await proxyColr(`/u/app/hc/${i}/colr`, blobFor(x.u)); else await ble.writeBlob(`/u/app/hc/${i}/colr`, x.u);
+          if (S.active === i){ try { if (isProxy()) await proxyColr('/p/app/thc/colr', blobFor(x.u)); else await ble.writeBlob('/p/app/thc/colr', x.u); } catch(_){} }
+        });
+        toast(`Set on P${i + 1}`); }
+      if (ln){ const x = items[+ln.dataset.lll];
+        await ledJob(async () => {
+          if (x.u.length === 8) await writeLanternColor('#' + toHex(x.u.slice(0, 3)));
+          else if (isProxy()) await proxyColr('/p/app/ltrn/colr', blobFor(x.u)); else await ble.writeBlob('/p/app/ltrn/colr', x.u);
+          await ble.write('/p/app/ltrn/cmd', new Uint8Array([1])); S.lantern = true;
+        });
+        toast('Lantern on'); }
+    } catch(err){ toast('Failed: ' + (err.message || err)); }
+  };
 }
 async function colorTest(){
   if (S.mode !== 'live'){ toast('Connect your device first'); return; }
@@ -5091,6 +5248,7 @@ function show(v){
   clearTimeout(enterTimer); enterTimer = setTimeout(() => sec.classList.remove('enter','from-l'), 1900);
   document.querySelectorAll('#nav button').forEach(b => b.dataset.v === (v === 'lights' ? 'prof' : v) ? b.setAttribute('aria-current','page') : b.removeAttribute('aria-current'));
   if (v === 'prof'){ drawProfiles(); drawAccountProfiles(); drawLightsState(); }
+  if (v !== 'lights' && phIdx(moodTarget) >= 0) moodTarget = null; // preheat pick only lasts while on Lights
   if (v === 'lights'){ drawLights(); drawMoods(); ltEnter(); }
   if (v === 'set'){ drawSettings(); drawDevice(); drawAccount(); wireAcctForm('ac'); drawTestTools(); }
   if (v === 'shop'){ closeShopForm(); drawShops(); }
@@ -5192,6 +5350,12 @@ $('#connBtn').addEventListener('click', () => {
 $('#bStart').onclick = async () => { if (S.mode !== 'live') return startConnect(false); BOOST.temp = 0; BOOST.time = 0; try { await ble.write('/p/app/hcs', new Uint8Array([S.active])); } catch(e){} modeCmd(7); }; // like the Puffco app: pick the profile, then start
 $('#bStop').onclick = () => modeCmd(8);
 $('#bBoost').onclick = () => boostCmd();
+$('#shareBtn').onclick = async () => {
+  const url = 'https://emberlineapp.github.io/emberline/', data = { title:'Emberline', text:'Emberline: a free, faster app for the Puffco Peak Pro and Proxy. Open it in the Path browser.', url };
+  try { if (navigator.share){ await navigator.share(data); return; } } catch(e){ if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); toast('Link copied. Paste it to share Emberline'); }
+  catch(e){ const t = document.createElement('textarea'); t.value = url; t.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); toast('Link copied. Paste it to share Emberline'); } catch(_){ toast(url); } t.remove(); }
+};
 { // first tap asks "Are you sure?" in the same button, second tap marks it
   const bc = $('#bCleaned'); let armT = 0;
   const label = t => { const n = [...bc.childNodes].find(x => x.nodeType === 3); if (n) n.nodeValue = t; else bc.prepend(t); };
@@ -5219,6 +5383,8 @@ $('#profList').addEventListener('click', e => {
   if (q){ const i = +q.parentElement.dataset.qi; S.profiles[i].color = q.dataset.qc; S.profiles[i].mood = null; drawProfiles(); syncRanges(); return; }
   const cm = e.target.closest('[data-clrmood]'); if (cm){ S.profiles[+cm.dataset.clrmood].mood = null; drawProfiles(); syncRanges(); return; }
   const b = e.target.closest('[data-save]'); if (b) saveProfile(+b.dataset.save);
+  const pm = e.target.closest('[data-phmood]'); if (pm){ moodTarget = 'ph:' + pm.dataset.phmood; show('lights'); drawMoods(); return; }
+  const po = e.target.closest('[data-phoff]'); if (po){ phSet(+po.dataset.phoff, null); drawProfiles(); toast('Preheat color off'); }
 });
 
 $('#tLantern').onchange = e => setLantern(e.target.checked);
@@ -5452,7 +5618,7 @@ function updateCluster(){
   set('#ckGear', GEAR[S.state] || 'P');
   set('#ckMode', (p.name || 'Profile').toUpperCase().slice(0, 12));
   set('#ckModeSub', `${isProxy() ? 'PROXY' : (CHAMBERS[S.chamber] || '').toUpperCase()} · ${vaporName(p.vapor).toUpperCase()} · ${p.time}s`);
-  const left = Math.max(0, Math.round(S.total - S.elapsed));
+  const left = Math.max(0, Math.round(S.total - liveElapsed()));
   set('#ckStatus', S.state === 8 && HIT.on ? `HIT ${HIT.live.toFixed(1)}` : S.state === 8 ? `${left}s` : (STATE_NAMES[S.state] || 'Idle').toUpperCase());
   const lerp = (a, b, k) => a + (b - a) * k;
   const bf = clamp((S.battery || 0) / 100, 0, 1), cf = clamp(sinceClean() / store.cleanEvery, 0, 1);
@@ -5468,6 +5634,7 @@ function updateCluster(){
 
 /* ================= mood lights (official format) ================= */
 const MOODS = JSON.parse(document.getElementById('moodData').textContent);
+const PROXY_EDITIONS = { 0:'Onyx', 1:'Haze', 2:'Pine' }; // from the Puffco web app's product list
 const EDITIONS = { 0:'OG', 21:'OG', 1:'Opal', 22:'Opal', 2:'Indiglow', 4:'Guardian', 12:'Pearl', 13:'Onyx', 15:'Desert', 17:'Flourish', 19:'Storm', 23:'Daybreak', 25:'Plasma', 26:'Glacier' };
 /* ---- Emberline native effects: built for the Peak's own light engine, so they save to the device and run smooth without the app ---- */
 const FX_UI = (min, max, def) => [
@@ -5634,7 +5801,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) zoneL
    Leaving Lights throws away anything unsaved and turns the preview off. */
 const LT = { on:false, pending:null, brDirty:false, brT:null };
 function ltTarget(){ return moodTarget ?? S.active; }
-function ltTargetName(){ const t = ltTarget(); return t === 'lantern' ? 'Lantern' : ((S.profiles[t] || {}).name || 'P' + (t + 1)); }
+function ltTargetName(){ const t = ltTarget(); if (phIdx(t) >= 0) return 'Preheat'; return t === 'lantern' ? 'Lantern' : ((S.profiles[t] || {}).name || 'P' + (t + 1)); }
 function ltCanShow(){ return S.mode === 'live' && !(S.state >= 7 && S.state <= 9); }
 function ltWrite(blobOrHex){ if (!ltCanShow()) return; clearTimeout(previewTimer); ledJob(() => previewWrite(blobOrHex).catch(() => {})); }
 // the Proxy only takes solid colors so far, so a mood shows as its main color there
@@ -5645,6 +5812,7 @@ function ltShowCurrent(){
   if (LT.pending) return ltShowRef(LT.pending);
   const t = ltTarget();
   if (t === 'lantern') return store.lanternMood ? ltShowRef(store.lanternMood) : ltWrite(store.lantern || '#ffffff');
+  if (phIdx(t) >= 0){ const pi = phIdx(t); return phMood(pi) ? ltShowRef(phMood(pi)) : phColor(pi) ? ltWrite(phColor(pi)) : undefined; }
   clearTimeout(previewTimer);
   ledJob(async () => {
     if (!LT.on || !ltCanShow()) return;
@@ -5707,6 +5875,26 @@ const INTRO_ZONES = { motion:'still', tempoFrac:.5, zones:[
 const INTRO_PROXY = { motion:'still', tempoFrac:.5, zones: Array.from({ length: 6 }, () => ({ c:'#ffffff', c2:'#b4148c', fx:'fade', sp:.25, bias:.25 })) }; // Proxy ring: pinkish purple, with a white sweep going around
 let introDone = false;
 let introBrightUntil = 0; // Proxy intro holds full brightness until then
+// Proxy startup: one animated light (pink-purple ring with a white sweep spinning around) that the Proxy plays on its own,
+// faded in and out with brightness. Smooth because nothing is streamed frame by frame.
+async function proxyIntro(){
+  const lbrt = v => { const b = new Uint8Array(4); new DataView(b.buffer).setInt32(0, Math.round(v), true); return ble.write('/u/app/ui/lbrt', b).catch(() => {}); };
+  let lamp; try { lamp = moodLamp({ kind:'tpl', tag:'pikaled2-spin-mood-light', name:'Intro', meta:{ userColors:['#b4148c', '#ffffff'], tempoFrac:.42, dynamicInhale:0 } }); } catch(e){ return; }
+  const blob = lampBlob(lamp);
+  introBrightUntil = Date.now() + 5400;
+  const steps = 8, ease = t => t * t * (3 - 2 * t);
+  ledJob(async () => {
+    await lbrt(0);
+    try { await previewWrite(blob); } catch(e){ return; }
+    for (let i = 1; i <= steps; i++){ await lbrt(256 * ease(i / steps)); await sleep(60); } // glide on
+  });
+  setTimeout(() => ledJob(async () => {
+    if (S.mode !== 'live' || !isProxy() || (S.state >= 7 && S.state <= 9)) return;
+    for (let i = steps - 1; i >= 0; i--){ await lbrt(256 * ease(i / steps)); await sleep(70); } // glide off
+    await previewClear();
+    const b = brightFor(S.active) || store.bright; if (b) await writeBright(b).catch(() => {}); else await lbrt(256);
+  }), 4300);
+}
 function connectIntro(){
   if (introDone || S.mode !== 'live' || S.api === 2 ||
       (S.state >= 7 && S.state <= 9) || zoneLive.on) return;
@@ -5714,6 +5902,7 @@ function connectIntro(){
   const meta = JSON.parse(JSON.stringify(isProxy() ? INTRO_PROXY : INTRO_ZONES));
   meta.env = { in: 500, out: 4300, outMs: 650 }; // 5 seconds: glide on fast, glide off at the end
   zPh.length = 0; zClock.last = 0; if (isProxy()) meta.zones.forEach((z, i) => { zPh[i] = .5 + i / 12; }); else zPh[3] = .5; // start on purple
+  if (isProxy()){ proxyIntro(); return; } // Proxy: let the device animate it itself, much smoother than streaming frames over Bluetooth
   if (!zoneLiveStart(meta, true)) return;
   // Proxy: play the intro at full brightness, then put the user's brightness back
   if (isProxy()){ introBrightUntil = Date.now() + 5150; const full = new Uint8Array(4); new DataView(full.buffer).setInt32(0, 256, true); ble.write('/u/app/ui/lbrt', full).catch(() => {});
@@ -5755,6 +5944,13 @@ function swatchStyle(ref){
 }
 async function writeMoodTo(target, ref){
   const name = ref.name || 'Mood';
+  const pi = phIdx(target);
+  if (pi >= 0){
+    phSet(pi, JSON.parse(JSON.stringify(ref)));
+    toast(`${name} will show while ${(S.profiles[pi] || {}).name || 'P' + (pi + 1)} heats up`);
+    setTimeout(() => { if (moodTarget === target){ moodTarget = null; show('prof'); drawProfiles(); } }, 700);
+    return;
+  }
   if (target === 'lantern'){
     store.lanternMood = ref; save(); drawLightsState(); toast(`${name} picked for the lantern`);
     if (!needLive('light the lantern')) return;
@@ -5768,7 +5964,7 @@ async function writeMoodTo(target, ref){
   const i = target, p = S.profiles[i];
   p.mood = ref; { const mc = moodColors(ref).filter((c, k, a) => a.indexOf(c) === k); p.color = pickAccent(mc) || p.color; p.pal = mc.filter(c => Math.max(...hexBytes(c)) > 40).slice(0, 6); }
   if (S.mode !== 'live'){ p.lightDirty = true; toast(`${name} saved on ${p.name}. It goes to your ${devWord()} when you connect and save.`); render(); return; }
-  if (S.api === 2){ await writeProfileColor(i, p.color); toast('This firmware only supports solid colors, so the first color was used'); return; }
+  if (S.api === 2){ await writeProfileColor(i, p.color); toast(['Opal', 'Indiglow', 'Guardian'].includes(S.edition) ? `The original Peak only shows solid colors, so ${p.name} is set to the mood's main color` : `Your Peak's firmware only shows solid colors, so ${p.name} is set to the mood's main color. Update it in the Puffco app to get animated moods.`); return; }
   const blob = moodPayload(ref);
   await ble.writeBlob(`/u/app/hc/${i}/colr`, blob);
   if (S.active === i){ try { await ble.writeBlob('/p/app/thc/colr', blob); } catch(e){} }
@@ -5788,7 +5984,7 @@ async function applyMood(ref){
   drawMoods();
 }
 function moodTile(ref, idx, group){
-  const on = LT.on && LT.pending ? sameMood(LT.pending, ref) : moodTarget === 'lantern' ? store.lanternMood && sameMood(store.lanternMood, ref) : S.profiles[moodTarget ?? S.active].mood && sameMood(S.profiles[moodTarget ?? S.active].mood, ref);
+  const on = LT.on && LT.pending ? sameMood(LT.pending, ref) : phIdx(moodTarget) >= 0 ? sameMood(phMood(phIdx(moodTarget)), ref) : moodTarget === 'lantern' ? store.lanternMood && sameMood(store.lanternMood, ref) : S.profiles[moodTarget ?? S.active].mood && sameMood(S.profiles[moodTarget ?? S.active].mood, ref);
   const tplName = ref.kind === 'excl' ? 'Exclusive' : ref.tag === ZONE_TAG ? 'Zones' : (MOODS.tpl[ref.tag] || {}).name || '';
   return `<button class="mood" data-mg="${group}" data-mi="${idx}" aria-pressed="${!!on}"><i class="mood-sw" style="${swatchStyle(ref)}"></i>${group === 'm' ? '<span class="medit">Edit</span>' : ''}<b>${esc(ref.name)}</b><span>${esc(tplName)}</span></button>`;
 }
@@ -5838,27 +6034,80 @@ function rndCard(){
   return `<div class="sgroup" id="rndCard"><div class="row between"><span class="label">Randomizer</span><span class="muted" style="font-size:12px">Test build</span></div>
     ${r ? `<div class="mood" style="pointer-events:none;width:100%;max-width:none"><i class="mood-sw" style="${swatchStyle(r)}"></i><b>${esc(r.name)}</b><span>${esc(t)}${r.meta.userColors.length ? ' · ' + r.meta.userColors.length + ' colors' : ''}</span></div>` : '<p class="muted" style="margin:0">Tap Shuffle for a random color combo and effect.</p>'}
     <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn primary" id="rndGo" style="flex:1">${r ? 'Shuffle again' : 'Shuffle'}</button>${RND.hist.length > 1 ? '<button class="btn" id="rndBack">Back</button>' : ''}</div>
-    ${r ? `<div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="rndSet" style="flex:1">Set on ${esc(((moodTarget ?? S.active) === 'lantern' ? 'lantern' : (S.profiles[moodTarget ?? S.active] || {}).name || 'profile').slice(0, 10))}</button><button class="btn" id="rndSave" style="flex:1">Save mood</button></div>` : ''}</div>`;
+    ${r ? `<div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="rndSet" style="flex:1">Set on ${esc((phIdx(moodTarget) >= 0 ? 'preheat' : (moodTarget ?? S.active) === 'lantern' ? 'lantern' : (S.profiles[moodTarget ?? S.active] || {}).name || 'profile').slice(0, 10))}</button><button class="btn" id="rndSave" style="flex:1">Save mood</button></div>` : ''}</div>`;
+}
+// keep the shuffled mood showing on the device while you're on Lights (cleared when you leave the page)
+function rndShow(ref){
+  if (S.mode !== 'live' || (S.state >= 7 && S.state <= 9)) return;
+  let blob; try { blob = S.api === 2 ? (moodColors(ref)[0] || '#ffffff') : moodPayload(ref); } catch(e){ return; }
+  clearTimeout(previewTimer); ledJob(() => previewWrite(blob).catch(() => {}));
 }
 function rndWire(){
   const go = $('#rndGo'); if (!go) return;
-  go.onclick = () => { RND.cur = rndMood(); RND.hist.push(RND.cur); if (RND.hist.length > 20) RND.hist.shift(); drawMoods(); previewMood(RND.cur, 6000); };
-  const bk = $('#rndBack'); if (bk) bk.onclick = () => { RND.hist.pop(); RND.cur = RND.hist[RND.hist.length - 1] || null; drawMoods(); if (RND.cur) previewMood(RND.cur, 6000); };
+  go.onclick = () => { RND.cur = rndMood(); RND.hist.push(RND.cur); if (RND.hist.length > 20) RND.hist.shift(); drawMoods(); rndShow(RND.cur); };
+  const bk = $('#rndBack'); if (bk) bk.onclick = () => { RND.hist.pop(); RND.cur = RND.hist[RND.hist.length - 1] || null; drawMoods(); if (RND.cur) rndShow(RND.cur); };
   const st = $('#rndSet'); if (st) st.onclick = async () => { try { await writeMoodTo(moodTarget ?? S.active, RND.cur); } catch(e){ toast('Could not set it: ' + (e.message || e)); } drawMoods(); };
   const sv = $('#rndSave'); if (sv) sv.onclick = () => { const m = { id: 'local-' + Date.now(), name: RND.cur.name, tag: RND.cur.tag, meta: JSON.parse(JSON.stringify(RND.cur.meta)) }; store.myMoods.unshift(m); save(); toast(`Saved "${m.name}" to your moods`); drawMoods(); };
 }
+/* ---- mood shuffle: a profile picks a random mood from your chosen saved moods after every session ---- */
+function shufCfg(i){ store.shuffle = store.shuffle || {}; return store.shuffle[i] || (store.shuffle[i] = { on:false, ids:[] }); }
+const moodKey = m => m.kind === 'excl' ? 'x:' + m.id : m.id || (m.tag + ':' + JSON.stringify(m.meta || {}));
+// everything a profile can shuffle through: your saved moods plus the Puffco exclusives
+function shufAll(){ return allMine().map(m => Object.assign({ kind:'tpl' }, m)).concat(MOODS.excl.filter(x => !isProxy() || x.toad).map(x => ({ kind:'excl', id:x.id, name:x.name }))); }
+function shufPool(i){ const ids = shufCfg(i).ids; return shufAll().filter(m => ids.includes(moodKey(m))); }
+async function shuffleNext(i, why){
+  const c = shufCfg(i); if (!c.on) return;
+  const pool = shufPool(i); if (!pool.length) return;
+  const curM = S.profiles[i] && S.profiles[i].mood, options = pool.length > 1 ? pool.filter(m => !(curM && sameMood(curM, m))) : pool;
+  const pick = options[Math.floor(Math.random() * options.length)];
+  try { await writeMoodTo(i, pick); } catch(e){ return; }
+  toast(`${why || 'Shuffle'}: ${pick.name || 'Mood'} is up next on ${(S.profiles[i] || {}).name || 'P' + (i + 1)}`);
+}
+function shufCard(){
+  const t = moodTarget ?? S.active; if (typeof t !== 'number') return '';
+  const c = shufCfg(t), n = shufPool(t).length, name = (S.profiles[t] || {}).name || 'P' + (t + 1);
+  return `<div class="sgroup shuf-card"><div class="row between"><span class="label">Mood shuffle</span><span class="muted" style="font-size:12px">${esc(name)}</span></div>
+    <label class="toggle"><span><b>Pick a random mood each session</b><br><span class="muted" style="font-size:13px">${c.on ? (n ? `Shuffling ${n} mood${n === 1 ? '' : 's'}. A new one is picked after every session.` : 'Choose at least 2 moods to shuffle.') : 'Off. This profile keeps the mood you set.'}</span></span><input type="checkbox" class="switch" id="shufOn" ${c.on ? 'checked' : ''}></label>
+    <button class="btn" id="shufPick" style="width:100%">${n ? `Edit moods in the mix (${n})` : 'Choose moods'}</button></div>`;
+}
+function shufSheet(i){
+  const all = shufAll(), c = shufCfg(i), sel = new Set(c.ids);
+  const el = document.createElement('div'); el.className = 'egg';
+  const paint = () => {
+    el.innerHTML = `<div class="egg-card" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;width:min(100%,420px)">
+      <h2 style="margin:0;text-align:center">Moods in the mix</h2>
+      <p style="margin:0;text-align:center;font-size:14px">Tap the moods ${esc((S.profiles[i] || {}).name || 'this profile')} can pick from. Your moods and Puffco exclusives both work.</p>
+      <div class="row" style="gap:8px"><button class="btn small" data-sh="all" style="flex:1">Select all</button><button class="btn small" data-sh="none" style="flex:1">Clear</button></div>
+      <div class="shuf-list">${all.length ? all.map(m => { const k = moodKey(m), on = sel.has(k); return `<button class="shuf-item${on ? ' on' : ''}" data-shk="${esc(k)}" aria-pressed="${on}"><i class="mood-sw" style="${swatchStyle(m)}"></i><span><b>${esc(m.name || 'Mood')}</b><small>${esc(m.kind === 'excl' ? 'Puffco exclusive' : (MOODS.tpl[m.tag] || {}).name || (m.tag === ZONE_TAG ? 'Zones' : ''))}</small></span><em>${on ? '✓' : ''}</em></button>`; }).join('') : '<p class="muted" style="margin:0">No moods yet.</p>'}</div>
+      <button class="btn primary" id="shDone" style="width:100%">${sel.size ? `Done · ${sel.size} mood${sel.size === 1 ? '' : 's'}` : 'Done'}</button></div>`;
+    requestAnimationFrame(() => el.classList.add('on'));
+  };
+  paint(); document.body.appendChild(el);
+  el.addEventListener('click', e => {
+    const it = e.target.closest('[data-shk]'), a = e.target.closest('[data-sh]');
+    if (it){ const k = it.dataset.shk; sel.has(k) ? sel.delete(k) : sel.add(k); const y = el.querySelector('.shuf-list').scrollTop; paint(); el.querySelector('.shuf-list').scrollTop = y; return; }
+    if (a){ if (a.dataset.sh === 'all') all.forEach(m => sel.add(moodKey(m))); else sel.clear(); paint(); return; }
+    if (e.target.id === 'shDone'){
+      c.ids = [...sel]; if (c.ids.length) c.on = true; save(); el.classList.remove('on'); setTimeout(() => el.remove(), 260); drawMoods();
+      if (c.on && c.ids.length) shuffleNext(i, 'Shuffle on');
+    }
+  });
+}
 function drawMoods(){
-  { const el = $('#moodFor'); if (el){ const t = moodTarget ?? S.active, n = t === 'lantern' ? 'the lantern' : ((S.profiles[t] || {}).name || 'P' + (t + 1)); el.textContent = `Tap a mood to set it on ${n}`; } }
+  { const el = $('#moodFor'); if (el){ const t = moodTarget ?? S.active, n = phIdx(t) >= 0 ? `${(S.profiles[phIdx(t)] || {}).name || 'P' + (phIdx(t) + 1)} preheat` : t === 'lantern' ? 'the lantern' : ((S.profiles[t] || {}).name || 'P' + (t + 1)); el.textContent = `Tap a mood to set it on ${n}`; } }
   const box = $('#moodLib'); if (!box) return;
   const tgt = moodTarget ?? S.active;
   $('#moodTarget').innerHTML = S.profiles.map((p, i) => `<button data-mt="${i}" aria-pressed="${tgt === i}">${esc(p.name.slice(0, 7))}</button>`).join('') + `<button data-mt="lantern" aria-pressed="${tgt === 'lantern'}">Lantern</button>`;
   const excl = MOODS.excl.filter(x => !isProxy() || x.toad).map(x => ({ kind:'excl', id:x.id, name:x.name }));
   const mine = allMine().map(m => Object.assign({ kind:'tpl' }, m));
-  box.innerHTML = rndCard() +
+  box.innerHTML = shufCard() + rndCard() +
     `<div class="sgroup"><div class="label">Puffco exclusives</div><div class="moods">${excl.map((r, i) => moodTile(r, i, 'x')).join('')}</div></div>` +
     `<div class="sgroup"><div class="row between"><span class="label">Your moods</span><span class="row" style="gap:6px"><button class="btn small" id="bNewMood">New mood</button></span></div><div class="moods">${mine.map((r, i) => moodTile(r, i, 'm')).join('') || '<p class="muted">No saved moods yet.</p>'}</div></div>`;
   $('#bNewMood').onclick = () => openMoodEditor();
   rndWire();
+  { const t = moodTarget ?? S.active, on = $('#shufOn'), pk = $('#shufPick');
+    if (on) on.onchange = e => { const c = shufCfg(t); c.on = e.target.checked; save(); if (c.on && shufPool(t).length < 1) shufSheet(t); else if (c.on) shuffleNext(t, 'Shuffle on'); drawMoods(); };
+    if (pk) pk.onclick = () => shufSheet(t); }
 }
 function moodFromTile(g, i){
   if (g === 'x'){ const x = MOODS.excl.filter(x => !isProxy() || x.toad)[i]; return { kind:'excl', id:x.id, name:x.name }; }
@@ -6057,7 +6306,7 @@ function loadAccountProfile(i, slot){
 function revStr(v){ const L = 'ABCDEFGHJKMNPRTUVWXYZ'; if (!(v > 0)) return 'X*'; let s = '', n = v - 1; while (n >= 0){ s = L[n % L.length] + s; n = Math.floor(n / L.length) - 1; } return s; }
 slowPoll.n = 0;
 async function readDeviceInfo(){
-  try { S.edition = isProxy() ? null : (EDITIONS[await ble.u32('/p/sys/hw/mdcd')] || null); } catch(e){}
+  try { const mc = await ble.u32('/p/sys/hw/mdcd'); S.edition = isProxy() ? (PROXY_EDITIONS[mc] || null) : (EDITIONS[mc] || null); } catch(e){}
   try { S.devName = await ble.str('/u/sys/name'); } catch(e){}
   try { const r = await ble.read('/p/sys/fw/ver', 4); S.fw = revStr(r[0]); } catch(e){}
   try { const v = await ble.f32('/u/app/rdym/hc'); S.readyMode = v >= 0 && v < 4 ? Math.round(v) : -1; } catch(e){ S.readyMode = null; }
@@ -6540,11 +6789,12 @@ function setProfileColor(hex, pal){
   $('#gStop0').setAttribute('stop-color', second); $('#gStop1').setAttribute('stop-color', hex);
 }
 const G = { frac:0, temp:22, glow:0, shown:null };
+function liveElapsed(){ const e = +S.elapsed || 0; if (S.mode !== 'live' || S.state !== 8 || !S.elapsedAt) return e; return e + Math.min(1.5, (performance.now() - S.elapsedAt) / 1000); } // glide between Bluetooth reads
 const ARC = 433.5, R = 92, CX = 110, CY = 110;
 function gaugeTarget(){
   if (S.mode !== 'live') return 0;
   const p = S.profiles[S.active], tgt = p.tempC;
-  if (S.state === 8 && S.total > 0) return clamp((S.total - S.elapsed) / S.total, 0, 1);  // ready: ring counts down
+  if (S.state === 8 && S.total > 0) return clamp((S.total - liveElapsed()) / S.total, 0, 1);  // ready: ring counts down
   return clamp((S.tempC - 20) / (tgt - 20), 0, 1);                                         // heating / cooling: ring shows temp
 }
 function gaugeLoop(){
@@ -6716,6 +6966,7 @@ $('#moodLib').addEventListener('click', e => {
   const t = e.target.closest('[data-mg]'); if (!t) return;
   const ref = moodFromTile(t.dataset.mg, +t.dataset.mi);
   if (ed2){ const li = store.myMoods.findIndex(m => m.id === ref.id); openMoodEditor(Object.assign({}, ref, { localIdx: li >= 0 ? li : null, name: li >= 0 ? ref.name : ref.name + ' copy' })); return; }
+  if (phIdx(moodTarget) >= 0){ if (LT.on) ltShowRef(ref); writeMoodTo(moodTarget, ref); drawMoods(); return; } // preheat pick: no save bar, it lives in the app
   ltPick(ref);
 });
 $('#moodEditor').addEventListener('click', async e => {
@@ -6816,8 +7067,32 @@ document.fonts && document.fonts.ready.then(() => moveTabPill(view));
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { applyTheme(); draw(); });
 
 /* ---- What's new: shows once per update ---- */
-const WN_VER = '2026-10-proxy';
+const WN_VER = '2026-10-preheat';
+/* ---- limited edition lights: owners can share their device's light files so we can add that edition's colorway ---- */
+const ED_LIGHT_PATHS = () => [0,1,2,3].map(i => `/u/app/hc/${i}/colr`).concat(['/p/app/thc/colr', '/p/app/ltrn/colr'],
+  S.api === 2 ? [0,1,2,3].flatMap(i => [`/u/app/hc/${i}/phcl`, `/u/app/hc/${i}/accl`]) : [0,1,2,3,4,5].map(i => `/u/app/led/aa/${i}`).concat([0,1,2,3,4,5,6,7].flatMap(i => [`/u/app/led/ca/${i}`, `/u/app/led/oa/${i}`])));
+function edIsLimited(){ return !!S.edition && (LIMITED_ED.includes(S.edition) || (isProxy() && S.edition !== 'Onyx')); }
+async function edShareSend(){
+  const files = {};
+  for (const p of ED_LIGHT_PATHS()){
+    if (S.mode !== 'live') return false;
+    try { const r = await ble.readAll(p); if (r && r.length) files[p] = toHex(r).slice(0, 8000); } catch(e){}
+  }
+  if (!Object.keys(files).length) return false;
+  // anonymous: no account, serial or device id, just the light data (hash only stops duplicate rows)
+  const hash = toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(S.edition + JSON.stringify(files)))));
+  await sbJSON('/rest/v1/edition_lights', { method:'POST', headers:{ Prefer:'return=minimal,resolution=ignore-duplicates' }, body: JSON.stringify({ hash, edition:S.edition, series:S.series || (isProxy() ? 'toad' : 'peak'), fw:S.fw || null, api:S.api || null, files }) });
+  store.edShare = store.edShare || {}; store.edShare[S.edition] = { ok:true, at:Date.now() }; save();
+  return true;
+}
+function edShareAsk(force){
+  if (S.mode !== 'live' || !edIsLimited()) return;
+  const st = (store.edShare || {})[S.edition];
+  if (!force && st && st.ok && Date.now() - st.at < 7 * 864e5) return; // shared recently
+  edShareSend().then(ok => { if (force) toast(ok ? `${S.edition} lights shared` : 'Could not read the lights'); }).catch(e => { if (force) toast('Share failed: ' + (e.message || e)); });
+}
 const WN_ITEMS = [
+  ['Preheat light', 'Pick a color or any mood (yours or Puffco’s) to show while a profile heats up. Find it on each profile in Profiles.'],
   ['Proxy support', 'Emberline now works with the Puffco Proxy: temps, battery, sessions, hit timer, blinkers, colors, moods, zones, brightness and the lantern.'],
   ['Randomizer', 'Tap Shuffle at the top of Lights for a random color combo and effect. Keep the ones you like.'],
   ['Gear on profiles', 'Profiles now show which Puffcos people use.']
