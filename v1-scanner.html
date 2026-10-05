@@ -82,7 +82,7 @@ function guess(dv){
   return g.join(' ');
 }
 const timeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error('timeout')), ms))]);
-const props = p => Object.keys(Object.getOwnPropertyDescriptors(Object.getPrototypeOf(p))).filter(k => { try { return p[k] === true; } catch(e){ return false; } }).join(',');
+const props = p => { if (!p) return 'props unknown'; try { return ['read','write','writeWithoutResponse','notify','indicate','broadcast'].filter(k => p[k] === true).join(',') || 'none'; } catch(e){ return 'props unknown'; } }; // some browsers (Path) don't fill these in
 
 $('bConnect').onclick = async () => {
   if (!navigator.bluetooth){ status('This browser has no Bluetooth. Use Path or Bluefy on iPhone, or Chrome.', 'bad'); return; }
@@ -101,8 +101,8 @@ $('bConnect').onclick = async () => {
     total = all.length; let last = '';
     for (const [s, c] of all){
       if (s.uuid !== last){ log('\n[service ' + s.uuid + ']'); last = s.uuid; }
-      let line = '  ' + c.uuid + '  (' + props(c.properties) + ')';
-      if (c.properties.read){
+      let line = '  ' + c.uuid; try { line += '  (' + props(c.properties) + ')'; } catch(e){}
+      if (!c.properties || c.properties.read !== false){ // try anyway when the browser doesn't say
         try { const v = await timeout(c.readValue(), 3000); line += '\n     = ' + hex(v) + '  ' + guess(v); readable.push(c); }
         catch(e){ line += '\n     read ERR ' + e.message; }
       }
