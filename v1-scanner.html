@@ -1,145 +1,496 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Emberline Peak Scanner</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Emberline Old Peak Lab</title>
 <style>
 :root{--bg:#120f18;--panel:#1c1824;--fg:#efeaf6;--muted:#a59db3;--line:#2e2838;--accent:#b46cff;--ink:#140b1f;--ok:#4cd68a;--bad:#ff6b6b;color-scheme:dark}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,system-ui,sans-serif;padding:max(20px,env(safe-area-inset-top)) 16px 40px}
-.wrap{max-width:680px;margin:0 auto;display:grid;gap:16px}
-h1{font-size:24px;margin:0}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,system-ui,sans-serif;padding:max(20px,env(safe-area-inset-top)) 16px 48px}
+.wrap{max-width:720px;margin:0 auto;display:grid;gap:16px}
+h1{font-size:24px;margin:0} h2{font-size:17px;margin:0}
 p{margin:0;color:var(--muted)}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;display:grid;gap:10px}
-ol{margin:0;padding-left:20px;display:grid;gap:6px}
-li{color:var(--fg)}
-.row{display:flex;flex-wrap:wrap;gap:8px}
-button{border:0;border-radius:10px;padding:12px 16px;font:600 15px system-ui;background:var(--accent);color:var(--ink);cursor:pointer}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button{border:0;border-radius:10px;padding:10px 14px;font:600 14px system-ui;background:var(--accent);color:var(--ink);cursor:pointer}
 button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
-button:disabled{opacity:.45}
-#status{font-weight:600}
-#status.ok{color:var(--ok)} #status.bad{color:var(--bad)}
-textarea{width:100%;height:320px;background:#0b0910;color:var(--fg);border:1px solid var(--line);border-radius:10px;font:11px/1.4 ui-monospace,Menlo,monospace;padding:8px}
-.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
-</style>
-</head>
-<body>
+button[aria-pressed="true"]{background:var(--fg);color:var(--ink)}
+button:disabled{opacity:.4}
+#status{font-weight:600} .ok{color:var(--ok)} .bad{color:var(--bad)}
+.moods{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.mood{display:grid;gap:6px;text-align:left;background:#251f2f;color:var(--fg);border:1px solid var(--line);padding:8px}
+.mood i{display:block;height:28px;border-radius:7px}
+textarea{width:100%;height:220px;background:#0b0910;color:var(--fg);border:1px solid var(--line);border-radius:10px;font:11px/1.4 ui-monospace,Menlo,monospace;padding:8px}
+input[type=color]{width:48px;height:40px;border:0;background:none;padding:0}
+ol{margin:0;padding-left:20px;display:grid;gap:4px}
+</style></head><body>
 <div class="wrap">
-  <h1>Emberline Peak Scanner</h1>
-  <p>This only reads from your Peak. It doesn't change any settings.</p>
-
-  <div class="card">
-    <b>Steps</b>
-    <ol>
-      <li>Close the Puffco app fully (swipe it away). Only one app can connect at a time.</li>
-      <li>Open this page in <b>Path</b> or <b>Bluefy</b> on iPhone, or <b>Chrome</b> on Android or a computer.</li>
-      <li>Turn your Peak on and tap <b>1. Connect</b>. Pick your Peak from the list.</li>
-      <li>Wait for <b>Scan done</b>.</li>
-      <li>Tap <b>2. Record 60s</b>, then right away start a heat cycle on the Peak (double click the button). Let it heat. Take a hit if it gets to Ready.</li>
-      <li>Tap <b>Copy results</b> and send it to kona991 on Discord.</li>
-    </ol>
-  </div>
+  <h1>Emberline Old Peak Lab</h1>
+  <p>For Peaks on the older firmware (OG, Opal, Indiglow, Guardian). Tests animated moods and hit detection. Close the Puffco app first.</p>
 
   <div class="card">
     <div id="status">Not connected</div>
-    <div class="bar"><i id="prog"></i></div>
-    <div class="row">
-      <button id="bConnect">1. Connect</button>
-      <button id="bRecord" disabled>2. Record 60s</button>
-      <button id="bCopy" class="ghost">Copy results</button>
-    </div>
-    <textarea id="out" readonly placeholder="Results show up here"></textarea>
+    <div id="info" class="row" style="color:var(--muted);font-size:13px"></div>
+    <div class="row"><button id="bConnect">Connect</button><button id="bCopy" class="ghost">Copy log</button></div>
   </div>
+
+  <div class="card">
+    <h2>1. Moods</h2>
+    <p>Pick where it goes, then tap a mood. Tell kona991 which ones animate and which look wrong.</p>
+    <div class="row" id="targets"></div>
+    <div class="moods" id="moods"></div>
+  </div>
+
+  <div class="card">
+    <h2>2. Solid color with pulse</h2>
+    <p>Same spot as above. Each button is a different pulse style. Tell kona991 what each one does.</p>
+    <div class="row"><input type="color" id="solid" value="#ff2060" aria-label="Color"><span id="pulses" class="row"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>3. Hit test</h2>
+    <ol>
+      <li>Start a session on the Peak (double click).</li>
+      <li>Tap <b>Record 60s</b>.</li>
+      <li>When it's Ready, take 2 or 3 hits of different lengths. Remember roughly when each one starts and stops.</li>
+      <li>Tap <b>Copy log</b> and send it to kona991 with your notes.</li>
+    </ol>
+    <div class="row"><button id="bHit" disabled>Record 60s</button></div>
+  </div>
+
+  <textarea id="log" readonly placeholder="Log shows up here"></textarea>
 </div>
 <script>
-// every Puffco service id from Puffco's own app, plus the standard ones, so we can see whatever this Peak has
-const SERVICES = [
-  '06caf9c0-74d3-454f-9be9-e30cd999c17a', // original / flat API
-  'e276967f-ea8a-478a-a92e-d78f5dd15dd5', // newer (LoRaX) API
-  '420b9b40-457d-4abe-a3bf-71609d79581b',
-  '1d14d6ee-fd63-4fa1-bfa4-8f47b42119f0', // firmware update
-  '05434bca-cc7f-4ef6-bbb3-b1c520b9800c','8dc5ec05-8f7d-45ad-99db-3fbde65dbd9c','43312cd1-7d34-46ce-a7d3-0a98fd9b4cb8',
-  'c830ee3e-0e32-4780-a51d-b1b0b38089a4','58b0a7aa-d89f-4bf2-961d-0d892d7439d8','4daad5ae-8a9e-417d-924d-b237ac64ad9c',
-  '2dab0217-8a4e-4de8-83c7-8fded59f4599','a5fa5a5d-f28e-47d9-b95b-f82c06177503','c364cf1d-117f-4a3b-baae-3e2fce5a248f',
-  'baeb965b-58ac-43bf-9cc5-bfb448ec2e72','0d7ec9f3-efe4-4e51-aea0-3a1477a9c37e','5c03d675-2588-490f-87dc-b88772934bbb',
-  'f7bf3564-fb6d-4e53-88a4-5e37e0326063','984227f3-34fc-4045-a5d0-2c581f81a153','9be50ff1-5695-41b0-a7c2-d491623693f0',
-  'device_information','battery_service','generic_access'
-];
-const $ = id => document.getElementById(id);
-const out = [], readable = [];
-let dev = null;
-const log = s => { out.push(s); $('out').value = out.join('\n'); };
-const status = (t, c) => { const s = $('status'); s.textContent = t; s.className = c || ''; };
-const hex = dv => [...new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength)].map(b => b.toString(16).padStart(2, '0')).join('');
-function guess(dv){
-  const n = dv.byteLength, g = [];
-  if (n === 4){ g.push('f32=' + +dv.getFloat32(0, true).toPrecision(6), 'u32=' + dv.getUint32(0, true), 'i32=' + dv.getInt32(0, true)); }
-  if (n === 1) g.push('u8=' + dv.getUint8(0));
-  if (n === 2) g.push('u16=' + dv.getUint16(0, true));
-  const txt = new TextDecoder().decode(new Uint8Array(dv.buffer, dv.byteOffset, n)).replace(/[^\x20-\x7e]/g, '');
-  if (txt.length >= 3 && txt.length >= n * 0.6) g.push('text="' + txt + '"');
-  return g.join(' ');
+const IS_PATH = /Path\//i.test(navigator.userAgent || '') || !!window.notifications;
+const store = {}; const isProxy = () => false;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function withTimeout(p, ms, stage){ let t; return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(Object.assign(new Error('Timed out'), { stage })), ms); })]).finally(() => clearTimeout(t)); }
+const SVC='e276967f-ea8a-478a-a92e-d78f5dd15dd5', CMD='60133d5c-5727-4f2c-9697-d842c5292a3c',
+      REPLY='8dc5ec05-8f7d-45ad-99db-3fbde65dbd9c', VERSION='05434bca-cc7f-4ef6-bbb3-b1c520b9800c';
+const PIKACHU='06caf9c0-74d3-454f-9be9-e30cd999c17a', PUP='420b9b40-457d-4abe-a3bf-71609d79581b', OTA='1d14d6ee-fd63-4fa1-bfa4-8f47b42119f0', PUFFCO_CO=3075;
+const MASTER = new Uint8Array([0x64,0xc6,0x45,0x62,0x56,0xf2,0x6f,0x5b,0x1c,0xa1,0x27,0x37,0xa5,0xdd,0x71,0xfb]);
+const OP = { SEED:0x00, UNLOCK:0x01, READ:0x10, WRITE:0x11 };
+const enc = new TextEncoder(), dec = new TextDecoder();
+const MAX_MSG = 128; // Peak Pro ATT MTU is 131 (minus 3 byte header)
+
+
+class Lorax {
+  constructor(){ this.seq=1; this.pending=new Map(); this.queue=Promise.resolve(); this.dev=null; this.ints={}; }
+  async request(showAll, name, id){
+    const opt = { optionalServices:[SVC, PIKACHU, PUP, OTA], optionalManufacturerData:[PUFFCO_CO] };
+    const base = [{ services:[SVC] }, { services:[PIKACHU] }, { manufacturerData:[{ companyIdentifier:PUFFCO_CO }] }];
+    const names = [{namePrefix:'Peak'},{namePrefix:'PEAK'},{namePrefix:'Puffco'},{namePrefix:'PUFFCO'},{namePrefix:'Proxy'},{namePrefix:'PROXY'}];
+    let filters;
+    if (name) filters = IS_PATH ? (id ? [{ deviceId: id }, { name }] : [{ name }]) : [{ name }]; // Path reconnects to a known id with no popup
+    else filters = [...base, ...names];
+    const attempt = f => navigator.bluetooth.requestDevice(showAll && !name ? Object.assign({ acceptAllDevices:true }, opt) : Object.assign({ filters:f }, opt));
+    this.lastRequest = filters;
+    let dev;
+    try { dev = await attempt(filters); }
+    catch(e){
+      // older browsers reject filters they don't know (deviceId / manufacturerData); retry with the plain ones
+      if (e && e.name === 'TypeError'){ const plain = filters.filter(x => !x.deviceId && !x.manufacturerData); dev = await navigator.bluetooth.requestDevice({ filters: plain, optionalServices:[SVC, PIKACHU] }); }
+      else throw e;
+    }
+    this.adopt(dev); return dev;
+  }
+  adopt(dev){
+    if (this.dev === dev) return;
+    if (this.dev && this._onGone) this.dev.removeEventListener('gattserverdisconnected', this._onGone);
+    this.dev = dev; this._onGone = () => this._dropped();
+    dev.addEventListener('gattserverdisconnected', this._onGone);
+  }
+  get connected(){ return !!(this.dev && this.dev.gatt && this.dev.gatt.connected && this.cmd); }
+  async attach(onStage, quick){
+    const st = x => onStage && onStage(x);
+    this.cmd = null;
+    st('gatt'); const gatt = await withTimeout(this.dev.gatt.connect(), quick ? 8000 : 15000, 'gatt');
+    st('service'); let svc;
+    try { svc = await withTimeout(gatt.getPrimaryService(SVC), 10000, 'service'); } catch(e){ e.code = 'noservice'; throw e; }
+    if (!quick){ try { const v = await svc.getCharacteristic(VERSION); await withTimeout(v.readValue(), 5000, 'gatt'); } catch(e){} } // triggers bonding (already bonded on a reconnect)
+    const cmd = await svc.getCharacteristic(CMD), rep = await svc.getCharacteristic(REPLY);
+    if (this.rep && this._onRep){ try { this.rep.removeEventListener('characteristicvaluechanged', this._onRep); } catch(e){} }
+    this._onRep = e => this._onReply(e.target.value);
+    rep.addEventListener('characteristicvaluechanged', this._onRep);
+    await withTimeout(rep.startNotifications(), 8000, 'gatt');
+    this.rep = rep; this.cmd = cmd; this.seq = 1; this.ints = {}; this.pending.clear(); this.queue = Promise.resolve();
+    st('auth'); await this._auth();
+  }
+  disconnect(silent){
+    this.cmd = null;
+    try { if (this.dev && this.dev.gatt.connected){ this._silent = !!silent; this.dev.gatt.disconnect(); } } catch(e){}
+  }
+  _dropped(){
+    this.cmd = null;
+    for (const p of this.pending.values()){ clearTimeout(p.timer); p.rej(new Error('Disconnected')); }
+    this.pending.clear(); this.queue = Promise.resolve();
+    if (this._silent){ this._silent = false; return; }
+    this.onDisconnect && this.onDisconnect();
+  }
+  _onReply(dv){
+    if (dv.byteLength < 3) return;
+    const seq = dv.getUint16(0,true), status = dv.getUint8(2);
+    const p = this.pending.get(seq); if (!p) return;
+    this.pending.delete(seq); clearTimeout(p.timer);
+    const body = new Uint8Array(dv.buffer.slice(dv.byteOffset+3, dv.byteOffset+dv.byteLength));
+    status === 0 ? p.res(body) : p.rej(Object.assign(new Error('Device status 0x'+status.toString(16)), {status}));
+  }
+  run(op, body = new Uint8Array(0), timeout = 4000){
+    const job = () => new Promise(async (res, rej) => {
+      if (!this.cmd) return rej(new Error('Disconnected'));
+      const seq = this.seq; this.seq = this.seq >= 0xffff ? 1 : this.seq + 1;
+      const msg = new Uint8Array(3 + body.length);
+      msg[0] = seq & 0xff; msg[1] = seq >> 8; msg[2] = op; msg.set(body, 3);
+      const timer = setTimeout(() => { this.pending.delete(seq); rej(new Error('Timed out')); }, timeout);
+      this.pending.set(seq, {res, rej, timer});
+      try {
+        if (this.cmd.writeValueWithoutResponse) await this.cmd.writeValueWithoutResponse(msg);
+        else await this.cmd.writeValue(msg);
+      } catch(e){ clearTimeout(timer); this.pending.delete(seq); rej(e); }
+    });
+    const p = this.queue.then(job, job);
+    this.queue = p.catch(()=>{});
+    return p;
+  }
+  async _auth(){
+    const seed = await this.run(OP.SEED, new Uint8Array(0), 6000);
+    if (seed.length < 16) throw new Error('Bad access seed');
+    const buf = new Uint8Array(32); buf.set(MASTER,0); buf.set(seed.slice(0,16),16);
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
+    await this.run(OP.UNLOCK, digest.slice(0,16));
+  }
+  read(path, size, offset = 0){
+    const p = enc.encode(path), b = new Uint8Array(4 + p.length);
+    b[0]=offset&0xff; b[1]=offset>>8; b[2]=size&0xff; b[3]=size>>8; b.set(p,4);
+    return this.run(OP.READ, b, 3000);
+  }
+  write(path, bytes, offset = 0, flags = 0){
+    const p = enc.encode(path), b = new Uint8Array(3 + p.length + 1 + bytes.length);
+    b[0]=offset&0xff; b[1]=offset>>8; b[2]=flags; b.set(p,3); b[3+p.length]=0; b.set(bytes, 4+p.length);
+    return this.run(OP.WRITE, b, 3000);
+  }
+  // Peak Pro stores numbers as 32-bit floats. The Proxy stores some as whole numbers, which read as ~0 if treated
+  // as floats (that's the 0% battery / 32°F bug). Spot that, read them as integers, and remember it for writes.
+  async f32(path, size = 4){
+    const r = await this.read(path, size);
+    if (r.length < 4){ const dv0 = new DataView(r.buffer, r.byteOffset, r.length); const v = r.length >= 2 ? dv0.getUint16(0, true) : r.length ? r[0] : 0; this.ints[path] = { scale: 1 }; return v; }
+    const dv = new DataView(r.buffer, r.byteOffset, r.length), f = dv.getFloat32(0, true), bits = dv.getUint32(0, true);
+    if (bits !== 0 && (!isFinite(f) || Math.abs(f) < 1e-20)){
+      const v = dv.getInt32(0, true), scale = this.intScale(path);
+      this.ints[path] = { scale }; return v === -2147483648 ? 0 : v / scale; // that value means "not set"
+    }
+    return f;
+  }
+  intScale(path){
+    // Proxy units (from the device inspector): temps in tenths of °C, times in hundredths of a second,
+    // battery in hundredths of a percent, volts in millivolts
+    // from Puffco's own app (Proxy int32 scales)
+    if (/info\/(dpd|drem)/.test(path)) return 256;               // dabs per day, dabs left
+    if (/msoc|lbws/.test(path)) return 100;                        // battery limit %, low battery warning %
+    if (/chg\/(etf|elap)/.test(path)) return 200;                 // charge time to full / elapsed
+    if (/bat\/(cap|curr)|chg\/iout/.test(path)) return 1000;      // battery capacity / current
+    if (/tmpo/.test(path)) return 10;                              // boost temp
+    if (/timo/.test(path)) return 200;                             // boost time
+    if (/intn|lbrt/.test(path)) return 256;                       // vapor setting, brightness
+    if (/temp|btmp|tcmd/.test(path)) return 10;
+    if (/elap|tott|time|btim|mbct/.test(path)) return 200;         // Puffco web app: times are seconds x 200
+    if (/bat\/soc/.test(path)) return 100;
+    if (/volt/.test(path)) return 1000;
+    if (/led\/di[fa]/.test(path)) return store.inhOld ? 1000 : 4096; // Puffco web app: 4096 = 1.0 (test build can flip back to the old 1000)
+    return 1;
+  }
+  async u8(path){ return (await this.read(path, 1))[0]; }
+  async u32(path){ const r = await this.read(path, 4); return new DataView(r.buffer).getUint32(0, true); }
+  async str(path){ const r = await this.read(path, 64); return dec.decode(r).split('\0')[0].trim(); }
+  wf32(path, v){ const b = new Uint8Array(4), t = this.ints[path] || (isProxy() ? { scale: this.intScale(path) } : null); /* Proxy stores whole numbers everywhere, even when the value reads 0 */ if (t) new DataView(b.buffer).setInt32(0, Math.round(v * t.scale), true); else new DataView(b.buffer).setFloat32(0, v, true); return this.write(path, b); }
+  async readAll(path){
+    const out = []; let off = 0;
+    while (off < 4096){
+      const chunk = await this.read(path, 125, off);
+      out.push(...chunk); off += chunk.length;
+      if (chunk.length < 125) break;
+    }
+    return new Uint8Array(out);
+  }
+  async writeBlob(path, blob){
+    const pl = enc.encode(path), room = MAX_MSG - (6 + pl.length + 1);
+    // fits in one message: single write that truncates the file
+    if (blob.length <= room){ try { await this.write(path, blob, 0, 4); return; } catch(e){} }
+    // bigger: open a handle, write the pieces, close. The Peak only applies the file on close,
+    // so it never sees half a light pattern (half patterns are what made it go white)
+    let h = null;
+    for (const fl of [4, 5, 0]){ try { const r = await this.run(0x20, new Uint8Array([fl, ...pl]), 3000); if (r.length >= 2){ h = r[0] | (r[1] << 8); break; } } catch(e){} }
+    if (h != null){
+      const step = MAX_MSG - 3 - 4;
+      try {
+        for (let off = 0; off < blob.length; off += step){
+          const piece = blob.slice(off, off + step), b = new Uint8Array(4 + piece.length);
+          b[0] = h & 255; b[1] = h >> 8; b[2] = off & 255; b[3] = off >> 8; b.set(piece, 4);
+          await this.run(0x22, b, 3000);
+        }
+      } finally { try { await this.run(0x26, new Uint8Array([h & 255, h >> 8]), 3000); } catch(e){} }
+      return;
+    }
+    return this.writeBlobLegacy(path, blob);
+  }
+  async writeBlobLegacy(path, blob){
+    const room = MAX_MSG - (6 + enc.encode(path).length + 1);
+    let off = 0, truncated = true;
+    // first piece truncates the file (flag 4) so no old bytes are left behind
+    try { await this.write(path, blob.slice(0, room), 0, 4); }
+    catch(e){ truncated = false; try { await this.write(path, blob.slice(0, room), 0, 1); } catch(e2){ await this.write(path, blob.slice(0, room), 0, 0); } }
+    off = Math.min(room, blob.length);
+    while (off < blob.length){ const piece = blob.slice(off, off + room); await this.write(path, piece, off, 0); off += piece.length; }
+    // older firmware without truncate: pad the tail with zeros instead
+    if (!truncated){ try { await this.write(path, new Uint8Array(Math.min(64, room)), blob.length, 0); } catch(e){} }
+  }
 }
-const timeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error('timeout')), ms))]);
-const props = p => { if (!p) return 'props unknown'; try { return ['read','write','writeWithoutResponse','notify','indicate','broadcast'].filter(k => p[k] === true).join(',') || 'none'; } catch(e){ return 'props unknown'; } }; // some browsers (Path) don't fill these in
+
+/* minimal canonical CBOR encoder (for LED color payloads) */
+function cbor(v){
+  const out = [];
+  const head = (major, n) => {
+    if (n < 24) out.push(major<<5 | n);
+    else if (n < 256) out.push(major<<5 | 24, n);
+    else if (n < 65536) out.push(major<<5 | 25, n>>8, n&255);
+    else if (n < 4294967296) out.push(major<<5 | 26, (n>>>24)&255, (n>>>16)&255, (n>>>8)&255, n&255);
+    else { const hi = Math.floor(n / 4294967296), lo = n >>> 0; out.push(major<<5 | 27, (hi>>>24)&255, (hi>>>16)&255, (hi>>>8)&255, hi&255, (lo>>>24)&255, (lo>>>16)&255, (lo>>>8)&255, lo&255); }
+  };
+  const w = x => {
+    if (x instanceof Uint8Array){ head(2, x.length); out.push(...x); }
+    else if (typeof x === 'boolean'){ out.push(x ? 0xf5 : 0xf4); }
+    else if (x === null || x === undefined){ out.push(0xf6); }
+    else if (typeof x === 'number' && !Number.isInteger(x)){
+      if (Math.fround(x) === x && !cbor.f64){ const b = new Uint8Array(4); new DataView(b.buffer).setFloat32(0, x); out.push(0xfa, ...b); }
+      else { const b = new Uint8Array(8); new DataView(b.buffer).setFloat64(0, x); out.push(0xfb, ...b); }
+    }
+    else if (typeof x === 'number'){ x >= 0 ? head(0, x) : head(1, -1 - x); }
+    else if (typeof x === 'string'){ const b = enc.encode(x); head(3, b.length); out.push(...b); }
+    else if (Array.isArray(x)){ head(4, x.length); x.forEach(w); }
+    else if (x instanceof Map){
+      const keys = [...x.keys()].map(k => ({k, b: cbor(k)})).sort((a,b) => a.b.length - b.b.length || cmpBytes(a.b, b.b));
+      head(5, keys.length); keys.forEach(({k,b}) => { out.push(...b); w(x.get(k)); });
+    }
+    else {
+      const keys = Object.keys(x).map(k => ({k, b: cbor(k)}))
+        .sort((a,b) => a.b.length - b.b.length || cmpBytes(a.b, b.b));
+      head(5, keys.length); keys.forEach(({k,b}) => { out.push(...b); w(x[k]); });
+    }
+  };
+  w(v); return new Uint8Array(out);
+}
+/* Proxy ("toad") light format, matched to the official Puffco web app: number keys instead of names,
+   and decimals scaled to whole numbers. {0:{0:<lamp id>, 1:<params>}, 1:<meta>} */
+const Toad = (() => {
+  const k = (key, sc, opt) => ({ key, opt, f: v => typeof v === 'number' ? Math.round(v * sc) : v });
+  const P = (key, a, b) => ({ key, f: v => Array.isArray(v) ? v.map(e => [Math.round(e[0] * a), Math.round(e[1] * b)]) : v });
+  const O = (key, sub) => ({ key, f: v => Array.isArray(v) ? v.map(e => apply(e, sub)) : v });
+  const V = { posXMin:k(0,16384,1), posXMax:k(1,16384,1), posYMin:k(2,16384), posYMax:k(3,16384), minRad:k(4,16384), maxRad:k(5,16384), period:k(6,32768), attack:k(7,32768), velXMin:k(8,4096,1), velXMax:k(9,4096,1), velYMin:k(10,4096,1), velYMax:k(11,4096,1) };
+  const M = { aX:k(0,16384), aY:k(1,16384), bX:k(2,16384), bY:k(3,16384), elast:k(4,256), exProb:k(5,256), exPkRdSc:k(6,256), exAtkTm:k(7,32768), exDecTm:k(8,32768) };
+  const PP = { constX:P(0,16384,512), constY:P(1,16384,512), brownX:P(2,16384,512), brownY:P(3,16384,512), visc:k(4,256), spawn:{ key:5, sub:V }, terminal:O(6,M), bgBright:k(7,256), partSoft:k(8,256), partToon:k(9,256), prNvRdSc:k(10,256), repuls:k(11,256), minQty:{ key:12 }, maxQty:{ key:13 }, prnDecTm:k(14,32768), colorByY:k(15,256) };
+  const LAMPS = {
+    pikaled2: { id:0, map:{ bright:{key:0}, speed:k(1,16), anim:{key:2}, plNum:{key:3}, plDenom:{key:4}, offset:{key:5}, color:{key:6}, colorLen:{key:7}, speedDi0:k(8,16,1), speedDi1:k(9,16,1), diFrac:k(10,256,1) } },
+    solid: { id:1, map:{ color:{key:0} } },
+    partphy2: { id:2, map:{ nonDi:{key:0,sub:PP}, di0:{key:1,sub:PP}, di1:{key:2,sub:PP}, colors:{key:3}, diFrac:k(4,256), boxBot:k(5,16384), boxTop:k(6,16384), blendClr:k(7,1) } }
+  };
+  const META = { version:{key:1}, moodName:{key:2}, moodType:{key:4}, userColors:{ key:9, f: v => Array.isArray(v) ? MoodEngine.packRgb(v.map(c => typeof c === 'string' ? c : '#' + [...c].map(x => x.toString(16).padStart(2, '0')).join(''))) : v }, bgBright:k(10,32768), density:k(11,4096), dynamicInhale:k(12,32768), tempoFrac:k(13,32768) };
+  function apply(obj, map){
+    const m = new Map();
+    for (const [name, spec] of Object.entries(map)){
+      if (!(name in obj) || obj[name] == null) continue;
+      const v = obj[name];
+      m.set(spec.key, spec.sub ? apply(v, spec.sub) : spec.f ? spec.f(v) : v);
+    }
+    return m;
+  }
+  function encode(lamp, meta){
+    const L = LAMPS[lamp.name]; if (!L) throw new Error('No Proxy version of ' + lamp.name);
+    const root = new Map([[0, new Map([[0, L.id], [1, apply(lamp.param, L.map)]])]]);
+    if (meta){ const mm = {}; for (const key in meta) if (key !== 'userColors' || Array.isArray(meta[key])) mm[key] = meta[key]; root.set(1, apply(mm, META)); }
+    const b = cbor(root); b.native = true; return b;
+  }
+  return { encode };
+})();
+// a light pattern as bytes for whichever device is connected
+const lampBlob = (lamp, meta) => isProxy() ? Toad.encode(lamp, meta) : cbor(meta ? { lamp, meta } : { lamp });
+function cborDecode(buf){
+  let i = 0; const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const len = ai => ai < 24 ? ai : ai === 24 ? buf[i++] : ai === 25 ? (i += 2, dv.getUint16(i-2)) : ai === 26 ? (i += 4, dv.getUint32(i-4)) : ai === 27 ? (i += 8, Number(dv.getBigUint64(i-8))) : -1;
+  const item = () => {
+    const b = buf[i++], mt = b >> 5, ai = b & 31;
+    if (mt === 7){
+      if (ai === 20) return false; if (ai === 21) return true; if (ai === 22 || ai === 23) return null;
+      if (ai === 25){ i += 2; const h = dv.getUint16(i-2), e = (h>>10)&31, f = h&1023, sg = h>>15 ? -1 : 1; return sg * (e === 0 ? f*2**-24 : e === 31 ? (f ? NaN : Infinity) : (1+f/1024)*2**(e-15)); }
+      if (ai === 26){ i += 4; return dv.getFloat32(i-4); }
+      if (ai === 27){ i += 8; return dv.getFloat64(i-8); }
+      return undefined;
+    }
+    const n = len(ai);
+    if (mt === 0) return n;
+    if (mt === 1) return -1 - n;
+    if (mt === 2){ const v = buf.slice(i, i+n); i += n; return {$b: [...v].map(x=>x.toString(16).padStart(2,'0')).join('')}; }
+    if (mt === 3){ const v = dec.decode(buf.slice(i, i+n)); i += n; return v; }
+    if (mt === 4){ const a = []; for (let k=0;k<n;k++) a.push(item()); return a; }
+    if (mt === 5){ const o = {}; for (let k=0;k<n;k++){ const key = item(); o[typeof key === 'string' ? key : JSON.stringify(key)] = item(); } return o; }
+    if (mt === 6) return {tag:n, v:item()};
+  };
+  return item();
+}
+function lightPalette(blob){
+  try {
+    const o = cborDecode(blob), lamp = o && o.lamp, meta = o && o.meta || {};
+    const hx = v => v && v.$b ? (v.$b.match(/.{6}/g) || []).map(h => '#' + h) : typeof v === 'number' ? ['#' + (v >>> 0 & 0xffffff).toString(16).padStart(6, '0')] : typeof v === 'string' && /^#?[0-9a-f]{6}$/i.test(v) ? ['#' + v.replace('#','')] : [];
+    let cols = [];
+    if (Array.isArray(meta.userColors)) meta.userColors.forEach(c => cols.push(...hx(c)));
+    // Proxy format: {0:{0:<lamp id>, 1:<params>}, 1:<meta>}. Meta 9 = the mood's colors; otherwise the color param for that lamp (pikaled2 = 6, solid = 0, partphy2 = 3)
+    if (!cols.length && o && o['0'] && typeof o['0']['0'] === 'number' && o['0']['1']){
+      const mt = o['1'], prm = o['0']['1'], key = { 0:'6', 1:'0', 2:'3' }[o['0']['0']];
+      if (mt && mt['9'] && mt['9'].$b) cols = hx(mt['9']);
+      if (!cols.length && key && prm[key] && prm[key].$b) cols = hx(prm[key]);
+      if (!cols.length) return { cols: [], name: mt && typeof mt['2'] === 'string' ? mt['2'] : null };
+      return { cols: cols.map(c => c.toLowerCase()).filter((c, i, a) => a.indexOf(c) === i), name: mt && typeof mt['2'] === 'string' ? mt['2'] : null };
+    }
+    if (!cols.length && lamp && lamp.param){ const c = lamp.param.color || lamp.param.colors; if (c && c.$b) cols = hx(c); else if (Array.isArray(c)) c.forEach(x => cols.push(...hx(x))); }
+    cols = cols.map(c => c.toLowerCase()).filter((c, i, a) => a.indexOf(c) === i);
+    return { cols, name: meta.moodName || null };
+  } catch(e){ return { cols: [], name: null }; }
+}
+function vivid(hex){ const [r, g, b] = Array.from(hexBytes(hex), v => v / 255), mx = Math.max(r, g, b), mn = Math.min(r, g, b); return (mx ? (mx - mn) / mx : 0) * .7 + mx * .3; }
+function pickAccent(cols){
+  const ok = cols.filter(c => Math.max(...hexBytes(c)) > 40); if (!ok.length) return cols[0] || null;
+  // the mood's own lead color if it's bright and colorful enough, otherwise its most vivid color
+  const lead = ok.find(c => { const v = Array.from(hexBytes(c), x => x / 255), mx = Math.max(...v), mn = Math.min(...v); return mx >= .5 && (mx - mn) / mx >= .45; });
+  return lead || ok.slice().sort((a, b) => vivid(b) - vivid(a))[0];
+}
+function applyPalette(p, pal){
+  if (!pal || !pal.cols.length) return false;
+  p.color = pickAccent(pal.cols) || p.color;
+  p.pal = pal.cols.filter(c => Math.max(...hexBytes(c)) > 40).slice(0, 6);
+  if (pal.name && !p.mood) p.lightName = pal.name;
+  return true;
+}
+const toHex = u => [...u].map(x=>x.toString(16).padStart(2,'0')).join('');
+function cmpBytes(a,b){ for (let i=0;i<Math.min(a.length,b.length);i++) if (a[i]!==b[i]) return a[i]-b[i]; return a.length-b.length; }
+const hexBytes = h => new Uint8Array([1,3,5].map(i => parseInt(h.slice(i,i+2),16)));
+const SINGLE_OFFSETS = [0,0,0,0,0,0,65536,0,0,65536,0,0,65536,65536,0,0,65536,65536,65536,0];
+let PROXY_TPL = null; // the Proxy's own light blob, used as the template for previews
+async function loadProxyTpl(){
+  if (!isProxy() || PROXY_TPL) return;
+  for (const path of ['/p/app/thc/colr', `/u/app/hc/${S.active || 0}/colr`]){
+    try { const t = cborDecode(await ble.readAll(path)); if (t && t.lamp && t.lamp.param){ PROXY_TPL = t; return; } } catch(e){}
+  }
+}
+function proxySolid(hex){
+  // byte strings come back from the decoder as {$b:'hex'}; turn them back into bytes for writing
+  const fix = v => Array.isArray(v) ? v.map(fix) : v instanceof Uint8Array ? new Uint8Array(v) : v && typeof v === 'object' ? (typeof v.$b === 'string' ? new Uint8Array(v.$b.match(/../g) ? v.$b.match(/../g).map(h => parseInt(h, 16)) : []) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fix(x)]))) : v;
+  const t = fix(PROXY_TPL), p = t.lamp.param, rgb = hexBytes(hex);
+  if (p.color instanceof Uint8Array && p.color.length >= 3){ for (let i = 0; i < p.color.length; i++) p.color[i] = rgb[i % 3]; }
+  else p.color = rgb;
+  if ('anim' in p) p.anim = 1;
+  return cbor(t);
+}
+// Proxy lights use number keys: {0:{0:1, 1:{0:<rgb bytes>}}} is one solid color (read off a real Proxy)
+const proxyBlob = hex => { const c = hexBytes(hex); const b = new Uint8Array([0xa1,0x00,0xa2,0x00,0x01,0x01,0xa1,0x00,0x43,c[0],c[1],c[2]]); b.native = true; return b; };
+const solidPayload = hex => isProxy() ? proxyBlob(hex) : cbor({ lamp:{ name:'pikaled2', param:{ bright:255, speed:64, anim:1, plNum:0, plDenom:1, offset: S.series === 'toad' ? Array(12).fill(0) : SINGLE_OFFSETS, color:hexBytes(hex), colorLen:32 } } });
+const rgbt = hex => { const c = hexBytes(hex); return new Uint8Array([c[0],c[1],c[2],0,0,0,0,0]); };
+
+/* ================= device controller ================= */
+
+const ble = new Lorax();
+const MOODS = [{"name":"Puffcon 2026","sw":["#ED6F28","#ED6F28","#ED6F28","#ED6F28","#E1F669","#E1F669"],"p":{"color":[237,111,40,237,111,40,237,111,40,237,111,40,225,246,105,225,246,105,225,246,105,225,246,105,116,205,77,116,205,77,116,205,77,116,205,77,76,199,209,76,199,209,76,199,209,76,199,209,196,140,225,196,140,225,196,140,225,196,140,225,255,255,255,255,255,255,255,255,255,255,255,255,76,199,209,76,199,209,76,199,209,76,199,209,237,111,40,237,111,40,237,111,40,237,111,40],"offset":[0,1024,2048,3072,4096,5120,6144,7168,8192,9216,10240,11264,12288,13312,14336,15360,16384,17408,18432,19456],"speed":14,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":32}},{"name":"Puffcon 2025","sw":["#FF0069","#FF0069","#FF0069","#FF0069","#43C3F9","#43C3F9"],"p":{"color":[255,0,105,255,0,105,255,0,105,255,0,105,67,195,249,67,195,249,67,195,249,67,195,249,67,195,249,67,195,249,67,195,249,67,195,249,67,195,249,67,195,249,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,0,105,255,0,105,255,0,105,255,0,105,255,0,105,255,0,105,255,0,105],"offset":[15360,18773,1707,5120,8533,11947,15360,10240,10240,5120,2844,1138,853,19627,19342,17636,0,0,0,0],"speed":20,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":32}},{"name":"Puffcon 2024","sw":["#faab36","#fbbd28","#fbca17","#fbcf0c","#f6cd3b","#e8c86a"],"p":{"color":[250,171,54,251,189,40,251,202,23,251,207,12,246,205,59,232,200,106,211,193,145,184,185,177,152,178,203,116,171,223,77,167,237,54,166,242,72,170,243,106,179,244,141,193,247,175,209,250,206,226,252,231,241,254,249,251,255,255,255,255,255,248,248,255,229,229,255,203,203,255,171,171,255,137,137,248,109,109,242,88,88,239,80,80,240,87,79,242,104,77,245,126,72,248,149,65],"offset":[8192,16385,16385,8192,0,0,16385,20480,0,16385,1073741824,1073745920,16385,16385,1073750016,1073754112,0,0,0,0],"speed":34,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":32}},{"name":"Puffcon 2023","sw":["#604ba9","#5f51ac","#5d60b4","#5873c1","#5089d1","#449fe1"],"p":{"color":[96,75,169,95,81,172,93,96,180,88,115,193,80,137,209,68,159,225,50,178,239,24,192,250,0,197,254,24,192,250,50,178,239,68,159,225,80,137,209,88,115,193,93,96,180,255,237,0,255,231,51,255,216,88,255,194,113,255,168,133,255,139,147,255,110,157,255,85,164,255,73,166,255,85,164,255,110,157,255,139,147,255,168,133,255,194,113,255,216,88,255,231,51,255,237,0],"offset":[331350016,331354112,331358208,331362304,331366400,331370496,331350016,270532608,270553088,331362304,331362304,331358208,331358208,331354112,331350016,62914560,0,0,0,0],"speed":24,"anim":6,"bright":255,"plNum":2,"plDenom":2,"colorLen":0}},{"name":"Puffcon 2022","sw":["#017693","#017794","#017996","#017c99","#01809e","#0184a3"],"p":{"color":[1,118,147,1,119,148,1,121,150,1,124,153,1,128,158,1,132,163,1,137,168,0,142,173,0,147,178,0,151,182,0,154,186,0,156,188,0,157,189,0,156,188,0,154,186,0,151,182,0,147,178,0,142,173,1,137,168,1,132,163,1,128,158,1,124,153,1,121,150,1,119,148,255,61,139,255,52,116,255,33,65,255,32,13,255,58,0,255,75,8,253,77,54,254,69,114],"offset":[36792320,36812800,36710400,36730880,36751360,36771840,96561152,36761600,36761600,96499712,96474112,96586752,96474112,96586752,96586752,96581632,0,0,0,0],"speed":24,"anim":6,"bright":255,"plNum":2,"plDenom":2,"colorLen":0}},{"name":"4th of July","sw":["#ff0000","#ff0000","#ff0000","#ff0000","#ffffff","#000000"],"p":{"color":[255,0,0,255,0,0,255,0,0,255,0,0,255,255,255,0,0,0,255,255,255,0,0,0,0,8,255,0,8,255,0,8,255,0,8,255,255,255,255,0,0,0,255,255,255,0,0,0,255,0,0,255,0,0,255,0,0,255,0,0,255,255,255,0,0,0,255,255,255,0,0,0,0,8,255,0,8,255,0,8,255,0,8,255,255,255,255,255,0,0,255,255,255,0,8,255],"offset":[114688,125611,5461,16384,27307,103765,16384,2012878165,2012878165,16384,9102,3641,2731,2731,127431,121970,0,0,0,0],"speed":12,"anim":5,"bright":255,"plNum":16,"plDenom":15,"colorLen":0}},{"name":"Candle Flicker","sw":["#ea9834","#e99734","#df9032","#d28830","#c67f2e","#bf7a2d"],"p":{"color":[234,152,52,233,151,52,223,144,50,210,136,48,198,127,46,191,122,45,192,123,45,201,130,47,214,138,49,227,147,51,222,144,50,220,142,50,190,122,45,144,92,34,150,96,35,234,151,52,226,149,47,223,150,55,203,128,42,203,128,42,155,100,38,234,152,52,221,143,49,166,107,38,129,82,30,152,98,35,208,134,46,235,152,52,230,150,49,223,148,45,222,147,44,228,149,48],"offset":[42035200,42055680,41953280,41973760,41994240,42014720,42035200,764725248,18159616,41973760,764725248,764725248,764725248,1033160704,1435875328,1435875328,0,0,0,0],"speed":9,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":0}},{"name":"Hologram","sw":["#8b51e1","#8b59e1","#8d6de2","#9086e6","#95a1eb","#9bbdf1"],"p":{"color":[139,81,225,139,89,225,141,109,226,144,134,230,149,161,235,155,189,241,160,214,247,165,234,252,167,246,254,169,249,255,177,244,255,191,234,254,206,221,252,221,206,251,234,191,250,244,176,248,251,165,247,255,158,247,253,157,247,244,151,244,229,141,241,211,129,237,191,116,232,172,103,229,155,92,226,143,84,225,139,81,225,151,170,237,168,249,255,221,206,251,255,158,247,197,120,234],"offset":[968189952,968210432,968108032,968128512,968148992,968169472,109144064,109113344,109113344,109082624,109057024,109169664,109057024,109169664,109169664,109164544,0,0,0,0],"speed":65,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":0}},{"name":"Lupus Awareness","sw":["#9900ff","#a100fe","#b200fe","#c100ff","#c800ff","#c000fe"],"p":{"color":[153,0,255,161,0,254,178,0,254,193,0,255,200,0,255,192,0,254,172,0,254,151,0,254,140,0,255,151,24,253,174,48,252,196,65,254,206,71,255,198,65,254,180,49,253,161,24,254,153,0,255,148,0,255,135,0,254,122,0,255,115,0,255,115,0,255,115,0,255,115,0,255,115,0,255,115,0,255,115,0,255,115,0,255,115,0,255,122,0,255,135,0,254,148,0,255],"offset":[134221368,268442736,402664104,134232288,268453656,402675024,268460936,536900032,402685944,268471856,402693224,268479136,402700504,536921872,536925512,134275968,0,0,0,0],"speed":4,"anim":5,"bright":255,"plNum":0,"plDenom":0,"colorLen":0}},{"name":"Disco","sw":["#FF0000","#FF3000","#FF6000","#FF9000","#FFC000","#FFF000"],"p":{"color":[255,0,0,255,48,0,255,96,0,255,144,0,255,192,0,255,240,0,224,255,0,176,255,0,128,255,0,80,255,0,32,255,0,0,255,16,0,255,64,0,255,112,0,255,160,0,255,208,0,255,255,0,208,255,0,160,255,0,112,255,0,64,255,0,16,255,32,0,255,80,0,255,128,0,255,176,0,255,224,0,255,255,0,240,255,0,192,255,0,144,255,0,96,255,0,48],"offset":[98304,120149,10923,32768,54613,76459,98304,65536,65536,32768,18204,7282,123790,112868,123790,112868,0,0,0,0],"speed":32,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":32}},{"name":"Fade: purple / pink","sw":["#8a2be2","#8c2ce1","#b236d2","#e045c2","#fd4fb9","#ff4fb8"],"p":{"color":[138,43,226,140,44,225,178,54,210,224,69,194,253,79,185,255,79,184,253,79,185,224,69,194,178,54,210,140,44,225],"offset":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"speed":40,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":10}},{"name":"Spin: red / blue","sw":["#fd0d0d","#fc0e1d","#de1d76","#a22fbe","#2b3ffb","#0040ff"],"p":{"color":[253,13,13,252,14,29,222,29,118,162,47,190,43,63,251,0,64,255,43,63,251,162,47,190,222,29,118,252,14,29],"offset":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"speed":64,"anim":7,"bright":255,"plNum":1,"plDenom":2,"colorLen":10}},{"name":"Gradient: green / gold","sw":["#1e6c17","#3b7820","#6d9634","#a4bc4b","#d1dd5f","#e4eb68"],"p":{"color":[30,108,23,59,120,32,109,150,52,164,188,75,209,221,95,228,235,104,209,221,95,164,188,75,109,150,52,59,120,32],"offset":[0,0,0,0,0,0,7680,25600,15360,7680,12800,12800,17920,17920,12800,12800,15360,15360,15360,15360],"speed":40,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":10}},{"name":"Disco: rainbow","sw":["#fd0d0d","#f9470d","#e9870b","#c1c007","#76ed03","#00ff00"],"p":{"color":[253,13,13,249,71,13,233,135,11,193,192,7,118,237,3,0,255,0,0,235,89,0,189,145,0,133,177,0,77,212,0,0,255,71,71,213,127,127,183,185,185,153,234,234,96,255,255,0,255,235,116,255,192,101,255,135,66,255,70,29],"offset":[61440,75092,6828,20480,34132,47788,61440,40960,40960,20480,11376,4552,3412,78508,77368,70544,0,0,0,0],"speed":40,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":20}}];
+const $ = id => document.getElementById(id);
+const L = []; const log = s => { L.push(s); $('log').value = L.join('\n'); $('log').scrollTop = 1e9; };
+const status = (t, c) => { $('status').textContent = t; $('status').className = c || ''; };
+const hex = u => Array.from(u).map(b => b.toString(16).padStart(2, '0')).join('');
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const EDITIONS = { 0:'OG', 21:'OG', 1:'Opal', 22:'Opal', 2:'Indiglow', 4:'Guardian', 12:'Pearl', 13:'Onyx', 15:'Desert', 17:'Flourish', 19:'Storm', 23:'Daybreak', 25:'Plasma', 26:'Glacier' };
+let target = 0, busy = false;
+const TARGETS = [['P1', 0], ['P2', 1], ['P3', 2], ['P4', 3], ['Lantern', 'lantern']];
+function drawTargets(){ $('targets').innerHTML = TARGETS.map(([n, v]) => `<button class="ghost" data-t="${v}" aria-pressed="${String(target) === String(v)}">${n}</button>`).join(''); }
+$('targets').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; target = b.dataset.t === 'lantern' ? 'lantern' : +b.dataset.t; drawTargets(); };
+$('moods').innerHTML = MOODS.map((m, i) => `<button class="mood" data-m="${i}"><i style="background:linear-gradient(90deg,${(m.sw.length > 1 ? m.sw : m.sw.concat(m.sw)).join(',')})"></i>${m.name}</button>`).join('');
+$('pulses').innerHTML = [0,1,2,3,4,5,6,7].map(n => `<button class="ghost" data-pulse="${n}">Pulse ${n}</button>`).join('');
+drawTargets();
+
+// slot numbers from Puffco's app: 0 = active session, 1-4 = profiles, 5/6 = lantern
+const slotFor = t => t === 'lantern' ? 5 : t + 1;
+const pathFor = t => t === 'lantern' ? '/p/app/ltrn/colr' : `/u/app/hc/${t}/colr`;
+async function lanternOn(){ try { await ble.wf32('/p/app/ltrn/time', 7200); } catch(e){} await ble.write('/p/app/ltrn/cmd', new Uint8Array([1])); }
+async function activeIs(t){ try { const r = await ble.read('/p/app/hcs', 1); return r[0] === t; } catch(e){ return false; } }
+async function setMood(m){
+  if (!ble.connected){ status('Connect first', 'bad'); return; }
+  if (busy) return; busy = true;
+  const P = m.p, t = target;
+  try {
+    let h = slotFor(t);
+    if (t === 'lantern'){ try { const r = await ble.read('/p/app/ltrn/colr', 8); if (r[3] === 1 && (r[6] & 15) - 8 === 5) h = 6; } catch(e){} }
+    const ca = new Uint8Array(128); for (let k = 0; k < 32; k++){ const j = k * 3; if (j + 2 < P.color.length){ ca[k*4] = P.color[j]; ca[k*4+1] = P.color[j+1]; ca[k*4+2] = P.color[j+2]; } }
+    await ble.writeBlob(`/u/app/led/ca/${h}`, ca);
+    if (P.offset && P.offset.length){ const oa = new Uint8Array(P.offset.length * 4), dv = new DataView(oa.buffer); P.offset.forEach((v, k) => dv.setUint32(k * 4, v >>> 0, true)); await ble.writeBlob(`/u/app/led/oa/${h}`, oa); }
+    const idx = 8 + h, cl = P.colorLen == null ? 32 : P.colorLen;
+    const rg = new Uint8Array([P.bright == null ? 255 : P.bright, clamp(Math.round(P.speed == null ? 255 : P.speed), 0, 255), P.anim || 0, 1, P.plNum || 0, P.plDenom || 0, (idx << 4) | idx, cl < 32 ? cl : 0]);
+    await ble.write(pathFor(t), rg);
+    if (t !== 'lantern' && await activeIs(t)){ // the profile that's selected right now: also update what it's showing
+      await ble.writeBlob('/u/app/led/ca/0', ca);
+      if (P.offset && P.offset.length){ const oa = new Uint8Array(P.offset.length * 4), dv = new DataView(oa.buffer); P.offset.forEach((v, k) => dv.setUint32(k * 4, v >>> 0, true)); await ble.writeBlob('/u/app/led/oa/0', oa); }
+      const r0 = rg.slice(); r0[6] = (8 << 4) | 8; await ble.write('/p/app/thc/colr', r0);
+    }
+    if (t === 'lantern') await lanternOn();
+    log(`mood "${m.name}" -> ${t === 'lantern' ? 'lantern' : 'P' + (t + 1)} slot ${h}: ${hex(rg)}`);
+    status(`${m.name} set. Does it animate?`, 'ok');
+  } catch(e){ log('mood ERR ' + e.message); status('Failed: ' + e.message, 'bad'); }
+  busy = false;
+}
+async function setPulse(n){
+  if (!ble.connected){ status('Connect first', 'bad'); return; }
+  const c = $('solid').value.slice(1).match(/../g).map(x => parseInt(x, 16));
+  const rg = new Uint8Array([c[0], c[1], c[2], 0, n, 0, 0, 0]);
+  try {
+    await ble.write(pathFor(target), rg);
+    if (target !== 'lantern' && await activeIs(target)) await ble.write('/p/app/thc/colr', rg);
+    if (target === 'lantern') await lanternOn();
+    log(`pulse ${n} -> ${target === 'lantern' ? 'lantern' : 'P' + (target + 1)}: ${hex(rg)}`); status(`Pulse ${n} set`, 'ok');
+  } catch(e){ log('pulse ERR ' + e.message); status('Failed: ' + e.message, 'bad'); }
+}
+$('moods').onclick = e => { const b = e.target.closest('[data-m]'); if (b) setMood(MOODS[+b.dataset.m]); };
+$('pulses').onclick = e => { const b = e.target.closest('[data-pulse]'); if (b) setPulse(+b.dataset.pulse); };
 
 $('bConnect').onclick = async () => {
-  if (!navigator.bluetooth){ status('This browser has no Bluetooth. Use Path or Bluefy on iPhone, or Chrome.', 'bad'); return; }
-  out.length = 0; readable.length = 0;
+  if (!navigator.bluetooth){ status('No Bluetooth here. Use Path or Bluefy on iPhone, or Chrome.', 'bad'); return; }
   try {
-    try { dev = await navigator.bluetooth.requestDevice({ filters:[{ namePrefix:'Peak' }, { namePrefix:'Puffco' }, { services:['06caf9c0-74d3-454f-9be9-e30cd999c17a'] }, { services:['e276967f-ea8a-478a-a92e-d78f5dd15dd5'] }, { manufacturerData:[{ companyIdentifier:3075 }] }], optionalServices:SERVICES }); }
-    catch(e){ if (e.name === 'NotFoundError' && /cancel/i.test(e.message)) throw e; dev = await navigator.bluetooth.requestDevice({ acceptAllDevices:true, optionalServices:SERVICES }); }
-    status('Connecting to ' + (dev.name || 'device') + '…');
-    const gatt = await dev.gatt.connect();
-    log('EMBERLINE PEAK SCAN ' + new Date().toISOString());
-    log('name: ' + dev.name + '   browser: ' + navigator.userAgent);
-    const svcs = await gatt.getPrimaryServices();
-    log('services: ' + svcs.length);
-    let total = 0, done = 0; const all = [];
-    for (const s of svcs){ try { const cs = await s.getCharacteristics(); cs.forEach(c => all.push([s, c])); } catch(e){ log('[svc ' + s.uuid + '] chars ERR ' + e.message); } }
-    total = all.length; let last = '';
-    for (const [s, c] of all){
-      if (s.uuid !== last){ log('\n[service ' + s.uuid + ']'); last = s.uuid; }
-      let line = '  ' + c.uuid; try { line += '  (' + props(c.properties) + ')'; } catch(e){}
-      if (!c.properties || c.properties.read !== false){ // try anyway when the browser doesn't say
-        try { const v = await timeout(c.readValue(), 3000); line += '\n     = ' + hex(v) + '  ' + guess(v); readable.push(c); }
-        catch(e){ line += '\n     read ERR ' + e.message; }
-      }
-      log(line); done++; $('prog').style.width = (done / total * 100) + '%';
-      status('Reading ' + done + ' / ' + total + '…');
-    }
-    status('Scan done. ' + total + ' values, ' + readable.length + ' readable.', 'ok');
-    $('bRecord').disabled = false;
-    dev.addEventListener('gattserverdisconnected', () => { status('Disconnected. Tap Connect to try again.', 'bad'); $('bRecord').disabled = true; });
-  } catch(e){ status('Failed: ' + e.message, 'bad'); log('ERROR ' + e.message); }
+    status('Pick your Peak…'); await ble.request(false);
+    status('Connecting…'); await ble.attach(s => status('Connecting (' + s + ')…'));
+    let api = '?', ed = '?', fw = '?';
+    try { await ble.read('/u/app/hc/0/phcl', 8); api = 2; } catch(e){ api = 3; }
+    try { const mc = await ble.u32('/p/sys/hw/mdcd'); ed = EDITIONS[mc] || ('code ' + mc); } catch(e){}
+    try { const r = await ble.read('/p/sys/fw/ver', 4); fw = r[0]; } catch(e){}
+    $('info').textContent = `${ble.dev.name || 'Peak'} · ${ed} · firmware ${fw} · ${api === 2 ? 'older firmware' : 'newer firmware'}`;
+    log(`connected: ${ble.dev.name} edition=${ed} fw=${fw} api=${api}`);
+    for (let i = 0; i < 4; i++){ try { log(`P${i + 1} colr = ${hex(await ble.read(`/u/app/hc/${i}/colr`, 8))}`); } catch(e){} }
+    try { log(`lantern colr = ${hex(await ble.read('/p/app/ltrn/colr', 8))}`); } catch(e){}
+    status(api === 2 ? 'Connected. Try some moods.' : 'Connected, but this Peak is on the newer firmware. The main app already supports it.', api === 2 ? 'ok' : '');
+    $('bHit').disabled = false;
+  } catch(e){ status('Failed: ' + e.message, 'bad'); log('connect ERR ' + e.message); }
 };
+ble.onDisconnect = () => { status('Disconnected. Tap Connect again.', 'bad'); $('bHit').disabled = true; };
 
-$('bRecord').onclick = async () => {
-  $('bRecord').disabled = true;
-  log('\n=== RECORD 60s (only values that change) ===');
-  const prev = new Map(); const t0 = Date.now();
-  for (const c of readable){ try { prev.set(c.uuid, hex(await timeout(c.readValue(), 2000))); } catch(e){} }
-  while (Date.now() - t0 < 60000 && dev && dev.gatt.connected){
-    const t = ((Date.now() - t0) / 1000).toFixed(1);
-    for (const c of readable){
-      try {
-        const v = await timeout(c.readValue(), 2000), h = hex(v);
-        if (prev.get(c.uuid) !== h){ log(t + 's ' + c.uuid.slice(0, 8) + '…' + c.uuid.slice(-4) + ' = ' + h + '  ' + guess(v)); prev.set(c.uuid, h); }
-      } catch(e){}
-    }
-    $('prog').style.width = Math.min(100, (Date.now() - t0) / 600) + '%';
+$('bHit').onclick = async () => {
+  $('bHit').disabled = true; busy = true;
+  const paths = ['/p/app/stat/id', '/p/app/htr/temp', '/p/htr/temp', '/p/htr/pwr', '/p/htr/duty', '/p/htr/iavg', '/p/htr/vavg', '/p/htr/res', '/p/app/led/dif', '/p/app/stat/elap'], ok = [];
+  for (const p of paths){ try { await ble.f32(p); ok.push(p); } catch(e){} }
+  log('\n=== HIT TEST ===\nreadable: ' + ok.join(' '));
+  log('t ' + ok.map(p => p.split('/').slice(-2).join('/')).join(' '));
+  const t0 = Date.now();
+  while (Date.now() - t0 < 60000 && ble.connected){
+    const row = [((Date.now() - t0) / 1000).toFixed(1)];
+    for (const p of ok){ try { const v = await ble.f32(p); row.push(Math.abs(v) < 10 ? v.toFixed(3) : v.toFixed(1)); } catch(e){ row.push('x'); } }
+    L.push(row.join(' ')); $('log').value = L.join('\n'); $('log').scrollTop = 1e9;
     status('Recording… ' + Math.round((Date.now() - t0) / 1000) + 's of 60');
+    await sleep(150);
   }
-  status('Recording done. Tap Copy results and send it to kona991.', 'ok');
-  $('bRecord').disabled = false;
+  busy = false; $('bHit').disabled = false; status('Done. Tap Copy log and send it to kona991.', 'ok');
 };
-
 $('bCopy').onclick = async () => {
-  const text = out.join('\n'); if (!text){ status('Nothing to copy yet', 'bad'); return; }
-  try { await navigator.clipboard.writeText(text); status('Copied. Paste it in Discord to kona991.', 'ok'); }
-  catch(e){ const ta = $('out'); ta.focus(); ta.select(); status('Text selected. Tap Copy on your keyboard menu.', 'ok'); }
+  const text = L.join('\n'); if (!text){ status('Nothing to copy yet', 'bad'); return; }
+  try { await navigator.clipboard.writeText(text); status('Copied. Send it to kona991.', 'ok'); }
+  catch(e){ const ta = $('log'); ta.focus(); ta.select(); status('Text selected. Tap Copy.', 'ok'); }
 };
-</script>
-</body>
-</html>
+</script></body></html>
