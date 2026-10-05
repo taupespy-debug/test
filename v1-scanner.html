@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Emberline Peak Scanner</title>
+<style>
+:root{--bg:#120f18;--panel:#1c1824;--fg:#efeaf6;--muted:#a59db3;--line:#2e2838;--accent:#b46cff;--ink:#140b1f;--ok:#4cd68a;--bad:#ff6b6b;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,system-ui,sans-serif;padding:max(20px,env(safe-area-inset-top)) 16px 40px}
+.wrap{max-width:680px;margin:0 auto;display:grid;gap:16px}
+h1{font-size:24px;margin:0}
+p{margin:0;color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;display:grid;gap:10px}
+ol{margin:0;padding-left:20px;display:grid;gap:6px}
+li{color:var(--fg)}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+button{border:0;border-radius:10px;padding:12px 16px;font:600 15px system-ui;background:var(--accent);color:var(--ink);cursor:pointer}
+button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+button:disabled{opacity:.45}
+#status{font-weight:600}
+#status.ok{color:var(--ok)} #status.bad{color:var(--bad)}
+textarea{width:100%;height:320px;background:#0b0910;color:var(--fg);border:1px solid var(--line);border-radius:10px;font:11px/1.4 ui-monospace,Menlo,monospace;padding:8px}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Emberline Peak Scanner</h1>
+  <p>This only reads from your Peak. It doesn't change any settings.</p>
+
+  <div class="card">
+    <b>Steps</b>
+    <ol>
+      <li>Close the Puffco app fully (swipe it away). Only one app can connect at a time.</li>
+      <li>Open this page in <b>Path</b> or <b>Bluefy</b> on iPhone, or <b>Chrome</b> on Android or a computer.</li>
+      <li>Turn your Peak on and tap <b>1. Connect</b>. Pick your Peak from the list.</li>
+      <li>Wait for <b>Scan done</b>.</li>
+      <li>Tap <b>2. Record 60s</b>, then right away start a heat cycle on the Peak (double click the button). Let it heat. Take a hit if it gets to Ready.</li>
+      <li>Tap <b>Copy results</b> and send it to kona991 on Discord.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <div id="status">Not connected</div>
+    <div class="bar"><i id="prog"></i></div>
+    <div class="row">
+      <button id="bConnect">1. Connect</button>
+      <button id="bRecord" disabled>2. Record 60s</button>
+      <button id="bCopy" class="ghost">Copy results</button>
+    </div>
+    <textarea id="out" readonly placeholder="Results show up here"></textarea>
+  </div>
+</div>
+<script>
+// every Puffco service id from Puffco's own app, plus the standard ones, so we can see whatever this Peak has
+const SERVICES = [
+  '06caf9c0-74d3-454f-9be9-e30cd999c17a', // original / flat API
+  'e276967f-ea8a-478a-a92e-d78f5dd15dd5', // newer (LoRaX) API
+  '420b9b40-457d-4abe-a3bf-71609d79581b',
+  '1d14d6ee-fd63-4fa1-bfa4-8f47b42119f0', // firmware update
+  '05434bca-cc7f-4ef6-bbb3-b1c520b9800c','8dc5ec05-8f7d-45ad-99db-3fbde65dbd9c','43312cd1-7d34-46ce-a7d3-0a98fd9b4cb8',
+  'c830ee3e-0e32-4780-a51d-b1b0b38089a4','58b0a7aa-d89f-4bf2-961d-0d892d7439d8','4daad5ae-8a9e-417d-924d-b237ac64ad9c',
+  '2dab0217-8a4e-4de8-83c7-8fded59f4599','a5fa5a5d-f28e-47d9-b95b-f82c06177503','c364cf1d-117f-4a3b-baae-3e2fce5a248f',
+  'baeb965b-58ac-43bf-9cc5-bfb448ec2e72','0d7ec9f3-efe4-4e51-aea0-3a1477a9c37e','5c03d675-2588-490f-87dc-b88772934bbb',
+  'f7bf3564-fb6d-4e53-88a4-5e37e0326063','984227f3-34fc-4045-a5d0-2c581f81a153','9be50ff1-5695-41b0-a7c2-d491623693f0',
+  'device_information','battery_service','generic_access'
+];
+const $ = id => document.getElementById(id);
+const out = [], readable = [];
+let dev = null;
+const log = s => { out.push(s); $('out').value = out.join('\n'); };
+const status = (t, c) => { const s = $('status'); s.textContent = t; s.className = c || ''; };
+const hex = dv => [...new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength)].map(b => b.toString(16).padStart(2, '0')).join('');
+function guess(dv){
+  const n = dv.byteLength, g = [];
+  if (n === 4){ g.push('f32=' + +dv.getFloat32(0, true).toPrecision(6), 'u32=' + dv.getUint32(0, true), 'i32=' + dv.getInt32(0, true)); }
+  if (n === 1) g.push('u8=' + dv.getUint8(0));
+  if (n === 2) g.push('u16=' + dv.getUint16(0, true));
+  const txt = new TextDecoder().decode(new Uint8Array(dv.buffer, dv.byteOffset, n)).replace(/[^\x20-\x7e]/g, '');
+  if (txt.length >= 3 && txt.length >= n * 0.6) g.push('text="' + txt + '"');
+  return g.join(' ');
+}
+const timeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error('timeout')), ms))]);
+const props = p => Object.keys(Object.getOwnPropertyDescriptors(Object.getPrototypeOf(p))).filter(k => { try { return p[k] === true; } catch(e){ return false; } }).join(',');
+
+$('bConnect').onclick = async () => {
+  if (!navigator.bluetooth){ status('This browser has no Bluetooth. Use Path or Bluefy on iPhone, or Chrome.', 'bad'); return; }
+  out.length = 0; readable.length = 0;
+  try {
+    try { dev = await navigator.bluetooth.requestDevice({ filters:[{ namePrefix:'Peak' }, { namePrefix:'Puffco' }, { services:['06caf9c0-74d3-454f-9be9-e30cd999c17a'] }, { services:['e276967f-ea8a-478a-a92e-d78f5dd15dd5'] }, { manufacturerData:[{ companyIdentifier:3075 }] }], optionalServices:SERVICES }); }
+    catch(e){ if (e.name === 'NotFoundError' && /cancel/i.test(e.message)) throw e; dev = await navigator.bluetooth.requestDevice({ acceptAllDevices:true, optionalServices:SERVICES }); }
+    status('Connecting to ' + (dev.name || 'device') + '…');
+    const gatt = await dev.gatt.connect();
+    log('EMBERLINE PEAK SCAN ' + new Date().toISOString());
+    log('name: ' + dev.name + '   browser: ' + navigator.userAgent);
+    const svcs = await gatt.getPrimaryServices();
+    log('services: ' + svcs.length);
+    let total = 0, done = 0; const all = [];
+    for (const s of svcs){ try { const cs = await s.getCharacteristics(); cs.forEach(c => all.push([s, c])); } catch(e){ log('[svc ' + s.uuid + '] chars ERR ' + e.message); } }
+    total = all.length; let last = '';
+    for (const [s, c] of all){
+      if (s.uuid !== last){ log('\n[service ' + s.uuid + ']'); last = s.uuid; }
+      let line = '  ' + c.uuid + '  (' + props(c.properties) + ')';
+      if (c.properties.read){
+        try { const v = await timeout(c.readValue(), 3000); line += '\n     = ' + hex(v) + '  ' + guess(v); readable.push(c); }
+        catch(e){ line += '\n     read ERR ' + e.message; }
+      }
+      log(line); done++; $('prog').style.width = (done / total * 100) + '%';
+      status('Reading ' + done + ' / ' + total + '…');
+    }
+    status('Scan done. ' + total + ' values, ' + readable.length + ' readable.', 'ok');
+    $('bRecord').disabled = false;
+    dev.addEventListener('gattserverdisconnected', () => { status('Disconnected. Tap Connect to try again.', 'bad'); $('bRecord').disabled = true; });
+  } catch(e){ status('Failed: ' + e.message, 'bad'); log('ERROR ' + e.message); }
+};
+
+$('bRecord').onclick = async () => {
+  $('bRecord').disabled = true;
+  log('\n=== RECORD 60s (only values that change) ===');
+  const prev = new Map(); const t0 = Date.now();
+  for (const c of readable){ try { prev.set(c.uuid, hex(await timeout(c.readValue(), 2000))); } catch(e){} }
+  while (Date.now() - t0 < 60000 && dev && dev.gatt.connected){
+    const t = ((Date.now() - t0) / 1000).toFixed(1);
+    for (const c of readable){
+      try {
+        const v = await timeout(c.readValue(), 2000), h = hex(v);
+        if (prev.get(c.uuid) !== h){ log(t + 's ' + c.uuid.slice(0, 8) + '…' + c.uuid.slice(-4) + ' = ' + h + '  ' + guess(v)); prev.set(c.uuid, h); }
+      } catch(e){}
+    }
+    $('prog').style.width = Math.min(100, (Date.now() - t0) / 600) + '%';
+    status('Recording… ' + Math.round((Date.now() - t0) / 1000) + 's of 60');
+  }
+  status('Recording done. Tap Copy results and send it to kona991.', 'ok');
+  $('bRecord').disabled = false;
+};
+
+$('bCopy').onclick = async () => {
+  const text = out.join('\n'); if (!text){ status('Nothing to copy yet', 'bad'); return; }
+  try { await navigator.clipboard.writeText(text); status('Copied. Paste it in Discord to kona991.', 'ok'); }
+  catch(e){ const ta = $('out'); ta.focus(); ta.select(); status('Text selected. Tap Copy on your keyboard menu.', 'ok'); }
+};
+</script>
+</body>
+</html>
