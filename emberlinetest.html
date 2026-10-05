@@ -2200,6 +2200,11 @@ class Lorax {
   intScale(path){
     // Proxy units (from the device inspector): temps in tenths of °C, times in hundredths of a second,
     // battery in hundredths of a percent, volts in millivolts
+    // from Puffco's own app (Proxy int32 scales)
+    if (/info\/(dpd|drem)/.test(path)) return 256;               // dabs per day, dabs left
+    if (/msoc|lbws/.test(path)) return 100;                        // battery limit %, low battery warning %
+    if (/chg\/(etf|elap)/.test(path)) return 200;                 // charge time to full / elapsed
+    if (/bat\/(cap|curr)|chg\/iout/.test(path)) return 1000;      // battery capacity / current
     if (/tmpo/.test(path)) return 10;                              // boost temp
     if (/timo/.test(path)) return 200;                             // boost time
     if (/intn|lbrt/.test(path)) return 256;                       // vapor setting, brightness
@@ -2637,21 +2642,23 @@ function previewProfile(i){
 }
 /* hit timer */
 const HIT = { on:false, start:0, last:null, hits:[], supported:null, base:0, peak:0, loop:null, inflight:false, live:0 };
-const HIT_DELAY = 1000; // counter starts 1s after the pull is detected
+const HIT_DELAY = -250; // the sensor lags the real pull a little, so start the clock a touch early
+const HIT_MERGE = 700; // a dip shorter than this is the same hit
 const HIT_IDLE = .03; // typical sensor value with nobody pulling
-function hitReset(){ HIT.pbase = null; HIT.diaAt = 0; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.base = HIT_IDLE; HIT.live = 0; }
+function hitReset(){ HIT.endAt = 0; HIT.lastStart = 0; HIT.pbase = null; HIT.diaAt = 0; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.base = HIT_IDLE; HIT.live = 0; }
 function hitSample(v, now){
   // v = inhale strength (0..1). Hysteresis so a shaky draw counts as one hit.
   // learn the resting level only from quiet samples, so a pull that's already going when Ready hits still counts
   if (!HIT.on){ const b = HIT.base || HIT_IDLE; if (v < b + .05) HIT.base = Math.min(.08, b * .9 + v * .1); }
   const up = Math.max(.12, HIT.base + .1), down = Math.max(.06, HIT.base + .04);
   if (S.state !== 8){ if (HIT.on){ HIT.on = false; const secs = (now - HIT.start) / 1000; if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); if (cur) cur.hits = HIT.hits.slice(); } } render(); return; } // not Ready: close any hit that was still open
-  if (!HIT.on && v >= up){ HIT.on = true; HIT.start = now + HIT_DELAY; HIT.peak = v; HIT.party = false; buzz(15); if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
+  if (!HIT.on && v >= up && HIT.endAt && now - HIT.endAt < HIT_MERGE && HIT.hits.length){ HIT.on = true; HIT.hits.pop(); HIT.start = HIT.lastStart; if (cur) cur.hits = HIT.hits.slice(); HIT.last = HIT.hits.length ? HIT.hits[HIT.hits.length - 1] : null; if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); } // short dip: keep counting the same hit
+  else if (!HIT.on && v >= up){ HIT.on = true; HIT.start = now + HIT_DELAY; HIT.peak = v; HIT.party = false; buzz(15); if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
   else if (HIT.on){
     HIT.peak = Math.max(HIT.peak, v); HIT.live = Math.max(0, (now - HIT.start) / 1000);
     if (!HIT.party && store.bigHit !== false && HIT.live >= (+store.bigHitSecs || 8)){ HIT.party = true; bigHit(); }
-    if (v <= down){
-      HIT.on = false; const secs = (now - HIT.start) / 1000;
+    if (v <= Math.max(down, HIT.peak * .3)){ // ends when the pull fades, not only when it's fully gone
+      HIT.on = false; HIT.endAt = now; HIT.lastStart = HIT.start; const secs = (now - HIT.start) / 1000;
       if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); if (cur) cur.hits = HIT.hits.slice(); }
     }
   }
@@ -3122,16 +3129,26 @@ function phLabel(i){ const m = phMood(i); return m ? `${esc(m.name || 'Mood')} w
 function phSwatch(i){ const m = phMood(i), c = phColor(i); return m ? swatchStyle(m) : c ? 'background:' + c : 'background:transparent;border:2px dashed var(--muted)'; }
 function phHex(i){ const m = phMood(i); if (m){ try { return moodSolid(m); } catch(e){ return '#ffffff'; } } return phColor(i); }
 function phSet(i, hex){ store.preheat = store.preheat || []; store.preheat[i] = hex; save(); if (S.mode === 'live' && S.api === 2) ledJob(() => ble.write(`/u/app/hc/${i}/phcl`, rgbt(phHex(i) || S.profiles[i].color)).catch(() => {})); }
-let phOn = false;
+let phRestore = null, phBusy = false;
 function phStart(){
-  const v = phVal(S.active); if (!v || S.api === 2 || S.mode !== 'live' || phOn) return; // original Peak does this on its own
-  // shown through the preview channel: the profile light stays untouched, so clearing it at Ready is instant (no white flash from rewriting the light file)
-  let blob; try { blob = typeof v === 'string' ? v : moodPayload(v); } catch(e){ return; }
-  if (isProxy() && typeof blob !== 'string') blob.native = true;
-  phOn = true; clearTimeout(previewTimer);
-  ledJob(() => previewWrite(blob).catch(() => { phOn = false; }));
+  const v = phVal(S.active); if (!v || S.api === 2 || S.mode !== 'live' || phRestore || phBusy) return; // original Peak does this on its own
+  phBusy = true;
+  // the Peak ignores the preview channel mid-session, so swap the active heat-cycle light
+  ledJob(async () => {
+    try {
+      let saved = null;
+      try { const r = await ble.readAll('/p/app/thc/colr'); if (r && r.length > 8) saved = r; } catch(e){}
+      if (!saved){ try { const r = await ble.readAll(`/u/app/hc/${S.active}/colr`); if (r && r.length > 8) saved = r; } catch(e){} }
+      if (!saved || S.state !== 7) return; // can't put it back (or already Ready), so don't change it
+      const blob = typeof v === 'string' ? solidPayload(v) : moodPayload(v);
+      if (isProxy()) await proxyColr('/p/app/thc/colr', blob); else await ble.writeBlob('/p/app/thc/colr', blob);
+      phRestore = async () => { if (isProxy()) await proxyColr('/p/app/thc/colr', saved); else await ble.writeBlob('/p/app/thc/colr', saved); };
+    } catch(e){ phRestore = null; } finally { phBusy = false; }
+  });
 }
-function phEnd(){ if (!phOn) return; phOn = false; ledJob(previewClear); }
+function phEnd(){ ledJob(async () => { const r = phRestore; phRestore = null; if (r && S.mode === 'live'){ try { await r(); } catch(e){} } }); }
+// put the profile light back a few degrees before Ready, so the rewrite (which shows white for a moment) finishes while it's still heating
+setInterval(() => { if (!phRestore || S.state !== 7) return; const tgt = S.liveTargetC || (S.profiles[S.active] || {}).tempC; if (tgt && S.tempC >= tgt - 6) phEnd(); }, 300);
 
 /* session tracking from state transitions */
 let cur = null;
@@ -6343,7 +6360,7 @@ function drawDevice(){
       <p class="muted" style="margin:0;font-size:13px">Starts heating as soon as you lift the Peak off the Power Dock.</p>
       <div class="seg" id="readySeg" style="display:grid;grid-template-columns:repeat(5,1fr)"><button data-rm="-1" aria-pressed="${rm < 0}">Off</button>${S.profiles.map((p, i) => `<button data-rm="${i}" aria-pressed="${rm === i}">P${i+1}</button>`).join('')}</div></div>`}
     <label class="toggle"><span>Battery preservation<br><span class="muted" style="font-size:13px">Stops charging at 80% to extend battery life</span></span><input type="checkbox" class="switch" id="tBatSaver" ${S.batSaver ? 'checked' : ''}></label>
-    <label class="toggle"><span>Low battery warning<br><span class="muted" style="font-size:13px">Peak blinks when battery drops to 10%</span></span><input type="checkbox" class="switch" id="tLowBat" ${S.lowBatInd ? 'checked' : ''}></label>
+    <label class="toggle"><span>Low battery warning<br><span class="muted" style="font-size:13px">${devWord()} blinks when battery drops to 10%</span></span><input type="checkbox" class="switch" id="tLowBat" ${S.lowBatInd ? 'checked' : ''}></label>
     <div class="row between"><span>Lantern turns off after</span><div class="seg" id="ltSeg">${[[1800,'30m'],[3600,'1h'],[7200,'2h'],[14400,'4h']].map(([s, l]) => `<button data-lt="${s}" aria-pressed="${(store.lanternTime || 7200) === s}">${l}</button>`).join('')}</div></div>
     <div class="devinfo">
       <div><span class="muted">Edition</span><b>${d(S.edition)}</b></div>
@@ -6355,7 +6372,7 @@ function drawDevice(){
       <div><span class="muted">Total heat time</span><b>${S.heatHours ? S.heatHours.toFixed(1) + ' h' : '—'}</b></div>
       <div><span class="muted">Dabs per day</span><b>${S.dpd ? S.dpd.toFixed(1) : '—'}</b></div>
     </div>
-    <div class="shop-actions"><button class="btn small" id="bShowBat">Show battery on Peak</button><span id="offWrap"><button class="btn small ghost" id="bPowerOff" style="color:var(--bad)">Power off</button></span></div>
+    <div class="shop-actions"><button class="btn small" id="bShowBat">Show battery on ${devWord()}</button><span id="offWrap"><button class="btn small ghost" id="bPowerOff" style="color:var(--bad)">Power off</button></span></div>
     </fieldset>`;
 }
 async function devWrite(fn, ok){
@@ -6368,17 +6385,28 @@ async function devWrite(fn, ok){
 async function adjustLive(kind, delta){
   const heating = S.state >= 7 && S.state <= 9;
   if (!heating) return;
+  const p = S.profiles[S.active] || {};
   if (kind === 'temp'){
-    const maxC = f2c(644), cur = S.liveTargetC ?? S.profiles[S.active].tempC;
-    const next = clamp(cur + delta * 5 / 9, f2c(400), maxC);
-    S.liveTargetC = next;
-    if (S.mode === 'live'){ try { await ble.wf32('/p/app/tmpo', next); } catch(e){ toast('Temp change failed'); return; } }
-    else S.tempC += delta * 5 / 9;
-    toast(`Target ${fmtT(next)}${U()}`);
+    // /p/app/tmpo is how much to ADD to the profile temp (same file Boost uses), not the target itself
+    const base = p.tempC, minC = f2c(400), maxC = f2c(644);
+    if (S.mode === 'live'){
+      let off = BOOST.temp; try { const r = await ble.f32('/p/app/tmpo'); if (isFinite(r) && Math.abs(r) < 200) off = r; } catch(e){}
+      const next = clamp(base + off + delta * 5 / 9, minC, maxC), newOff = next - base;
+      if (Math.abs(newOff) > 150){ toast('Temp change blocked'); return; } // never send anything wild
+      try { await ble.wf32('/p/app/tmpo', newOff); BOOST.temp = newOff; S.liveTargetC = next; } catch(e){ toast('Temp change failed'); return; }
+      toast(`Target ${fmtT(next)}${U()}`);
+    } else { const next = clamp((S.liveTargetC ?? base) + delta * 5 / 9, minC, maxC); S.liveTargetC = next; S.tempC += delta * 5 / 9; toast(`Target ${fmtT(next)}${U()}`); }
   } else {
-    const next = clamp(Math.round(S.total + delta), 15, 180);
-    if (S.mode === 'live'){ try { await ble.wf32('/p/app/timo', next); } catch(e){ toast('Time change failed'); return; } }
-    S.total = next; toast(`${Math.max(0, Math.round(S.total - S.elapsed))}s left`);
+    // /p/app/timo is seconds ADDED to the profile time, not the total
+    const nextTotal = clamp(Math.round(S.total + delta), 15, 180), d = nextTotal - S.total;
+    if (!d) return;
+    if (S.mode === 'live'){
+      let off = BOOST.time; try { const r = await ble.f32('/p/app/timo'); if (isFinite(r) && Math.abs(r) < 600) off = r; } catch(e){}
+      const newOff = Math.round(off + d);
+      if (newOff > 170 || newOff < -(p.time || 30)){ toast('Time change blocked'); return; }
+      try { await ble.wf32('/p/app/timo', newOff); BOOST.time = newOff; } catch(e){ toast('Time change failed'); return; }
+    }
+    S.total = nextTotal; toast(`${Math.max(0, Math.round(S.total - liveElapsed()))}s left`);
   }
   render();
 }
