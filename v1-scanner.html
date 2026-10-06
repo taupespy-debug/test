@@ -48,12 +48,13 @@ ol{margin:0;padding-left:20px;display:grid;gap:4px}
   <div class="card">
     <h2>3. Hit test</h2>
     <ol>
-      <li>Start a session on the Peak (double click).</li>
-      <li>Tap <b>Record 60s</b>.</li>
-      <li>When it's Ready, take 2 or 3 hits of different lengths. Remember roughly when each one starts and stops.</li>
-      <li>Tap <b>Copy log</b> and send it to kona991 with your notes.</li>
+      <li>Start a session on the Peak (double click) and wait until it's <b>Ready</b>.</li>
+      <li>Tap <b>Record 90s</b>.</li>
+      <li>Take 3 or 4 hits of different lengths (short, medium, long). <b>Press and hold the big HOLD WHILE HITTING button the whole time you're pulling</b>, let go when you stop.</li>
+      <li>Let it finish, then tap <b>Copy log</b> and send it to kona991.</li>
     </ol>
-    <div class="row"><button id="bHit" disabled>Record 60s</button></div>
+    <div class="row"><button id="bHit" disabled>Record 90s</button></div>
+    <button id="bMark" class="ghost" style="padding:28px;font-size:18px;touch-action:none;user-select:none;-webkit-user-select:none">HOLD WHILE HITTING</button>
   </div>
 
   <textarea id="log" readonly placeholder="Log shows up here"></textarea>
@@ -474,20 +475,26 @@ ble.onDisconnect = () => { status('Disconnected. Tap Connect again.', 'bad'); $(
 
 $('bHit').onclick = async () => {
   $('bHit').disabled = true; busy = true;
-  const paths = ['/p/app/stat/id', '/p/app/htr/temp', '/p/htr/temp', '/p/htr/pwr', '/p/htr/duty', '/p/htr/iavg', '/p/htr/vavg', '/p/htr/res', '/p/app/led/dif', '/p/app/stat/elap'], ok = [];
+  const paths = ['/p/app/stat/id', '/p/app/htr/temp', '/p/htr/pwr', '/p/htr/duty'], ok = [];
   for (const p of paths){ try { await ble.f32(p); ok.push(p); } catch(e){} }
   log('\n=== HIT TEST ===\nreadable: ' + ok.join(' '));
-  log('t ' + ok.map(p => p.split('/').slice(-2).join('/')).join(' '));
+  log('t hold ' + ok.map(p => p.split('/').slice(-2).join('/')).join(' '));
   const t0 = Date.now();
-  while (Date.now() - t0 < 60000 && ble.connected){
-    const row = [((Date.now() - t0) / 1000).toFixed(1)];
+  while (Date.now() - t0 < 90000 && ble.connected){
+    const row = [((Date.now() - t0) / 1000).toFixed(1), holding ? 'HIT' : '-'];
     for (const p of ok){ try { const v = await ble.f32(p); row.push(Math.abs(v) < 10 ? v.toFixed(3) : v.toFixed(1)); } catch(e){ row.push('x'); } }
     L.push(row.join(' ')); $('log').value = L.join('\n'); $('log').scrollTop = 1e9;
-    status('Recording… ' + Math.round((Date.now() - t0) / 1000) + 's of 60');
-    await sleep(150);
+    status('Recording… ' + Math.round((Date.now() - t0) / 1000) + 's of 90');
+    await sleep(60);
   }
   busy = false; $('bHit').disabled = false; status('Done. Tap Copy log and send it to kona991.', 'ok');
 };
+let holding = false;
+const mk = $('bMark');
+const down = e => { e.preventDefault(); holding = true; mk.style.background = 'var(--ok)'; mk.style.color = 'var(--ink)'; mk.textContent = 'HITTING…'; };
+const up = e => { if (e) e.preventDefault(); holding = false; mk.style.background = ''; mk.style.color = ''; mk.textContent = 'HOLD WHILE HITTING'; };
+mk.addEventListener('pointerdown', down); mk.addEventListener('pointerup', up); mk.addEventListener('pointercancel', up); mk.addEventListener('pointerleave', up);
+mk.addEventListener('touchstart', down, { passive:false }); mk.addEventListener('touchend', up, { passive:false });
 $('bCopy').onclick = async () => {
   const text = L.join('\n'); if (!text){ status('Nothing to copy yet', 'bad'); return; }
   try { await navigator.clipboard.writeText(text); status('Copied. Send it to kona991.', 'ok'); }
