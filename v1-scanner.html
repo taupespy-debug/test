@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Emberline Old Peak Lab</title>
+<title>Emberline Proxy Hit Lab</title>
 <style>
 :root{--bg:#120f18;--panel:#1c1824;--fg:#efeaf6;--muted:#a59db3;--line:#2e2838;--accent:#b46cff;--ink:#140b1f;--ok:#4cd68a;--bad:#ff6b6b;color-scheme:dark}
 *{box-sizing:border-box}
@@ -23,8 +23,8 @@ input[type=color]{width:48px;height:40px;border:0;background:none;padding:0}
 ol{margin:0;padding-left:20px;display:grid;gap:4px}
 </style></head><body>
 <div class="wrap">
-  <h1>Emberline Old Peak Lab</h1>
-  <p>For Peaks on the older firmware (OG, Opal, Indiglow, Guardian). Tests animated moods and hit detection. Close the Puffco app first.</p>
+  <h1>Emberline Proxy Hit Lab</h1>
+  <p>Records what the Proxy’s inhale sensor reads while you hit, so the hit timer can be fixed. Close the Puffco app first.</p>
 
   <div class="card">
     <div id="status">Not connected</div>
@@ -33,24 +33,12 @@ ol{margin:0;padding-left:20px;display:grid;gap:4px}
   </div>
 
   <div class="card">
-    <h2>1. Moods</h2>
-    <p>Pick where it goes, then tap a mood. Tell kona991 which ones animate and which look wrong.</p>
-    <div class="row" id="targets"></div>
-    <div class="moods" id="moods"></div>
-  </div>
-
-  <div class="card">
-    <h2>2. Solid color with pulse</h2>
-    <p>Same spot as above. Each button is a different pulse style. Tell kona991 what each one does.</p>
-    <div class="row"><input type="color" id="solid" value="#ff2060" aria-label="Color"><span id="pulses" class="row"></span></div>
-  </div>
-
-  <div class="card">
-    <h2>3. Hit test</h2>
+    <h2>Hit test</h2>
     <ol>
-      <li>Start a session on the Peak (double click) and wait until it's <b>Ready</b>.</li>
+      <li>Start a session on the Proxy (double click) and wait until it's <b>Ready</b>.</li>
       <li>Tap <b>Record 90s</b>.</li>
       <li>Take 3 or 4 hits of different lengths (short, medium, long). <b>Press and hold the big HOLD WHILE HITTING button the whole time you're pulling</b>, let go when you stop.</li>
+      <li>Also leave it alone for 15 seconds without hitting, so we can see the fake hits.</li>
       <li>Let it finish, then tap <b>Copy log</b> and send it to kona991.</li>
     </ol>
     <div class="row"><button id="bHit" disabled>Record 90s</button></div>
@@ -396,78 +384,23 @@ const rgbt = hex => { const c = hexBytes(hex); return new Uint8Array([c[0],c[1],
 /* ================= device controller ================= */
 
 const ble = new Lorax();
-const MOODS = [{"name":"Puffcon 2026","sw":["#ED6F28","#ED6F28","#ED6F28","#ED6F28","#E1F669","#E1F669"],"p":{"color":[237,111,40,237,111,40,237,111,40,237,111,40,225,246,105,225,246,105,225,246,105,225,246,105,116,205,77,116,205,77,116,205,77,116,205,77,76,199,209,76,199,209,76,199,209,76,199,209,196,140,225,196,140,225,196,140,225,196,140,225,255,255,255,255,255,255,255,255,255,255,255,255,76,199,209,76,199,209,76,199,209,76,199,209,237,111,40,237,111,40,237,111,40,237,111,40],"offset":[0,1024,2048,3072,4096,5120,6144,7168,8192,9216,10240,11264,12288,13312,14336,15360,16384,17408,18432,19456],"speed":14,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":32}},{"name":"Puffcon 2025","sw":["#FF0069","#FF0069","#FF0069","#FF0069","#43C3F9","#43C3F9"],"p":{"color":[255,0,105,255,0,105,255,0,105,255,0,105,67,195,249,67,195,249,67,195,249,67,195,249,67,195,249,67,195,249,67,195,249,67,195,249,67,195,249,67,195,249,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,236,77,255,0,105,255,0,105,255,0,105,255,0,105,255,0,105,255,0,105,255,0,105],"offset":[15360,18773,1707,5120,8533,11947,15360,10240,10240,5120,2844,1138,853,19627,19342,17636,0,0,0,0],"speed":20,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":32}},{"name":"Puffcon 2024","sw":["#faab36","#fbbd28","#fbca17","#fbcf0c","#f6cd3b","#e8c86a"],"p":{"color":[250,171,54,251,189,40,251,202,23,251,207,12,246,205,59,232,200,106,211,193,145,184,185,177,152,178,203,116,171,223,77,167,237,54,166,242,72,170,243,106,179,244,141,193,247,175,209,250,206,226,252,231,241,254,249,251,255,255,255,255,255,248,248,255,229,229,255,203,203,255,171,171,255,137,137,248,109,109,242,88,88,239,80,80,240,87,79,242,104,77,245,126,72,248,149,65],"offset":[8192,16385,16385,8192,0,0,16385,20480,0,16385,1073741824,1073745920,16385,16385,1073750016,1073754112,0,0,0,0],"speed":34,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":32}},{"name":"Puffcon 2023","sw":["#604ba9","#5f51ac","#5d60b4","#5873c1","#5089d1","#449fe1"],"p":{"color":[96,75,169,95,81,172,93,96,180,88,115,193,80,137,209,68,159,225,50,178,239,24,192,250,0,197,254,24,192,250,50,178,239,68,159,225,80,137,209,88,115,193,93,96,180,255,237,0,255,231,51,255,216,88,255,194,113,255,168,133,255,139,147,255,110,157,255,85,164,255,73,166,255,85,164,255,110,157,255,139,147,255,168,133,255,194,113,255,216,88,255,231,51,255,237,0],"offset":[331350016,331354112,331358208,331362304,331366400,331370496,331350016,270532608,270553088,331362304,331362304,331358208,331358208,331354112,331350016,62914560,0,0,0,0],"speed":24,"anim":6,"bright":255,"plNum":2,"plDenom":2,"colorLen":0}},{"name":"Puffcon 2022","sw":["#017693","#017794","#017996","#017c99","#01809e","#0184a3"],"p":{"color":[1,118,147,1,119,148,1,121,150,1,124,153,1,128,158,1,132,163,1,137,168,0,142,173,0,147,178,0,151,182,0,154,186,0,156,188,0,157,189,0,156,188,0,154,186,0,151,182,0,147,178,0,142,173,1,137,168,1,132,163,1,128,158,1,124,153,1,121,150,1,119,148,255,61,139,255,52,116,255,33,65,255,32,13,255,58,0,255,75,8,253,77,54,254,69,114],"offset":[36792320,36812800,36710400,36730880,36751360,36771840,96561152,36761600,36761600,96499712,96474112,96586752,96474112,96586752,96586752,96581632,0,0,0,0],"speed":24,"anim":6,"bright":255,"plNum":2,"plDenom":2,"colorLen":0}},{"name":"4th of July","sw":["#ff0000","#ff0000","#ff0000","#ff0000","#ffffff","#000000"],"p":{"color":[255,0,0,255,0,0,255,0,0,255,0,0,255,255,255,0,0,0,255,255,255,0,0,0,0,8,255,0,8,255,0,8,255,0,8,255,255,255,255,0,0,0,255,255,255,0,0,0,255,0,0,255,0,0,255,0,0,255,0,0,255,255,255,0,0,0,255,255,255,0,0,0,0,8,255,0,8,255,0,8,255,0,8,255,255,255,255,255,0,0,255,255,255,0,8,255],"offset":[114688,125611,5461,16384,27307,103765,16384,2012878165,2012878165,16384,9102,3641,2731,2731,127431,121970,0,0,0,0],"speed":12,"anim":5,"bright":255,"plNum":16,"plDenom":15,"colorLen":0}},{"name":"Candle Flicker","sw":["#ea9834","#e99734","#df9032","#d28830","#c67f2e","#bf7a2d"],"p":{"color":[234,152,52,233,151,52,223,144,50,210,136,48,198,127,46,191,122,45,192,123,45,201,130,47,214,138,49,227,147,51,222,144,50,220,142,50,190,122,45,144,92,34,150,96,35,234,151,52,226,149,47,223,150,55,203,128,42,203,128,42,155,100,38,234,152,52,221,143,49,166,107,38,129,82,30,152,98,35,208,134,46,235,152,52,230,150,49,223,148,45,222,147,44,228,149,48],"offset":[42035200,42055680,41953280,41973760,41994240,42014720,42035200,764725248,18159616,41973760,764725248,764725248,764725248,1033160704,1435875328,1435875328,0,0,0,0],"speed":9,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":0}},{"name":"Hologram","sw":["#8b51e1","#8b59e1","#8d6de2","#9086e6","#95a1eb","#9bbdf1"],"p":{"color":[139,81,225,139,89,225,141,109,226,144,134,230,149,161,235,155,189,241,160,214,247,165,234,252,167,246,254,169,249,255,177,244,255,191,234,254,206,221,252,221,206,251,234,191,250,244,176,248,251,165,247,255,158,247,253,157,247,244,151,244,229,141,241,211,129,237,191,116,232,172,103,229,155,92,226,143,84,225,139,81,225,151,170,237,168,249,255,221,206,251,255,158,247,197,120,234],"offset":[968189952,968210432,968108032,968128512,968148992,968169472,109144064,109113344,109113344,109082624,109057024,109169664,109057024,109169664,109169664,109164544,0,0,0,0],"speed":65,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":0}},{"name":"Lupus Awareness","sw":["#9900ff","#a100fe","#b200fe","#c100ff","#c800ff","#c000fe"],"p":{"color":[153,0,255,161,0,254,178,0,254,193,0,255,200,0,255,192,0,254,172,0,254,151,0,254,140,0,255,151,24,253,174,48,252,196,65,254,206,71,255,198,65,254,180,49,253,161,24,254,153,0,255,148,0,255,135,0,254,122,0,255,115,0,255,115,0,255,115,0,255,115,0,255,115,0,255,115,0,255,115,0,255,115,0,255,115,0,255,122,0,255,135,0,254,148,0,255],"offset":[134221368,268442736,402664104,134232288,268453656,402675024,268460936,536900032,402685944,268471856,402693224,268479136,402700504,536921872,536925512,134275968,0,0,0,0],"speed":4,"anim":5,"bright":255,"plNum":0,"plDenom":0,"colorLen":0}},{"name":"Disco","sw":["#FF0000","#FF3000","#FF6000","#FF9000","#FFC000","#FFF000"],"p":{"color":[255,0,0,255,48,0,255,96,0,255,144,0,255,192,0,255,240,0,224,255,0,176,255,0,128,255,0,80,255,0,32,255,0,0,255,16,0,255,64,0,255,112,0,255,160,0,255,208,0,255,255,0,208,255,0,160,255,0,112,255,0,64,255,0,16,255,32,0,255,80,0,255,128,0,255,176,0,255,224,0,255,255,0,240,255,0,192,255,0,144,255,0,96,255,0,48],"offset":[98304,120149,10923,32768,54613,76459,98304,65536,65536,32768,18204,7282,123790,112868,123790,112868,0,0,0,0],"speed":32,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":32}},{"name":"Fade: purple / pink","sw":["#8a2be2","#8c2ce1","#b236d2","#e045c2","#fd4fb9","#ff4fb8"],"p":{"color":[138,43,226,140,44,225,178,54,210,224,69,194,253,79,185,255,79,184,253,79,185,224,69,194,178,54,210,140,44,225],"offset":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"speed":40,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":10}},{"name":"Spin: red / blue","sw":["#fd0d0d","#fc0e1d","#de1d76","#a22fbe","#2b3ffb","#0040ff"],"p":{"color":[253,13,13,252,14,29,222,29,118,162,47,190,43,63,251,0,64,255,43,63,251,162,47,190,222,29,118,252,14,29],"offset":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"speed":64,"anim":7,"bright":255,"plNum":1,"plDenom":2,"colorLen":10}},{"name":"Gradient: green / gold","sw":["#1e6c17","#3b7820","#6d9634","#a4bc4b","#d1dd5f","#e4eb68"],"p":{"color":[30,108,23,59,120,32,109,150,52,164,188,75,209,221,95,228,235,104,209,221,95,164,188,75,109,150,52,59,120,32],"offset":[0,0,0,0,0,0,7680,25600,15360,7680,12800,12800,17920,17920,12800,12800,15360,15360,15360,15360],"speed":40,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":10}},{"name":"Disco: rainbow","sw":["#fd0d0d","#f9470d","#e9870b","#c1c007","#76ed03","#00ff00"],"p":{"color":[253,13,13,249,71,13,233,135,11,193,192,7,118,237,3,0,255,0,0,235,89,0,189,145,0,133,177,0,77,212,0,0,255,71,71,213,127,127,183,185,185,153,234,234,96,255,255,0,255,235,116,255,192,101,255,135,66,255,70,29],"offset":[61440,75092,6828,20480,34132,47788,61440,40960,40960,20480,11376,4552,3412,78508,77368,70544,0,0,0,0],"speed":40,"anim":1,"bright":255,"plNum":0,"plDenom":0,"colorLen":20}}];
 const $ = id => document.getElementById(id);
 const L = []; const log = s => { L.push(s); $('log').value = L.join('\n'); $('log').scrollTop = 1e9; };
 const status = (t, c) => { $('status').textContent = t; $('status').className = c || ''; };
 const hex = u => Array.from(u).map(b => b.toString(16).padStart(2, '0')).join('');
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const EDITIONS = { 0:'OG', 21:'OG', 1:'Opal', 22:'Opal', 2:'Indiglow', 4:'Guardian', 12:'Pearl', 13:'Onyx', 15:'Desert', 17:'Flourish', 19:'Storm', 23:'Daybreak', 25:'Plasma', 26:'Glacier' };
-let target = 0, busy = false;
-const TARGETS = [['P1', 0], ['P2', 1], ['P3', 2], ['P4', 3], ['Lantern', 'lantern']];
-function drawTargets(){ $('targets').innerHTML = TARGETS.map(([n, v]) => `<button class="ghost" data-t="${v}" aria-pressed="${String(target) === String(v)}">${n}</button>`).join(''); }
-$('targets').onclick = e => { const b = e.target.closest('[data-t]'); if (!b) return; target = b.dataset.t === 'lantern' ? 'lantern' : +b.dataset.t; drawTargets(); };
-$('moods').innerHTML = MOODS.map((m, i) => `<button class="mood" data-m="${i}"><i style="background:linear-gradient(90deg,${(m.sw.length > 1 ? m.sw : m.sw.concat(m.sw)).join(',')})"></i>${m.name}</button>`).join('');
-$('pulses').innerHTML = [0,1,2,3,4,5,6,7].map(n => `<button class="ghost" data-pulse="${n}">Pulse ${n}</button>`).join('');
-drawTargets();
-
-// slot numbers from Puffco's app: 0 = active session, 1-4 = profiles, 5/6 = lantern
-const slotFor = t => t === 'lantern' ? 5 : t + 1;
-const pathFor = t => t === 'lantern' ? '/p/app/ltrn/colr' : `/u/app/hc/${t}/colr`;
-async function lanternOn(){ try { await ble.wf32('/p/app/ltrn/time', 7200); } catch(e){} await ble.write('/p/app/ltrn/cmd', new Uint8Array([1])); }
-async function activeIs(t){ try { const r = await ble.read('/p/app/hcs', 1); return r[0] === t; } catch(e){ return false; } }
-async function setMood(m){
-  if (!ble.connected){ status('Connect first', 'bad'); return; }
-  if (busy) return; busy = true;
-  const P = m.p, t = target;
-  try {
-    let h = slotFor(t);
-    if (t === 'lantern'){ try { const r = await ble.read('/p/app/ltrn/colr', 8); if (r[3] === 1 && (r[6] & 15) - 8 === 5) h = 6; } catch(e){} }
-    const ca = new Uint8Array(128); for (let k = 0; k < 32; k++){ const j = k * 3; if (j + 2 < P.color.length){ ca[k*4] = P.color[j]; ca[k*4+1] = P.color[j+1]; ca[k*4+2] = P.color[j+2]; } }
-    await ble.writeBlob(`/u/app/led/ca/${h}`, ca);
-    if (P.offset && P.offset.length){ const oa = new Uint8Array(P.offset.length * 4), dv = new DataView(oa.buffer); P.offset.forEach((v, k) => dv.setUint32(k * 4, v >>> 0, true)); await ble.writeBlob(`/u/app/led/oa/${h}`, oa); }
-    const idx = 8 + h, cl = P.colorLen == null ? 32 : P.colorLen;
-    const rg = new Uint8Array([P.bright == null ? 255 : P.bright, clamp(Math.round(P.speed == null ? 255 : P.speed), 0, 255), P.anim || 0, 1, P.plNum || 0, P.plDenom || 0, (idx << 4) | idx, cl < 32 ? cl : 0]);
-    await ble.write(pathFor(t), rg);
-    if (t !== 'lantern' && await activeIs(t)){ // the profile that's selected right now: also update what it's showing
-      await ble.writeBlob('/u/app/led/ca/0', ca);
-      if (P.offset && P.offset.length){ const oa = new Uint8Array(P.offset.length * 4), dv = new DataView(oa.buffer); P.offset.forEach((v, k) => dv.setUint32(k * 4, v >>> 0, true)); await ble.writeBlob('/u/app/led/oa/0', oa); }
-      const r0 = rg.slice(); r0[6] = (8 << 4) | 8; await ble.write('/p/app/thc/colr', r0);
-    }
-    if (t === 'lantern') await lanternOn();
-    log(`mood "${m.name}" -> ${t === 'lantern' ? 'lantern' : 'P' + (t + 1)} slot ${h}: ${hex(rg)}`);
-    status(`${m.name} set. Does it animate?`, 'ok');
-  } catch(e){ log('mood ERR ' + e.message); status('Failed: ' + e.message, 'bad'); }
-  busy = false;
-}
-async function setPulse(n){
-  if (!ble.connected){ status('Connect first', 'bad'); return; }
-  const c = $('solid').value.slice(1).match(/../g).map(x => parseInt(x, 16));
-  const rg = new Uint8Array([c[0], c[1], c[2], 0, n, 0, 0, 0]);
-  try {
-    await ble.write(pathFor(target), rg);
-    if (target !== 'lantern' && await activeIs(target)) await ble.write('/p/app/thc/colr', rg);
-    if (target === 'lantern') await lanternOn();
-    log(`pulse ${n} -> ${target === 'lantern' ? 'lantern' : 'P' + (target + 1)}: ${hex(rg)}`); status(`Pulse ${n} set`, 'ok');
-  } catch(e){ log('pulse ERR ' + e.message); status('Failed: ' + e.message, 'bad'); }
-}
-$('moods').onclick = e => { const b = e.target.closest('[data-m]'); if (b) setMood(MOODS[+b.dataset.m]); };
-$('pulses').onclick = e => { const b = e.target.closest('[data-pulse]'); if (b) setPulse(+b.dataset.pulse); };
-
+let busy = false;
 $('bConnect').onclick = async () => {
   if (!navigator.bluetooth){ status('No Bluetooth here. Use Path or Bluefy on iPhone, or Chrome.', 'bad'); return; }
   try {
     status('Pick your Peak…'); await ble.request(false);
     status('Connecting…'); await ble.attach(s => status('Connecting (' + s + ')…'));
-    let api = '?', ed = '?', fw = '?';
-    try { await ble.read('/u/app/hc/0/phcl', 8); api = 2; } catch(e){ api = 3; }
-    try { const mc = await ble.u32('/p/sys/hw/mdcd'); ed = EDITIONS[mc] || ('code ' + mc); } catch(e){}
-    try { const r = await ble.read('/p/sys/fw/ver', 4); fw = r[0]; } catch(e){}
-    $('info').textContent = `${ble.dev.name || 'Peak'} · ${ed} · firmware ${fw} · ${api === 2 ? 'older firmware' : 'newer firmware'}`;
-    log(`connected: ${ble.dev.name} edition=${ed} fw=${fw} api=${api}`);
-    for (let i = 0; i < 4; i++){ try { log(`P${i + 1} colr = ${hex(await ble.read(`/u/app/hc/${i}/colr`, 8))}`); } catch(e){} }
-    try { log(`lantern colr = ${hex(await ble.read('/p/app/ltrn/colr', 8))}`); } catch(e){}
-    status(api === 2 ? 'Connected. Try some moods.' : 'Connected, but this Peak is on the newer firmware. The main app already supports it.', api === 2 ? 'ok' : '');
+    let ed = '?'; try { const mc = await ble.u32('/p/sys/hw/mdcd'); ed = ({0:'Onyx',1:'Haze',2:'Pine'})[mc] || ('code ' + mc); } catch(e){}
+    let ch = '?'; try { ch = (await ble.read('/p/htr/chmt', 1))[0]; } catch(e){}
+    $('info').textContent = `${ble.dev.name || 'Proxy'} · ${ed} · atomizer code ${ch}`;
+    log(`connected: ${ble.dev.name} edition=${ed} chmt=${ch}`);
+    status('Connected. Start a session, then tap Record 90s.', 'ok');
     $('bHit').disabled = false;
   } catch(e){ status('Failed: ' + e.message, 'bad'); log('connect ERR ' + e.message); }
 };
@@ -475,14 +408,14 @@ ble.onDisconnect = () => { status('Disconnected. Tap Connect again.', 'bad'); $(
 
 $('bHit').onclick = async () => {
   $('bHit').disabled = true; busy = true;
-  const paths = ['/p/app/stat/id', '/p/app/htr/temp', '/p/htr/pwr', '/p/htr/duty'], ok = [];
+  const paths = ['/p/app/stat/id', '/p/app/led/dif', '/p/app/led/dia', '/p/app/led/difo', '/p/app/led/diao', '/p/app/htr/temp', '/p/htr/pwr'], ok = [];
   for (const p of paths){ try { await ble.f32(p); ok.push(p); } catch(e){} }
   log('\n=== HIT TEST ===\nreadable: ' + ok.join(' '));
   log('t hold ' + ok.map(p => p.split('/').slice(-2).join('/')).join(' '));
   const t0 = Date.now();
   while (Date.now() - t0 < 90000 && ble.connected){
     const row = [((Date.now() - t0) / 1000).toFixed(1), holding ? 'HIT' : '-'];
-    for (const p of ok){ try { const v = await ble.f32(p); row.push(Math.abs(v) < 10 ? v.toFixed(3) : v.toFixed(1)); } catch(e){ row.push('x'); } }
+    for (const p of ok){ try { const v = await ble.f32(p); row.push(Math.abs(v) < 10 ? v.toFixed(4) : v.toFixed(1)); } catch(e){ row.push('x'); } }
     L.push(row.join(' ')); $('log').value = L.join('\n'); $('log').scrollTop = 1e9;
     status('Recording… ' + Math.round((Date.now() - t0) / 1000) + 's of 90');
     await sleep(60);
