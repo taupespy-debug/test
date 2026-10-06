@@ -3219,10 +3219,13 @@ function logSession(s){
   if (rankBefore) afterSessionLogged(s, rankBefore);
 }
 
-function rankLock(){ try { const u = rankFor(rankSessions()).lockedUntil; return u > Date.now() ? u : 0; } catch(e){ return 0; } }
+function rankLock(){ if (IS_TEST && store.testRankLock > Date.now()) return store.testRankLock; try { const u = rankFor(rankSessions()).lockedUntil; return u > Date.now() ? u : 0; } catch(e){ return 0; } } // testRankLock: fake lock from the test tools
 function rankLockCheck(before){ // say it once, the moment the lock starts
   const u = rankLock(); if (!u || (before && before.lockedUntil === u)) return;
-  setTimeout(() => alert(`Over 300 RP in one day. Either you're hacking or you need to take a break.\n\nYou're locked out of ranked for 24 hours. Sessions until ${new Date(u).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })} won't earn RP.`), 800);
+  setTimeout(() => rankLockAlert(u), 800);
+}
+function rankLockAlert(u){
+  alert(`Over 300 RP in one day. Either you're hacking or you need to take a break.\n\nYou're locked out of ranked for 24 hours. Sessions until ${new Date(u).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })} won't earn RP.`);
 }
 
 /* ================= clean tracking ================= */
@@ -6795,13 +6798,27 @@ function goldUnlockedCard(){
   if (view === 'set') drawSettings();
 }
 function goldSweep(){ const r = document.documentElement; r.classList.remove('gold-in'); void r.offsetWidth; r.classList.add('gold-in'); setTimeout(() => r.classList.remove('gold-in'), 1600); }
+// test tools for ranked rules: run rankFor on made-up sessions so real RP never changes
+function rankTest(k){
+  const T = new Date(); T.setDate(1); T.setHours(9, 0, 0, 0); const t0 = T.getTime(), fake = (t, hits) => ({ t, run:30, sc:1, hits });
+  if (k === 'unlock'){ store.testRankLock = 0; save(); drawRank(); toast('Fake lock cleared'); return; }
+  if (k === 'b2b'){ const r = rankFor([fake(t0, [3]), fake(t0 + 60000, [3])], t0); toast(`2 sessions 1 min apart: ${r.firsts + r.sessions} counted, ${r.rp} RP`); return; }
+  const ss = []; for (let i = 0; i < 70; i++) ss.push(fake(t0 + i * 60000, [9])); // 70 blinker sessions in one morning
+  const r = rankFor(ss, t0);
+  if (!r.lockedUntil){ toast(`No lock (${r.rp} RP). Something's wrong`); return; }
+  store.testRankLock = Date.now() + RANK_LOCK_MS; save(); drawRank();
+  rankLockAlert(store.testRankLock);
+  toast(`Locked at ${r.rp} RP, ${r.locked} sessions skipped`);
+}
 function drawTestTools(){
   const el = $('#testTools'); if (!el) return;
   if (!IS_TEST){ el.hidden = true; return; }
   el.hidden = false;
   el.innerHTML = `<span class="label">Test site tools</span>
     <p class="muted" style="margin:0;font-size:13px">Only on the test link. Blinkers: <b>${blinkerCount()}</b>${goldUnlockedNow() ? ' · Aurum unlocked' : ''}</p>
-    <div class="shop-actions"><button class="btn small" data-tt="1">+1 blinker</button><button class="btn small" data-tt="10">+10</button><button class="btn small" data-tt="99">Set 99</button><button class="btn small" data-tt="reset">Reset</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="1">+1 blinker</button><button class="btn small" data-tt="10">+10</button><button class="btn small" data-tt="99">Set 99</button><button class="btn small" data-tt="reset">Reset</button></div>
+    <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
+    <div class="shop-actions"><button class="btn small" data-tt="lock">Try 300 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -6987,6 +7004,7 @@ $('#goldSheet').addEventListener('click', e => {
 });
 $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
+  if (k === 'lock' || k === 'unlock' || k === 'b2b'){ rankTest(k); drawTestTools(); return; }
   const real = blinkerCount() - (store.blinkerBonus || 0);
   if (k === 'reset'){ store.blinkerBonus = -real; store.goldUnlocked = false; if (store.theme === 'gold') store.theme = 'orchid'; save(); applyTheme(); }
   else if (k === '99'){ store.blinkerBonus = 99 - real; save(); }
