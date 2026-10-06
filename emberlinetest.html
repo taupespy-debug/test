@@ -3225,7 +3225,7 @@ function rankLockCheck(before){ // say it once, the moment the lock starts
   setTimeout(() => rankLockAlert(u), 800);
 }
 function rankLockAlert(u){
-  alert(`Over 300 RP in one day. Either you're hacking or you need to take a break.\n\nYou're locked out of ranked for 24 hours. Sessions until ${new Date(u).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })} won't earn RP.`);
+  alert(`Over 1000 RP in one day. Either you're hacking or you need to take a break.\n\nYou're locked out of ranked for 24 hours. Sessions until ${new Date(u).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })} won't earn RP.`);
 }
 
 /* ================= clean tracking ================= */
@@ -4054,7 +4054,7 @@ function afterSessionLogged(s, before){
    a dab past 120 since your last clean costs -1 instead of earning its session point */
 const RANK_TIERS = [ { n:'Ember', min:0, c:'#ff6a3d' }, { n:'Flame', min:50, c:'#ff9f0a' }, { n:'Blaze', min:150, c:'#ffd60a' }, { n:'Inferno', min:300, c:'#ff2d55' }, { n:'Champion', min:500, c:'#e9bb4f' } ];
 const RANK_DIRTY = 120, RANK_DAY_SESS = Infinity; // every session after the first earns its point
-const RANK_DAY_MAX = 300, RANK_LOCK_MS = 864e5; // going past 300 RP in one day locks you out of ranked for 24h
+const RANK_DAY_MAX = 1000, RANK_LOCK_MS = 864e5; // going past 1000 RP in one day locks you out of ranked for 24h
 function rankFor(sessions, when){
   const d = new Date(when || Date.now()), m0 = new Date(d.getFullYear(), d.getMonth(), 1).getTime(), m1 = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
   const ss = sessions.filter(s => s.t >= m0 && s.t < m1 && !(typeof s.run === 'number' && s.run < 20)).sort((a, b) => a.t - b.t); // ranked only counts sessions that ran 20s+
@@ -4066,7 +4066,7 @@ function rankFor(sessions, when){
     const day = new Date(s.t).toDateString(), first = !seen.has(day), nth = (seen.get(day) || 0);
     const bl = (s.hits || []).filter(h => h >= 8).length;
     const gain = (s.sc > RANK_DIRTY ? -1 : first ? 3 + ext : 1 + ext) + bl * (5 + ext), dr = dayRp.get(day) || 0;
-    if (dr + gain > RANK_DAY_MAX){ lockUntil = r.lockedUntil = s.t + RANK_LOCK_MS; r.locked++; continue; } // over 300 RP in a day: this session doesn't count and ranked locks
+    if (dr + gain > RANK_DAY_MAX){ lockUntil = r.lockedUntil = s.t + RANK_LOCK_MS; r.locked++; continue; } // over 1000 RP in a day: this session doesn't count and ranked locks
     dayRp.set(day, dr + gain); seen.set(day, nth + 1);
     if (s.sc > RANK_DIRTY){ r.dirty++; r.rp -= 1; }
     else if (first){ r.firsts++; r.firstPts += 3 + ext; r.rp += 3 + ext; r.extreme += ext; }
@@ -4103,7 +4103,7 @@ function lastSessionHtml(){
   let rp = 0; try { if (s.t >= m0.getTime()) rp = rankFor(all).rp - rankFor(all.slice(0, -1)).rp; } catch(e){}
   const mins = Math.round((Date.now() - s.t) / 60000), when = mins < 1 ? 'just now' : mins < 60 ? mins + 'm ago' : mins < 1440 ? Math.round(mins / 60) + 'h ago' : new Date(s.t).toLocaleDateString([], { month:'short', day:'numeric' });
   const len = typeof s.run === 'number' ? s.run : s.dur || 0;
-  const lk = rankLock(), why = lk && s.t >= lk - RANK_LOCK_MS ? 'Not counted: locked out of ranked for going over 300 RP in a day' : typeof s.run === 'number' && s.run < 20 ? 'Not counted: shorter than 20s' : s.t < m0.getTime() ? 'From last month' : '';
+  const lk = rankLock(), why = lk && s.t >= lk - RANK_LOCK_MS ? 'Not counted: locked out of ranked for going over 1000 RP in a day' : typeof s.run === 'number' && s.run < 20 ? 'Not counted: shorter than 20s' : s.t < m0.getTime() ? 'From last month' : '';
   return `<div class="last-sess"><div class="row between"><span class="label">Last session</span><span class="muted" style="font-size:12px">${esc(s.name || 'Session')} · ${when}</span></div>
     <div class="ls-grid"><div><b>${rp > 0 ? '+' + rp : rp}</b><span>RP</span></div><div><b>${hits.length}</b><span>hit${hits.length === 1 ? '' : 's'}</span></div><div><b>${best ? best.toFixed(1) + 's' : '-'}</b><span>best hit</span></div><div><b>${blinks}</b><span>blinker${blinks === 1 ? '' : 's'}</span></div><div><b>${len ? len + 's' : '-'}</b><span>length</span></div></div>
     ${why ? `<p class="muted" style="margin:0;font-size:12px">${why}</p>` : ''}</div>`;
@@ -4129,7 +4129,7 @@ function drawRankInner(){
     </div>
     ${lastSessionHtml()}
     ${dirtyNow ? `<div class="banner warn" style="padding:10px 14px;font-size:14px"><div class="grow"><b>Losing points</b>Every dab costs 1 RP until you clean.</div></div>` : ''}
-    ${lockU ? `<div class="banner warn" style="padding:10px 14px;font-size:14px"><div class="grow"><b>Locked out of ranked</b>You went over 300 RP in one day. Sessions won't earn RP until ${new Date(lockU).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })}.</div></div>` : ''}
+    ${lockU ? `<div class="banner warn" style="padding:10px 14px;font-size:14px"><div class="grow"><b>Locked out of ranked</b>You went over 1000 RP in one day. Sessions won't earn RP until ${new Date(lockU).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })}.</div></div>` : ''}
     ${(() => { const h = badgeHistory(), dev = LB.me && LB.me.dev; if (!h.length && !dev) return '';
         return `<div class="rb-shelf-wrap"><span class="label">Your badges</span><div class="rb-shelf">${dev ? `<div class="rb-item" data-bv="dev">${devBadge(54)}<span>Developer</span></div>` : ''}${h.map(b => `<div class="rb-item" data-bv="${b.y}-${String(b.m + 1).padStart(2, '0')}:${b.t}">${rankBadge(b.m, b.t, 58, b.y)}<span>${RB_MONTHS[b.m].slice(0, 3)} · ${RB_TIERS[b.t].n}</span></div>`).join('')}</div></div>`; })()}
     <details class="rank-how"><summary>How points work</summary>
@@ -4141,7 +4141,7 @@ function drawRankInner(){
         <div><span>Each dab after ${RANK_DIRTY} without cleaning <small>replaces that session's point</small></span><b class="neg">−1</b></div>
       </div>
       <div class="how-tiers">${RANK_TIERS.map((t, i) => `<span style="--c:${t.c}">${rankBadge(new Date().getMonth(), i)}${t.n}<small>${t.min}</small></span>`).join('')}</div>
-      <p class="how-note">Points reset on the 1st of every month. Going over 300 RP in one day locks you out of ranked for 24 hours.</p>
+      <p class="how-note">Points reset on the 1st of every month. Going over 1000 RP in one day locks you out of ranked for 24 hours.</p>
     </details>`;
 }
 /* ===== Leaderboard (Supabase) ===== */
@@ -6803,7 +6803,7 @@ function rankTest(k){
   const T = new Date(); T.setDate(1); T.setHours(9, 0, 0, 0); const t0 = T.getTime(), fake = (t, hits) => ({ t, run:30, sc:1, hits });
   if (k === 'unlock'){ store.testRankLock = 0; save(); drawRank(); toast('Fake lock cleared'); return; }
   if (k === 'b2b'){ const r = rankFor([fake(t0, [3]), fake(t0 + 60000, [3])], t0); toast(`2 sessions 1 min apart: ${r.firsts + r.sessions} counted, ${r.rp} RP`); return; }
-  const ss = []; for (let i = 0; i < 70; i++) ss.push(fake(t0 + i * 60000, [9])); // 70 blinker sessions in one morning
+  const ss = []; for (let i = 0; i < 200; i++) ss.push(fake(t0 + i * 60000, [9])); // 200 blinker sessions in one morning
   const r = rankFor(ss, t0);
   if (!r.lockedUntil){ toast(`No lock (${r.rp} RP). Something's wrong`); return; }
   store.testRankLock = Date.now() + RANK_LOCK_MS; save(); drawRank();
@@ -6818,7 +6818,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Only on the test link. Blinkers: <b>${blinkerCount()}</b>${goldUnlockedNow() ? ' · Aurum unlocked' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="1">+1 blinker</button><button class="btn small" data-tt="10">+10</button><button class="btn small" data-tt="99">Set 99</button><button class="btn small" data-tt="reset">Reset</button></div>
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
-    <div class="shop-actions"><button class="btn small" data-tt="lock">Try 300 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
