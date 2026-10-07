@@ -3325,7 +3325,7 @@ function logSession(s){
   lbPush(true);
   rankLockCheck(rankBefore);
   if (rankBefore) afterSessionLogged(s, rankBefore);
-  { const hh = hotHeadTry(s); if (hh) setTimeout(() => toast(hh.ok ? 'Hot Head done! Badge unlocked' : `Hot Head: ${Math.min(hh.bl, 5)} / 5 blinkers${hh.bl >= 5 ? ', the last one was too early' : ''}`), 3200); }
+  { const hh = hotHeadTry(s); if (hh) setTimeout(() => toast(hh.ok ? 'Hot Head done! Legendary badge unlocked' : `Hot Head: ${Math.min(hh.bl, 5)} / 5 blinkers${hh.bl >= 5 ? ', the last one was too early' : ''}`), 3200); }
 }
 
 function rankLock(){ if (IS_TEST && store.testRankLock > Date.now()) return store.testRankLock; try { const sv = LB.me && LB.me.locked_until ? Date.parse(LB.me.locked_until) : 0, u = Math.max(rankFor(rankSessions()).lockedUntil, sv || 0); return u > Date.now() ? u : 0; } catch(e){ return 0; } } // the server can lock you too // testRankLock: fake lock from the test tools
@@ -4895,7 +4895,7 @@ function hotHeadSheet(){
   const b = spbById('hothead'), st = spbStatus().hothead || {}, loaded = !!hhBack(), unit = v => store.unit === 'C' ? Math.round((v - 32) * 5 / 9) + '°C' : v + '°F';
   const el = document.createElement('div'); el.className = 'egg hh';
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Hot Head challenge" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
-    <div style="display:grid;justify-items:center;gap:6px"><div style="width:120px">${SPB.badge(b)}</div><span class="label">Challenge · ${st.got ? 'Unlocked' : 'Locked'}</span><h2 style="margin:0">Hot Head</h2></div>
+    <div style="display:grid;justify-items:center;gap:6px"><div style="width:120px">${SPB.badge(b)}</div><span class="bv-rar r-legendary">Legendary</span><span class="label">Challenge · ${st.got ? 'Unlocked' : 'Locked'}</span><h2 style="margin:0">Hot Head</h2></div>
     <p style="margin:0">Hit <b>5 blinkers</b> in one session on the Hot Head profile. The last one has to land in the <b>final 30 seconds</b>.</p>
     <div style="display:flex;flex-wrap:wrap;gap:6px">${[unit(HOTHEAD.tempF), HOTHEAD.time + 's', isProxy() ? 'Intense' : 'Extreme', 'Boost +' + (store.unit === 'C' ? '1°C' : '1°F') + ' · +60s', 'Hologram light'].map(t => `<span class="chip" style="padding:4px 10px;border-radius:99px;background:var(--fill-2);font-size:13px">${t}</span>`).join('')}</div>
     ${st.prog ? `<p class="muted" style="margin:0;font-size:14px">${esc(st.prog)}</p>` : ''}
