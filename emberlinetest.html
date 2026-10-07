@@ -2581,6 +2581,7 @@ async function afterConnect(quick){
   if (quick && S.readFor && ble.dev && S.readFor === ble.dev.id){
     S.mode = 'live'; failStreak = 0;
     try { S.state = await ble.u8('/p/app/stat/id'); } catch(e){}
+    resumeOpenSess();
     try { S.active = clamp(await ble.u8('/p/app/hcs'), 0, 3); } catch(e){}
     startPolling();
     setConnUI('live');
@@ -2595,6 +2596,7 @@ async function afterConnect(quick){
   S.mode = 'live'; S.name = ble.dev.name || 'Peak Pro'; failStreak = 0; S.devName = null; S.edition = null; PROXY_TPL = null; // don't carry the last device's name over
   await detectLedApi();
   try { S.state = await ble.u8('/p/app/stat/id'); } catch(e){}
+  resumeOpenSess();
   connectIntro(); // the logo lights up now while the rest loads
   try { S.active = clamp(await ble.u8('/p/app/hcs'), 0, 3); } catch(e){}
   try { S.battery = clamp(Math.round(await ble.f32('/p/bat/soc')), 0, 100); } catch(e){}
@@ -3190,9 +3192,10 @@ setInterval(() => { if (!phRestore || S.state !== 7) return; const tgt = S.liveT
 let cur = null;
 function trackSession(prev, st){
   checkWarn();
-  if (st === 7 && prev !== 7){ hitReset(); hitLoopStart(); phStart(); }
+  const midSess = !!(cur && cur.readyAt); // already reached Ready: Boost and other in-between states are the same session
+  if (st === 7 && prev !== 7){ if (!midSess) hitReset(); hitLoopStart(); if (!midSess) phStart(); }
   if (prev === 7 && st !== 7) phEnd(); // start listening during preheat so hits count the moment it's Ready
-  if (st === 8 && prev !== 8){ if (prev !== 9 && prev !== 7) hitReset(); hitLoopStart(); }
+  if (st === 8 && prev !== 8){ if (prev !== 9 && prev !== 7 && !midSess) hitReset(); hitLoopStart(); }
   if (prev === 8 && st !== 8 && S.mode === 'live' && !zoneLive.on){ clearTimeout(previewTimer); setTimeout(() => { ledJob(previewClear); if (LT.on) ltShowCurrent(); }, 900); }
   const tF = c2f(S.tempC);
   if (st === 7 && prev !== 7 && !cur){
@@ -3200,17 +3203,27 @@ function trackSession(prev, st){
   }
   if (cur){
     cur.peak = Math.max(cur.peak, tF);
-    if (st === 8){ cur.hit = true; if (!cur.readyAt){ cur.readyAt = Date.now(); cur.tax = taxPop(); } }
-    if ((st === 9 || st === 5 || st < 5) && prev >= 7 && prev <= 8){
+    if (st === 8){ cur.hit = true; if (!cur.readyAt){ cur.readyAt = Date.now(); cur.tax = taxPop(); saveOpenSess(); } }
+    if (st === 9 || st <= 6){
       const ranFor = cur.readyAt ? (Date.now() - cur.readyAt) / 1000 : 0;
       S.cyclesSinceOdo = (S.cyclesSinceOdo || 0) + 1;
       const gotHit = (cur.hits || HIT.hits || []).some(h => h >= 1);
       if (cur.hit && (ranFor >= 20 || gotHit)){ logSession({ tax: cur.tax && ranFor >= RANK_TAX_SECS ? cur.tax : undefined, t:cur.t, p:cur.p, name:cur.name, target:cur.target, peak:Math.round(cur.peak), dur:Math.round((Date.now()-cur.t)/1000), batt:cur.batt, hits:(cur.hits || HIT.hits).slice(0, 20), vapor:(S.profiles[cur.p] || {}).vapor, sc:sinceClean() + 1, run: cur.readyAt ? Math.round((Date.now() - cur.readyAt) / 1000) : null }); }
       { const pi = cur.p; if (store.shuffle && store.shuffle[pi] && store.shuffle[pi].on) setTimeout(() => shuffleNext(pi), 2500); } // mood shuffle: next mood for this profile
-      cur = null;
+      cur = null; store.openSess = null; save();
     }
   }
 }
+function saveOpenSess(){ if (!cur || demo) return; store.openSess = Object.assign({}, cur, { hits: (cur.hits || HIT.hits || []).slice(0, 20), savedAt: Date.now() }); save(); }
+// the page came back (reconnect or reload): put back an unfinished session, and finish it if the Peak is already done
+function resumeOpenSess(){
+  if (!cur && store.openSess && !demo){ const o = store.openSess; if (Date.now() - (o.savedAt || 0) < 3 * 36e5){ cur = o; HIT.hits = (o.hits || []).slice(); } else { store.openSess = null; save(); } }
+  if (!cur) return;
+  if (S.state === 7 && cur.readyAt){ trackSession(8, 5); trackSession(5, 7); return; } // a new session already started: log the old one, track the new one
+  if (cur) trackSession(S.state, S.state); // done or idle now: log it
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveOpenSess(); });
+window.addEventListener('pagehide', saveOpenSess);
 function data(){ return demo || { sessions:store.sessions, lastClean:store.lastClean }; }
 // ranked counts only this Puffco account's sessions (several accounts can share one phone)
 function acctId(){ const a = store.account, id = a && a.data && a.data.user && a.data.user.id; return id != null ? String(id) : (a && a.email ? 'e:' + a.email.toLowerCase() : null); }
