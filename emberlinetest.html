@@ -947,8 +947,14 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:non
 .spb-holo{animation:spbHolo 6s linear infinite}
 @keyframes spbHolo{to{transform:rotate(360deg)}}
 .spb-myth{animation:spbMyth 4s linear infinite}
+.spb-flick{animation:spbFlick 1.4s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
+@keyframes spbFlick{0%,100%{transform:none}25%{transform:scale(1.05,.95)}50%{transform:scale(.96,1.07) skewX(-3deg)}75%{transform:scale(1.03,.98) skewX(3deg)}}
+.spb-ember{animation:spbEmber 2.6s ease-out infinite;opacity:0}
+@keyframes spbEmber{0%{transform:translateY(0);opacity:0}15%{opacity:1}100%{transform:translateY(-58px);opacity:0}}
+.spb-glow{animation:spbGlow 2.2s ease-in-out infinite}
+@keyframes spbGlow{0%,100%{opacity:.22}50%{opacity:.6}}
 @keyframes spbMyth{to{stroke-dashoffset:-72}}
-@media (prefers-reduced-motion:reduce){.spb-shine,.spb-spark,.spb-glitch,.spb-holo,.spb-myth,.bv-rar.r-mythic{animation:none}}
+@media (prefers-reduced-motion:reduce){.spb-shine,.spb-spark,.spb-glitch,.spb-holo,.spb-myth,.spb-flick,.spb-ember,.spb-glow,.bv-rar.r-mythic{animation:none}}
 /* app feel: no blue text selection or long-press copy menu (text boxes still work normally) */
 html,body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 input,textarea,select,[contenteditable="true"]{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
@@ -4771,14 +4777,15 @@ function badge(b, size){
       <clipPath id="${id}c"><polygon points="${hex(52)}"/></clipPath>
       ${leg ? `<linearGradient id="${id}holo" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7ad9" stop-opacity=".0"/><stop offset=".3" stop-color="#ff7ad9" stop-opacity=".25"/><stop offset=".5" stop-color="#7afcff" stop-opacity=".3"/><stop offset=".7" stop-color="#fff07a" stop-opacity=".25"/><stop offset="1" stop-color="#fff07a" stop-opacity="0"/></linearGradient>` : ''}
     </defs>
-    ${leg ? `<polygon points="${hex(66)}" fill="${c1}" opacity=".22"/>` : ''}
+    ${leg ? `<polygon ${myth ? 'class="spb-glow"' : ''} points="${hex(66)}" fill="${c1}" opacity=".22"/>` : ''}
     ${myth ? `<polygon class="spb-myth" points="${hex(69)}" fill="none" stroke="url(#${id}r)" stroke-width="2.5" stroke-dasharray="10 8" stroke-linejoin="round"/>` : ''}
     <polygon points="${hex(62)}" fill="url(#${id}r)" ${sec ? 'stroke="#ff6f91" stroke-width="1.5" stroke-dasharray="4 4"' : ''}/>
     <polygon points="${hex(56)}" fill="#120e19"/>
     <polygon points="${hex(52)}" fill="url(#${id}bg)" stroke="${c1}" stroke-opacity=".55" stroke-width="1.5"/>
     <g clip-path="url(#${id}c)">
       ${leg ? `<g class="spb-holo" style="transform-origin:70px 66px"><rect x="0" y="0" width="140" height="140" fill="url(#${id}holo)"/></g>` : ''}
-      <g transform="translate(32 28) scale(1.27)"><g ${sec ? 'class="spb-glitch"' : ''}>${I[b.icon](ink)}</g></g>
+      <g transform="translate(32 28) scale(1.27)"><g ${sec ? 'class="spb-glitch"' : myth ? 'class="spb-flick"' : ''}>${I[b.icon](ink)}</g></g>
+      ${myth ? [[52, 0], [70, .9], [88, 1.7], [61, 2.2], [80, .4]].map(([x, d]) => `<circle class="spb-ember" style="animation-delay:${d}s" cx="${x}" cy="104" r="${x % 2 ? 1.6 : 2.2}" fill="${c0}"/>`).join('') : ''}
       ${leg || b.rar === 'epic' ? `<rect class="spb-shine" x="40" y="0" width="30" height="140" fill="url(#${id}sh)" opacity="${leg ? .9 : .5}"/>` : ''}
     </g>
     ${leg ? `<path class="spb-spark" style="animation-delay:.3s" d="M118 18l2 6 6 2-6 2-2 6-2-6-6-2 6-2z" fill="#fff8dc"/><path class="spb-spark" style="animation-delay:1.3s" d="M22 104l1.6 4.4 4.4 1.6-4.4 1.6-1.6 4.4-1.6-4.4-4.4-1.6 4.4-1.6z" fill="#fff8dc"/>` : ''}
