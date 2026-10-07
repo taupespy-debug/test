@@ -4331,7 +4331,7 @@ function showName(key, row){
 }
 function earnedBadges(){
   const out = [];
-  if (LB.me && LB.me.dev) out.push('dev');
+  { const me = LB.me || lbStore().meCache; if (me && me.dev) out.push('dev'); }
   const now = new Date(), cur = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
   out.push(cur + ':now');
   badgeHistory().forEach(b => out.push(b.y + '-' + String(b.m + 1).padStart(2, '0') + ':' + b.t));
@@ -4697,20 +4697,34 @@ function spbStatus(){
   const ps = (store.profSaved || []).filter(Boolean).length;
   out.master = { got: ps >= 4, prog: ps + ' / 4 profiles saved' };
   // ranked: from your finished months plus this one
-  const seq = badgeHistory().slice().reverse().map(b => b.t).concat([rbTierIdx(rankFor(ss).tier.n)]);
+  const now = new Date(), seq = badgeHistory().slice().reverse().map(b => ({ k: b.y * 12 + b.m, t: b.t }));
+  let curT = 0; try { curT = rbTierIdx(myRank().tier.n); } catch(e){ curT = rbTierIdx(rankFor(ss).tier.n); }
+  seq.push({ k: now.getFullYear() * 12 + now.getMonth(), t: curT });
   let cb = false, b2b = false;
-  for (let i = 1; i < seq.length; i++){ if (seq[i - 1] === 0 && seq[i] >= 2) cb = true; if (seq[i - 1] === 4 && seq[i] === 4) b2b = true; }
-  const aw = (LB.me && LB.me.awards) || [];
+  for (let i = 1; i < seq.length; i++){
+    if (seq[i].k !== seq[i - 1].k + 1) continue; // only months right after each other count
+    if (seq[i - 1].t === 0 && seq[i].t >= 2) cb = true;
+    if (seq[i - 1].t === 4 && seq[i].t === 4) b2b = true;
+  }
+  const me = LB.me || lbStore().meCache, aw = (me && me.awards) || []; // meCache: awards and Founder show before the leaderboard loads
   out.podium = { got: aw.includes('podium') };
   out.comeback = { got: cb };
   out.b2b = { got: b2b };
-  const made = LB.me && LB.me.created_at ? new Date(LB.me.created_at) : null;
+  const made = me && me.created_at ? new Date(me.created_at) : null;
   out.founder = { got: !!(made && made < new Date('2026-11-01T00:00:00')), prog: made ? '' : 'Make your profile in October 2026 to claim it' };
   out['420'] = { got: ss.some(x => { const d = new Date(x.t); return d.getMonth() === 3 && d.getDate() === 20; }) };
   out.discord = { got: aw.includes('discord') };
   out.bughunter = { got: aw.includes('bughunter') };
   out.secret = { got: ss.some(x => { const d = new Date(x.t); return (d.getHours() % 12) === 4 && d.getMinutes() === 20; }) };
   aw.forEach(id => { out[id] = Object.assign({}, out[id], { got: true }); }); // badges given by hand in Supabase (players.awards) always count
+  // once earned, a badge stays earned (deleting a zone, trimming old sessions or a slow leaderboard load can't take it back)
+  if (!demo){
+    const key = acctId() || 'local', all = store.spbKeep = store.spbKeep || {}, keep = all[key] = all[key] || {};
+    let changed = false;
+    SPB_ALL.forEach(b => { if (out[b.id] && out[b.id].got && !keep[b.id]){ keep[b.id] = Date.now(); changed = true; } });
+    Object.keys(keep).forEach(id => { out[id] = Object.assign({}, out[id], { got: true }); });
+    if (changed) save();
+  }
   return out;
 }
 function drawBadgeBook(){
