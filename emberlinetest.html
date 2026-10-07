@@ -2763,8 +2763,11 @@ const GOLD_GOAL = 100, IS_TEST = !!window.EMBER_TEST;
 // blinkers = single hits of 8s or longer, all time (same count as the Stats tile)
 function blinkerCount(){
   const ss = (store.sessions || []), live = (typeof cur !== 'undefined' && cur && HIT.hits) ? HIT.hits : [];
-  return ss.reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0) + live.filter(h => h >= 8).length + (IS_TEST ? (store.blinkerBonus || 0) : 0);
+  const here = ss.reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0) + live.filter(h => h >= 8).length;
+  return Math.max(here, serverBlinkers()) + (IS_TEST ? (store.blinkerBonus || 0) : 0); // a new phone or tablet starts with the account's count, not 0
 }
+// all-time blinkers your account reached on any device (sent with your profile stats)
+function serverBlinkers(){ try { const me = LB.me || lbStore().meCache, v = me && me.stats && +me.stats.blAll; return v > 0 ? v : 0; } catch(e){ return 0; } }
 /* blinker: one hit that reaches the long-hit length (8s by default). Fired from bigHit(). */
 let blinkAt = 0;
 function blinker(secs){
@@ -4315,7 +4318,7 @@ function myStats(){
   const d = new Date(), m0 = new Date(d.getFullYear(), d.getMonth(), 1).getTime(), all = rankSessions();
   const ss = all.filter(s => s.t >= m0 && !(typeof s.run === 'number' && s.run < 20)), hits = ss.flatMap(s => s.hits || []);
   return { sessions: ss.length, hits: hits.length, best: hits.length ? Math.round(Math.max(...hits) * 10) / 10 : 0,
-    days: new Set(ss.map(s => new Date(s.t).toDateString())).size, blAll: all.reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0) };
+    days: new Set(ss.map(s => new Date(s.t).toDateString())).size, blAll: Math.max(all.reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0), serverBlinkers()) }; // never lower than another device already sent
 }
 function lbPayload(){
   // test build: never change RP on the leaderboard, only send what the server already has
