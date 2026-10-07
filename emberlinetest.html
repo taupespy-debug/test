@@ -123,6 +123,7 @@ h1,h2,h3{font-family:var(--f-display);margin:0;text-wrap:balance}
 .label{font-size:13px;letter-spacing:.02em;text-transform:uppercase;color:var(--muted);font-weight:500}
 
 /* ambient color field that the glass refracts */
+:root.has-wall .ambient{inset:0;background:var(--wall) center/cover no-repeat!important;animation:none!important;transform:none!important;filter:none!important;opacity:1!important}
 .ambient{position:fixed;inset:-20%;z-index:-1;pointer-events:none;
   background:
     radial-gradient(40% 32% at 18% 12%, color-mix(in srgb,var(--accent) 55%,transparent), transparent 70%),
@@ -1740,6 +1741,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
       <div class="row between"><span>Clean reminder every</span><span class="row" style="gap:6px"><input class="num" type="number" id="cleanEvery" min="10" max="1000" step="10"><span class="muted">dabs</span></span></div>
       <div class="row between"><span>Dabs since last clean</span><span class="row" style="gap:6px"><input class="num" type="number" id="sinceEdit" min="0" max="5000"><button class="btn small" id="sinceSave">Set</button></span></div>
     </div>
+    <div class="card" id="richWall" hidden style="display:grid;gap:10px"></div>
     <div class="card" id="testTools" hidden style="display:grid;gap:10px"></div>
     <div class="card cel-dev" id="celDev" hidden></div>
     <div class="card" id="acctCard" style="display:grid;gap:12px"></div>
@@ -2463,6 +2465,44 @@ function armFullscreen(){
 }
 // rich only: tap Settings 3 times fast to go in or out of full screen (by player id, so a rename doesn't break it)
 const RICH_ID = 'a1ca5a326c89dd177960d792e64d0e82';
+// rich only: a wallpaper behind the glass (the Lines one, or any photo from his phone, kept on that phone)
+const WALL_LINES = 'bg/rich-wallpaper.jpg';
+function isRich(){ if (IS_TEST && store.testRich) return true; const me = LB.me || lbStore().meCache; return !!(me && me.id === RICH_ID); }
+function wallPhoto(){ try { return localStorage.getItem('emberWall') || ''; } catch(e){ return ''; } }
+function applyWall(){
+  const k = isRich() ? store.wall : '', src = k === 'lines' ? WALL_LINES : k === 'photo' ? wallPhoto() : '';
+  if (applyWall.src === src) return; applyWall.src = src;
+  const r = document.documentElement; r.classList.toggle('has-wall', !!src);
+  if (src) r.style.setProperty('--wall', `url("${src}")`); else r.style.removeProperty('--wall');
+}
+function drawRichWall(){
+  const el = $('#richWall'); if (!el) return;
+  if (!isRich()){ el.hidden = true; return; }
+  el.hidden = false; const k = store.wall || '', has = !!wallPhoto();
+  el.innerHTML = `<span class="label">Wallpaper · only you have this</span>
+    <div class="seg" id="wallSeg"><button data-wall="" aria-pressed="${!k}">Off</button><button data-wall="lines" aria-pressed="${k === 'lines'}">Lines</button><button data-wall="photo" aria-pressed="${k === 'photo'}">${has ? 'My photo' : 'Choose photo'}</button></div>
+    ${has ? '<button class="btn small" id="wallNew">Pick a different photo</button>' : ''}<input type="file" id="wallFile" accept="image/*" hidden>`;
+}
+function wallPick(){ const i = $('#wallFile'); if (i){ i.value = ''; i.click(); } }
+document.addEventListener('click', e => {
+  if (!e.target.closest('#richWall')) return;
+  if (e.target.id === 'wallNew'){ wallPick(); return; }
+  const b = e.target.closest('[data-wall]'); if (!b) return; const k = b.dataset.wall;
+  if (k === 'photo' && !wallPhoto()){ wallPick(); return; }
+  store.wall = k; save(); applyWall(); drawRichWall();
+});
+document.addEventListener('change', e => {
+  if (e.target.id !== 'wallFile') return; const f = e.target.files && e.target.files[0]; if (!f) return;
+  const img = new Image(), url = URL.createObjectURL(f);
+  img.onload = () => { // shrink it so it fits in the phone's storage
+    const k = Math.min(1, 1400 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+    try { localStorage.setItem('emberWall', c.toDataURL('image/jpeg', .82)); } catch(err){ toast('That picture is too big to save. Try another one.'); return; }
+    store.wall = 'photo'; save(); applyWall.src = null; applyWall(); drawRichWall(); toast('Wallpaper set');
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); toast('That picture couldn’t be opened.'); };
+  img.src = url;
+});
 function fsToggle(){ store.fullscreen = !wantFullscreen(); save(); if (store.fullscreen) FS.enter(); else FS.exit(); toast(store.fullscreen ? 'Full screen on' : 'Full screen off'); if (view === 'set') drawSettings(); }
 { let taps = 0, last = 0;
   document.addEventListener('click', e => {
@@ -3741,7 +3781,7 @@ function applyHaptics(){
     if (sw.disabled !== !!el.disabled) sw.disabled = !!el.disabled;
   });
 }
-function render(){ if (raf) return; raf = requestAnimationFrame(() => { raf = 0; draw(); applyHaptics(); }); }
+function render(){ if (raf) return; raf = requestAnimationFrame(() => { raf = 0; draw(); applyHaptics(); applyWall(); }); }
 
 function fmtDur(sec){ const m = Math.max(1, Math.round(sec / 60)); return m < 60 ? m + ' min' : Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm'; }
 const BOLT = '<svg class="bolt" viewBox="0 0 12 16" aria-hidden="true"><path d="M7 0 0 9h4.5L4 16l8-10H7.5z"/></svg>';
@@ -5404,7 +5444,7 @@ function show(v){
   if (v === 'prof'){ drawProfiles(); drawAccountProfiles(); drawLightsState(); }
   if (v !== 'lights' && phIdx(moodTarget) >= 0) moodTarget = null; // preheat pick only lasts while on Lights
   if (v === 'lights'){ drawLights(); drawMoods(); ltEnter(); }
-  if (v === 'set'){ drawSettings(); drawDevice(); drawAccount(); wireAcctForm('ac'); drawTestTools(); }
+  if (v === 'set'){ drawRichWall(); drawSettings(); drawDevice(); drawAccount(); wireAcctForm('ac'); drawTestTools(); }
   if (v === 'shop'){ closeShopForm(); drawShops(); }
   if (v === 'stats'){ drawStats.sig = null; autoSync(); lbStart(); drawBadgeBook(); setTimeout(() => rankTaxNotice(), 900); }
   if (v === 'social'){ lbStart(); socLoad(); }
@@ -6949,7 +6989,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -7140,6 +7180,7 @@ $('#testTools').addEventListener('click', e => {
   if (k === 'pstats'){ openPlayer({ id:'test-player', username:'TestPlayer', tier:'Blaze', rp:212, blinkers:37, created_at:'2026-10-05T23:08:00Z', stats:{ sessions:41, hits:96, best:12.4, days:6, blAll:37 } }); setTimeout(() => { const n = document.querySelector('#lbProfile [data-pstats]'); if (n) n.click(); }, 300); return; } // a made-up profile with stats open
   if (k === 'champbl'){ const t0 = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 9).getTime(), one = blk => rankFor([{ t: t0, run: 30, sc: 1, hits: [9, 11.5], blk }], t0).blinkers;
     toast(`Hits 9s + 11.5s: ${one()} blinkers normally, ${one(CHAMP_BLINK)} in Champion`); return; }
+  if (k === 'asrich'){ store.testRich = !store.testRich; save(); applyWall(); drawRichWall(); drawTestTools(); toast(store.testRich ? 'Acting as rich: wallpaper is in Settings' : 'Back to you'); return; }
   if (k === 'fstoggle'){ fsToggle(); return; } // what rich's triple tap on Settings does
   if (k === 'lbmoves'){ const rows = LB.rows || []; if (!rows.length){ toast('Open Social first so the leaderboard loads'); return; } const st = store.lbPos, base = {}; rows.forEach((r, i) => { base[r.id] = Math.max(1, i + 1 + [2, -1, 0, 3, -2][i % 5]); }); st.base = base; save(); show('social'); setTimeout(drawLeaderboard, 300); toast('Fake moves on (real ones come back next visit)'); return; } // only changes the arrows, not RP
   if (k === 'patherr'){ show('home'); setConnUI('error', bleError(new TypeError("undefined is not an object (evaluating 'window.webkit.messageHandlers.bluetooth.postMessage')"), 'request')); return; }
