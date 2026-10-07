@@ -946,7 +946,9 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:non
 @keyframes spbGlitch{0%,92%,100%{transform:none}93%{transform:translate(2px,-1px)}95%{transform:translate(-2px,1px)}97%{transform:translate(1px,2px)}}
 .spb-holo{animation:spbHolo 6s linear infinite}
 @keyframes spbHolo{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.spb-shine,.spb-spark,.spb-glitch,.spb-holo{animation:none}}
+.spb-myth{animation:spbMyth 4s linear infinite}
+@keyframes spbMyth{to{stroke-dashoffset:-72}}
+@media (prefers-reduced-motion:reduce){.spb-shine,.spb-spark,.spb-glitch,.spb-holo,.spb-myth,.bv-rar.r-mythic{animation:none}}
 /* app feel: no blue text selection or long-press copy menu (text boxes still work normally) */
 html,body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 input,textarea,select,[contenteditable="true"]{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default}
@@ -968,6 +970,8 @@ img,svg{-webkit-user-drag:none;-webkit-touch-callout:none}
 .bv-rar.r-epic{color:#c77dff}
 .bv-rar.r-legendary{color:#ffcf4a;text-shadow:0 0 10px rgba(255,207,74,.6)}
 .bv-rar.r-mystery{color:#ff6f91}
+.bv-rar.r-mythic{color:#ff5a3c;text-shadow:0 0 12px rgba(255,90,60,.85);animation:mythPulse 2.4s ease-in-out infinite}
+@keyframes mythPulse{50%{color:#ffb03c;text-shadow:0 0 16px rgba(255,150,40,.95)}}
 .bv-cat{font-size:14px;color:#cfc6de}
 /* ===== celebrations ===== */
 .cel{position:fixed;inset:0;z-index:70;display:grid;place-items:center;overflow:hidden;background:rgba(6,4,10,0);transition:background .45s ease;--cc:#ff9f0a;cursor:pointer}
@@ -3325,7 +3329,7 @@ function logSession(s){
   lbPush(true);
   rankLockCheck(rankBefore);
   if (rankBefore) afterSessionLogged(s, rankBefore);
-  { const hh = hotHeadTry(s); if (hh) setTimeout(() => toast(hh.ok ? 'Hot Head done! Legendary badge unlocked' : `Hot Head: ${Math.min(hh.bl, 5)} / 5 blinkers${hh.bl >= 5 ? ', the last one was too early' : ''}`), 3200); }
+  { const hh = hotHeadTry(s); if (hh) setTimeout(() => toast(hh.ok ? 'Hot Head done! Mythic badge unlocked' : `Hot Head: ${Math.min(hh.bl, 5)} / 5 blinkers${hh.bl >= 5 ? ', the last one was too early' : ''}`), 3200); }
 }
 
 function rankLock(){ if (IS_TEST && store.testRankLock > Date.now()) return store.testRankLock; try { const sv = LB.me && LB.me.locked_until ? Date.parse(LB.me.locked_until) : 0, u = Math.max(rankFor(rankSessions()).lockedUntil, sv || 0); return u > Date.now() ? u : 0; } catch(e){ return 0; } } // the server can lock you too // testRankLock: fake lock from the test tools
@@ -4728,7 +4732,7 @@ const CATS = [
   { n:'Skill', c:'#ff6a3d', badges:[
     { id:'ironlungs', name:'Iron Lungs', req:'Take a single hit of 12 seconds or longer.', icon:'lungs', col:['#ffc2a8','#ff6a3d','#8a2410'], rar:'epic' },
     { id:'triple', name:'Triple Threat', req:'Hit 3 blinkers in one session.', icon:'threeFlames', col:['#ffd3a0','#ff8a1f','#9a3b00'], rar:'rare' },
-    { id:'hothead', name:'Hot Head', req:'On the Hot Head profile (644°F, 120s, Extreme on a Peak or Intense on a Proxy), hit 5 blinkers in one session. The last one has to land in the final 30 seconds.', icon:'threeFlames', col:['#ffd2c2','#ff3b1f','#7a0f00'], rar:'legendary' },
+    { id:'hothead', name:'Hot Head', req:'On the Hot Head profile (644°F, 120s, Extreme on a Peak or Intense on a Proxy), hit 5 blinkers in one session. The last one has to land in the final 30 seconds.', icon:'threeFlames', col:['#ffd2c2','#ff3b1f','#7a0f00'], rar:'mythic' },
     { id:'sniper', name:'Sniper', req:'5 sessions in a row with your best hit within 5 seconds of each other.', icon:'crosshair', col:['#ffb3b3','#ff3b4e','#7a0b18'], rar:'epic' } ]},
   { n:'Habits', c:'#30d1a0', badges:[
     { id:'clean', name:'Squeaky Clean', req:'Clean your Peak on time 10 times, before the clean meter turns red.', icon:'sparkle', col:['#c8fff0','#2fd3a7','#0b6b55'], rar:'rare' },
@@ -4755,7 +4759,7 @@ const CATS = [
 // ---------- badge drawing: hexagon shield, gradient rim, icon, name ribbon ----------
 let uid = 0;
 function badge(b, size){
-  const id = 'sb' + (uid++), [c0, c1, c2] = b.col, leg = b.rar === 'legendary', sec = b.secret;
+  const id = 'sb' + (uid++), [c0, c1, c2] = b.col, myth = b.rar === 'mythic', leg = b.rar === 'legendary' || myth, sec = b.secret;
   const hex = (r, cx = 70, cy = 66) => Array.from({ length: 6 }, (_, i) => { const a = Math.PI / 180 * (60 * i - 90); return `${(cx + r * Math.cos(a)).toFixed(2)},${(cy + r * Math.sin(a)).toFixed(2)}`; }).join(' ');
   const ink = sec ? '#ff6f91' : c0;
   return `<svg viewBox="-6 -6 152 172" ${size ? `width="${size}"` : ''} role="img" aria-label="${b.name} badge">
@@ -4768,6 +4772,7 @@ function badge(b, size){
       ${leg ? `<linearGradient id="${id}holo" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7ad9" stop-opacity=".0"/><stop offset=".3" stop-color="#ff7ad9" stop-opacity=".25"/><stop offset=".5" stop-color="#7afcff" stop-opacity=".3"/><stop offset=".7" stop-color="#fff07a" stop-opacity=".25"/><stop offset="1" stop-color="#fff07a" stop-opacity="0"/></linearGradient>` : ''}
     </defs>
     ${leg ? `<polygon points="${hex(66)}" fill="${c1}" opacity=".22"/>` : ''}
+    ${myth ? `<polygon class="spb-myth" points="${hex(69)}" fill="none" stroke="url(#${id}r)" stroke-width="2.5" stroke-dasharray="10 8" stroke-linejoin="round"/>` : ''}
     <polygon points="${hex(62)}" fill="url(#${id}r)" ${sec ? 'stroke="#ff6f91" stroke-width="1.5" stroke-dasharray="4 4"' : ''}/>
     <polygon points="${hex(56)}" fill="#120e19"/>
     <polygon points="${hex(52)}" fill="url(#${id}bg)" stroke="${c1}" stroke-opacity=".55" stroke-width="1.5"/>
@@ -4895,7 +4900,7 @@ function hotHeadSheet(){
   const b = spbById('hothead'), st = spbStatus().hothead || {}, loaded = !!hhBack(), unit = v => store.unit === 'C' ? Math.round((v - 32) * 5 / 9) + '°C' : v + '°F';
   const el = document.createElement('div'); el.className = 'egg hh';
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Hot Head challenge" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
-    <div style="display:grid;justify-items:center;gap:6px"><div style="width:120px">${SPB.badge(b)}</div><span class="bv-rar r-legendary">Legendary</span><span class="label">Challenge · ${st.got ? 'Unlocked' : 'Locked'}</span><h2 style="margin:0">Hot Head</h2></div>
+    <div style="display:grid;justify-items:center;gap:6px"><div style="width:120px">${SPB.badge(b)}</div><span class="bv-rar r-mythic">Mythic</span><span class="label">Challenge · ${st.got ? 'Unlocked' : 'Locked'}</span><h2 style="margin:0">Hot Head</h2></div>
     <p style="margin:0">Hit <b>5 blinkers</b> in one session on the Hot Head profile. The last one has to land in the <b>final 30 seconds</b>.</p>
     <div style="display:flex;flex-wrap:wrap;gap:6px">${[unit(HOTHEAD.tempF), HOTHEAD.time + 's', isProxy() ? 'Intense' : 'Extreme', 'Boost +' + (store.unit === 'C' ? '1°C' : '1°F') + ' · +60s', 'Hologram light'].map(t => `<span class="chip" style="padding:4px 10px;border-radius:99px;background:var(--fill-2);font-size:13px">${t}</span>`).join('')}</div>
     ${st.prog ? `<p class="muted" style="margin:0;font-size:14px">${esc(st.prog)}</p>` : ''}
@@ -4921,7 +4926,7 @@ function drawBadgeBook(){
   if (fresh.length || first) save();
   if (fresh.length) setTimeout(() => toast(fresh.length === 1 ? `Badge unlocked: ${fresh[0].name}` : `${fresh.length} new badges unlocked`), 400);
   const got = SPB_ALL.filter(b => st[b.id] && st[b.id].got);
-  const RAR = { mystery:5, legendary:4, epic:3, rare:2, common:1 }, sec = id => Math.floor((store.spbUnlocked[id] || 0) / 1000);
+  const RAR = { mythic:6, mystery:5, legendary:4, epic:3, rare:2, common:1 }, sec = id => Math.floor((store.spbUnlocked[id] || 0) / 1000);
   const recent = got.slice().sort((a, b) => (sec(b.id) - sec(a.id)) || (RAR[b.rar] - RAR[a.rar])).slice(0, 3); // newest first; same moment: rarest first
   const item = (b, big) => { const ok = st[b.id] && st[b.id].got;
     return `<button class="bb-item ${ok ? 'got' : 'locked'}${big ? ' big' : ''}" data-bv="sp:${b.id}"><span class="bb-art">${SPB.badge(b)}${ok ? '' : '<span class="bb-lock"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span>'}</span><span class="bb-name">${b.secret && !ok ? '???' : b.name}</span></button>`; };
