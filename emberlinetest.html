@@ -2220,6 +2220,9 @@ class Lorax {
     const r = await this.read(path, size);
     if (r.length < 4){ const dv0 = new DataView(r.buffer, r.byteOffset, r.length); const v = r.length >= 2 ? dv0.getUint16(0, true) : r.length ? r[0] : 0; this.ints[path] = { scale: 1 }; return v; }
     const dv = new DataView(r.buffer, r.byteOffset, r.length), f = dv.getFloat32(0, true), bits = dv.getUint32(0, true);
+    // NaN is the device saying "no reading" (a Peak with no chamber seated). It is not a Proxy whole number: read as one
+    // it showed 385792114°F. A Peak never stores whole numbers, and on a Proxy the plain NaN pattern can't be a real value
+    if (isNaN(f) && (!isProxy() || (bits & 0x7fffffff) === 0x7fc00000)) return NaN;
     if (bits !== 0 && (!isFinite(f) || Math.abs(f) < 1e-20)){
       const v = dv.getInt32(0, true), scale = this.intScale(path);
       this.ints[path] = { scale }; return v === -2147483648 ? 0 : v / scale; // that value means "not set"
@@ -3212,7 +3215,7 @@ async function poll(){
       const linkDown = !(ble.dev && ble.dev.gatt && ble.dev.gatt.connected);
       if ((linkDown && failStreak >= 2) || failStreak >= 8){ failStreak = 0; forceReconnect(); return; }
     }
-    try { S.tempC = await ble.f32('/p/app/htr/temp'); } catch(e){ try { S.tempC = await ble.f32('/p/htr/temp'); } catch(e2){} }
+    try { const t = await ble.f32('/p/app/htr/temp'); if (isFinite(t)) S.tempC = t; } catch(e){ try { const t = await ble.f32('/p/htr/temp'); if (isFinite(t)) S.tempC = t; } catch(e2){} } // no reading (no chamber): keep the last temp
     // while Ready, keep the Bluetooth line clear for the inhale sensor: read the timer every other tick and skip the rest
     const hitting = S.state === 8 && HIT.loop, odd = (slowTick & 1) === 1;
     if (S.state !== prev){ S.elapsed = 0; S.elapsedAt = performance.now(); S.totalFor = -1; if (S.state === 8) S.total = (S.profiles[S.active] || {}).time || S.total; } // new phase: don't show the last phase's timer
