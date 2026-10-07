@@ -4378,7 +4378,7 @@ async function lbPush(force){
 }
 async function lbLoad(){
   try {
-    LB.rows = await sbRows(`/rest/v1/players?select=*&month=eq.${lbMonth()}&order=rp.desc,updated_at.asc&limit=100`);
+    LB.rows = await sbRows(`/rest/v1/players?select=*&month=eq.${lbMonth()}&banned=not.is.true&order=rp.desc,updated_at.asc&limit=100`); // banned players don't show
     lbMarkSeen(LB.rows);
     LB.err = '';
   } catch(e){ LB.err = 'Couldn’t load the leaderboard. Check your connection.'; }
