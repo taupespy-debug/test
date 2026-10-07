@@ -929,6 +929,7 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:non
 .bb-art{position:relative;width:100%;max-width:72px;display:block}
 .bb-art svg{width:100%;height:auto;display:block;overflow:visible}
 .bb-item.locked .bb-art svg{filter:grayscale(1) brightness(.55);opacity:.55}
+.bb-item.locked .bb-art svg *{animation:none!important} /* greyed out: no shine, no repaint work */
 .bb-lock{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.6);display:grid;place-items:center}
 .bb-lock svg{width:13px;height:13px;fill:none;stroke:#fff;stroke-width:2.2;stroke-linecap:round;filter:none!important;opacity:1!important}
 .bb-name{font:600 10.5px var(--f-round);color:var(--muted);text-align:center;line-height:1.2;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -946,12 +947,15 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:non
 @keyframes spbGlitch{0%,92%,100%{transform:none}93%{transform:translate(2px,-1px)}95%{transform:translate(-2px,1px)}97%{transform:translate(1px,2px)}}
 .spb-holo{animation:spbHolo 6s linear infinite}
 @keyframes spbHolo{to{transform:rotate(360deg)}}
-.spb-myth{animation:spbMyth 4s linear infinite}
-.spb-flick{animation:spbFlick 1.4s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
+/* Mythic effects only run in the big badge view and the Hot Head pop-up. In grids and lists (many badges, some greyed out)
+   iPhone Safari stopped repainting the page right and the tab bar slid up the screen */
+.spb-ember{opacity:0}
+:is(.bv,.egg.hh) .spb-myth{animation:spbMyth 4s linear infinite}
+:is(.bv,.egg.hh) .spb-flick{animation:spbFlick 1.4s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
 @keyframes spbFlick{0%,100%{transform:none}25%{transform:scale(1.05,.95)}50%{transform:scale(.96,1.07) skewX(-3deg)}75%{transform:scale(1.03,.98) skewX(3deg)}}
-.spb-ember{animation:spbEmber 2.6s ease-out infinite;opacity:0}
+:is(.bv,.egg.hh) .spb-ember{animation:spbEmber 2.6s ease-out infinite}
 @keyframes spbEmber{0%{transform:translateY(0);opacity:0}15%{opacity:1}100%{transform:translateY(-58px);opacity:0}}
-.spb-glow{animation:spbGlow 2.2s ease-in-out infinite}
+:is(.bv,.egg.hh) .spb-glow{animation:spbGlow 2.2s ease-in-out infinite}
 @keyframes spbGlow{0%,100%{opacity:.22}50%{opacity:.6}}
 @keyframes spbMyth{to{stroke-dashoffset:-72}}
 @media (prefers-reduced-motion:reduce){.spb-shine,.spb-spark,.spb-glitch,.spb-holo,.spb-myth,.spb-flick,.spb-ember,.spb-glow,.bv-rar.r-mythic{animation:none}}
