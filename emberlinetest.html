@@ -2541,6 +2541,15 @@ async function startConnect(pickNew, auto){
   if (C.state === 'connecting' || S.mode === 'live') return;
   if (!('bluetooth' in navigator)){ setConnUI('unsupported'); return; }
   manualDisconnect = false; reconnectRun++;
+  // Connect / Retry: first try the last device the same way picking it from the device menu does (a fresh ask by id).
+  // Re-using the old device handle could hang and fail, so you had to pick it from the menu at the top instead
+  if (auto && !pickNew) ble.dev = null; // automatic tries already ran connectLast: just ask for the device fresh by name and id
+  if (!pickNew && !auto && store.lastDeviceName && (ble.dev || IS_PATH)){
+    setConnUI('connecting', { label:'Connecting to ' + store.lastDeviceName + '…' });
+    if (await connectLast({ scan: 4000 })) return;
+    if (S.mode === 'live' || manualDisconnect) return;
+    ble.dev = null; // drop the stale handle so the next step asks for the device fresh
+  }
   setConnUI('connecting', { label:'Choose your Peak' });
   let stage = 'request';
   try {
