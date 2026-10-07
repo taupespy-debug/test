@@ -1067,6 +1067,9 @@ img,svg{-webkit-user-drag:none;-webkit-touch-callout:none}
 .lbp-head{display:grid;justify-items:center;gap:6px;text-align:center}
 .lbp-head .lb-av{box-shadow:0 0 0 3px var(--accent),0 10px 30px rgba(0,0,0,.4);font-size:36px}
 .lbp-head b{font-size:24px;display:flex;align-items:center;gap:6px}
+.lbp-name{cursor:pointer}.lbp-chev{width:18px;height:18px;fill:none;stroke:var(--muted);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;transition:transform .25s}.lbp-name.open .lbp-chev{transform:rotate(180deg)}
+.lbp-stats{display:grid;gap:8px;padding:12px;border-radius:16px;background:var(--fill-2,rgba(255,255,255,.06))}.lbp-stats[hidden]{display:none}
+.lbp-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 4px;text-align:center}.lbp-grid b{display:block;font-size:17px;font-variant-numeric:tabular-nums}.lbp-grid span{font-size:11px;color:var(--muted)}
 .lbp-shelf{display:flex;gap:14px;justify-content:center}
 .lbp-shelf div{display:grid;justify-items:center;gap:2px;font:600 11px var(--f-round);color:var(--muted);text-align:center;width:84px}
 .lbp-shelf svg{width:74px;height:auto;overflow:visible}
@@ -4307,13 +4310,20 @@ function gearHtml(list, empty){
     return `<span class="gear-chip ed${st.light ? ' light' : ''}" style="--e1:${st.c[0]};--e2:${st.c[1]}">${ic(k)}${esc(name(k))}${LIMITED_ED.includes(ed(k)) ? '<small>Limited</small>' : ''}</span>`; };
   return `<div class="gear"><span class="label">Gear</span><div class="gear-list">${list.map(chip).join('')}</div></div>`;
 }
+// your stats for your profile: this month's counted sessions, hits, best hit, days you dabbed, and all-time blinkers
+function myStats(){
+  const d = new Date(), m0 = new Date(d.getFullYear(), d.getMonth(), 1).getTime(), all = rankSessions();
+  const ss = all.filter(s => s.t >= m0 && !(typeof s.run === 'number' && s.run < 20)), hits = ss.flatMap(s => s.hits || []);
+  return { sessions: ss.length, hits: hits.length, best: hits.length ? Math.round(Math.max(...hits) * 10) / 10 : 0,
+    days: new Set(ss.map(s => new Date(s.t).toDateString())).size, blAll: all.reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0) };
+}
 function lbPayload(){
   // test build: never change RP on the leaderboard, only send what the server already has
   { const m = lbMonth(), me = LB.me || lbStore().meCache; if (!me) return { gear: myGear(), month: m }; const same = me.month === m;
     return { rp: same ? me.rp || 0 : 0, tier: same ? me.tier : 'Ember', blinkers: same ? me.blinkers || 0 : 0, month: m, gear: myGear() }; }
   const r = myRank(), m = lbMonth(), me = LB.me && LB.me.month === m ? LB.me : null;
   const rp = r.rp, bl = Math.max(r.blinkers, me ? me.blinkers || 0 : 0);
-  return { rp, base: me ? me.rp || 0 : undefined, tier: rp > r.rp && me ? me.tier : r.tier.n, blinkers: bl, month: m, gear: myGear() }; // base: the leaderboard RP this built on, so the server lets the rank tax lower it
+  return { stats: myStats(), rp, base: me ? me.rp || 0 : undefined, tier: rp > r.rp && me ? me.tier : r.tier.n, blinkers: bl, month: m, gear: myGear() }; // base: the leaderboard RP this built on, so the server lets the rank tax lower it
 }
 async function lbPush(force){
   const L = lbStore(); if (!L.joined || !lbUsesPuffco()) return;
@@ -4384,8 +4394,9 @@ function openPlayer(r){
   let el = $('#lbProfile'); if (!el){ el = document.createElement('div'); el.id = 'lbProfile'; el.className = 'welcome'; document.body.appendChild(el); }
   const sc = r.showcase || [], meId = LB.me && LB.me.id, isMe = r.id === meId;
   el.innerHTML = `<div class="wl-card lbp"><div class="row between"><span class="label">Profile</span><button class="btn small ghost" id="lbpClose">Close</button></div>
-    <div class="lbp-head">${lbAvatar(r.avatar_url, r.username, 96)}<b>${esc(r.username)}${r.dev ? devBadge(26) : ''}</b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
+    <div class="lbp-head">${lbAvatar(r.avatar_url, r.username, 96)}<b class="lbp-name" data-pstats role="button" tabindex="0">${esc(r.username)}${r.dev ? devBadge(26) : ''}<svg class="lbp-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
       <div class="soc-counts"><span><b data-cnt="followers">–</b> followers</span><span><b data-cnt="following">–</b> following</span></div></div>
+    <div class="lbp-stats" id="lbpStats" hidden></div>
     ${r.bio ? `<p class="soc-bio">${esc(r.bio)}</p>` : ''}
     <div id="lbpGear">${gearHtml(isMe ? myGear() : r.gear, true)}</div>
     ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, r)}">${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}
@@ -4396,9 +4407,11 @@ function openPlayer(r){
   fillCounts();
   // grab their latest row so gear shows even if the list we opened from is old
   if (!isMe && r.id) sbRows(`/rest/v1/players?select=${SOC_COLS}&id=eq.${r.id}`).then(rows => { const f = rows && rows[0]; if (!f || el.hidden) return;
+    if (f.stats) r.stats = f.stats; if (f.blinkers != null) r.blinkers = f.blinkers; const ps = el.querySelector('#lbpStats'); if (ps && !ps.hidden) ps.innerHTML = playerStatsHtml(r, isMe);
     if (Array.isArray(f.gear)){ r.gear = f.gear; const g = el.querySelector('#lbpGear'); if (g) g.innerHTML = gearHtml(f.gear, true); edCard(el.querySelector('.wl-card'), f.gear); } }).catch(() => {});
   el.onclick = async e => {
     if (e.target === el || e.target.id === 'lbpClose'){ el.hidden = true; return; }
+    if (e.target.closest('[data-pstats]')){ const ps = el.querySelector('#lbpStats'), nm = el.querySelector('.lbp-name'); ps.hidden = !ps.hidden; nm.classList.toggle('open', !ps.hidden); if (!ps.hidden) ps.innerHTML = playerStatsHtml(r, isMe); return; }
     const f = e.target.closest('[data-follow]'); if (f){ e.stopPropagation(); const was = SOC.following.has(r.id);
       const n = el.querySelector('[data-cnt="followers"]'); if (n && !isNaN(+n.textContent)) n.textContent = Math.max(0, +n.textContent + (was ? -1 : 1));
       await socToggleFollow(r); }
@@ -4406,6 +4419,16 @@ function openPlayer(r){
 }
 
 
+// stats panel on a profile (tap the name). Other players' numbers come from their app, so older versions show dashes
+function playerStatsHtml(r, isMe){
+  const st = isMe ? myStats() : (r.stats || null), dash = '–', v = x => x == null ? dash : x;
+  const place = (LB.rows || []).findIndex(x => x.id === r.id), joined = r.created_at ? new Date(r.created_at).toLocaleDateString([], { month:'short', year:'numeric' }) : dash;
+  const tile = (n, l) => `<div><b>${n}</b><span>${l}</span></div>`;
+  return `<span class="label">This month</span>
+    <div class="lbp-grid">${tile(r.rp ?? 0, 'RP')}${tile(place >= 0 ? '#' + (place + 1) : dash, 'place')}${tile(v(r.blinkers), 'blinkers')}${tile(v(st && st.sessions), 'sessions')}
+      ${tile(v(st && st.hits), 'hits')}${tile(st && st.best ? st.best.toFixed(1) + 's' : dash, 'best hit')}${tile(v(st && st.days), 'days dabbed')}${tile(v(st && st.blAll), 'blinkers ever')}</div>
+    <p class="muted" style="margin:0;font-size:12px;text-align:center">Joined ${joined}${!isMe && !st ? ' · more stats show once they update the app' : ''}</p>`;
+}
 /* ===== badge viewer: tap a badge to see it big ===== */
 function bvKeyNow(t){ const n = new Date(); return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + ':' + t; }
 function bvResolve(k, row){ return k === 'dev' || k.startsWith('sp:') ? k : k.replace(':now', ':' + rbTierIdx(row && row.tier)); }
@@ -6922,7 +6945,7 @@ function drawTestTools(){
     <div class="shop-actions"><button class="btn small" data-tt="1">+1 blinker</button><button class="btn small" data-tt="10">+10</button><button class="btn small" data-tt="99">Set 99</button><button class="btn small" data-tt="reset">Reset</button></div>
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
+    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button></div>`;
 }
 function drawAccountStats(){
@@ -7110,6 +7133,7 @@ $('#goldSheet').addEventListener('click', e => {
 $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
   if (k === 'taxnote'){ rankTaxNotice(true); return; }
+  if (k === 'pstats'){ openPlayer({ id:'test-player', username:'TestPlayer', tier:'Blaze', rp:212, blinkers:37, created_at:'2026-10-05T23:08:00Z', stats:{ sessions:41, hits:96, best:12.4, days:6, blAll:37 } }); setTimeout(() => { const n = document.querySelector('#lbProfile [data-pstats]'); if (n) n.click(); }, 300); return; } // a made-up profile with stats open
   if (k === 'champbl'){ const t0 = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 9).getTime(), one = blk => rankFor([{ t: t0, run: 30, sc: 1, hits: [9, 11.5], blk }], t0).blinkers;
     toast(`Hits 9s + 11.5s: ${one()} blinkers normally, ${one(CHAMP_BLINK)} in Champion`); return; }
   if (k === 'fstoggle'){ fsToggle(); return; } // what rich's triple tap on Settings does
