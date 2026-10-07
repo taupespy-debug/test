@@ -3230,7 +3230,7 @@ function rankLockCheck(before){ // say it once, the moment the lock starts
   setTimeout(() => rankLockAlert(u), 800);
 }
 function rankLockAlert(u){
-  alert(`Over 1000 RP in one day. Either you're hacking or you need to take a break.\n\nYou're locked out of ranked for 24 hours. Sessions until ${new Date(u).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })} won't earn RP.`);
+  alert(`Either you're hacking or you need to take a break.\n\nYou're locked out of ranked for 24 hours. Sessions until ${new Date(u).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })} won't earn RP.`);
 }
 
 /* ================= clean tracking ================= */
@@ -4124,7 +4124,7 @@ function lastSessionHtml(){
   let rp = 0; try { if (s.t >= m0.getTime()) rp = rankFor(all).rp - rankFor(all.slice(0, -1)).rp; } catch(e){}
   const mins = Math.round((Date.now() - s.t) / 60000), when = mins < 1 ? 'just now' : mins < 60 ? mins + 'm ago' : mins < 1440 ? Math.round(mins / 60) + 'h ago' : new Date(s.t).toLocaleDateString([], { month:'short', day:'numeric' });
   const len = typeof s.run === 'number' ? s.run : s.dur || 0;
-  const lk = rankLock(), why = lk && s.t >= lk - RANK_LOCK_MS ? 'Not counted: locked out of ranked for going over 1000 RP in a day' : typeof s.run === 'number' && s.run < 20 ? 'Not counted: shorter than 20s' : s.t < m0.getTime() ? 'From last month' : '';
+  const lk = rankLock(), why = lk && s.t >= lk - RANK_LOCK_MS ? 'Not counted: locked out of ranked' : typeof s.run === 'number' && s.run < 20 ? 'Not counted: shorter than 20s' : s.t < m0.getTime() ? 'From last month' : '';
   return `<div class="last-sess"><div class="row between"><span class="label">Last session</span><span class="muted" style="font-size:12px">${esc(s.name || 'Session')} · ${when}</span></div>
     <div class="ls-grid"><div><b>${rp > 0 ? '+' + rp : rp}</b><span>RP</span></div><div><b>${hits.length}</b><span>hit${hits.length === 1 ? '' : 's'}</span></div><div><b>${best ? best.toFixed(1) + 's' : '-'}</b><span>best hit</span></div><div><b>${blinks}</b><span>blinker${blinks === 1 ? '' : 's'}</span></div><div><b>${len ? len + 's' : '-'}</b><span>length</span></div></div>
     ${why ? `<p class="muted" style="margin:0;font-size:12px">${why}</p>` : ''}</div>`;
@@ -4151,7 +4151,7 @@ function drawRankInner(){
     </div>
     ${lastSessionHtml()}
     ${dirtyNow ? `<div class="banner warn" style="padding:10px 14px;font-size:14px"><div class="grow"><b>Losing points</b>Every dab costs 1 RP until you clean.</div></div>` : ''}
-    ${lockU ? `<div class="banner warn" style="padding:10px 14px;font-size:14px"><div class="grow"><b>Locked out of ranked</b>You went over 1000 RP in one day. Sessions won't earn RP until ${new Date(lockU).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })}.</div></div>` : ''}
+    ${lockU ? `<div class="banner warn" style="padding:10px 14px;font-size:14px"><div class="grow"><b>Locked out of ranked</b>Take a break. Sessions won't earn RP until ${new Date(lockU).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })}.</div></div>` : ''}
     ${(() => { const h = badgeHistory(), dev = LB.me && LB.me.dev; if (!h.length && !dev) return '';
         return `<div class="rb-shelf-wrap"><span class="label">Your badges</span><div class="rb-shelf">${dev ? `<div class="rb-item" data-bv="dev">${devBadge(54)}<span>Developer</span></div>` : ''}${h.map(b => `<div class="rb-item" data-bv="${b.y}-${String(b.m + 1).padStart(2, '0')}:${b.t}">${rankBadge(b.m, b.t, 58, b.y)}<span>${RB_MONTHS[b.m].slice(0, 3)} · ${RB_TIERS[b.t].n}</span></div>`).join('')}</div></div>`; })()}
     <details class="rank-how"><summary>How points work</summary>
@@ -4164,7 +4164,7 @@ function drawRankInner(){
         <div><span>Rank tax <small>each 30s+ session in Blaze / Inferno / Champion</small></span><b class="neg">−3 / −5 / −8</b></div>
       </div>
       <div class="how-tiers">${RANK_TIERS.map((t, i) => `<span style="--c:${t.c}">${rankBadge(new Date().getMonth(), i)}${t.n}<small>${t.min}</small></span>`).join('')}</div>
-      <p class="how-note">Points reset on the 1st of every month. Going over 1000 RP in one day locks you out of ranked for 24 hours.</p>
+      <p class="how-note">Points reset on the 1st of every month.</p>
     </details>`;
 }
 /* ===== Leaderboard (Supabase) ===== */
