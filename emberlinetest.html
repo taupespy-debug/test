@@ -2732,21 +2732,21 @@ const HIT = { on:false, start:0, last:null, hits:[], supported:null, base:0, pea
 const HIT_DELAY = -250; // the sensor lags the real pull a little, so start the clock a touch early
 const HIT_MERGE = 700; // a dip shorter than this is the same hit
 const HIT_IDLE = .03; // typical sensor value with nobody pulling
-function hitReset(){ HIT.endAt = 0; HIT.lastStart = 0; HIT.pbase = null; HIT.diaAt = 0; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.base = HIT_IDLE; HIT.live = 0; }
+function hitReset(){ HIT.endAt = 0; HIT.lastStart = 0; HIT.pbase = null; HIT.diaAt = 0; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.ends = []; HIT.base = HIT_IDLE; HIT.live = 0; }
 function hitSample(v, now){
   // v = inhale strength (0..1). Hysteresis so a shaky draw counts as one hit.
   // learn the resting level only from quiet samples, so a pull that's already going when Ready hits still counts
   if (!HIT.on){ const b = HIT.base || HIT_IDLE; if (v < b + .05) HIT.base = Math.min(.08, b * .9 + v * .1); }
   const up = Math.max(.12, HIT.base + .1), down = Math.max(.06, HIT.base + .04);
-  if (S.state !== 8){ if (HIT.on){ HIT.on = false; const secs = (now - HIT.start) / 1000; if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); if (cur) cur.hits = HIT.hits.slice(); } } render(); return; } // not Ready: close any hit that was still open
-  if (!HIT.on && v >= up && HIT.endAt && now - HIT.endAt < HIT_MERGE && HIT.hits.length){ HIT.on = true; HIT.hits.pop(); HIT.start = HIT.lastStart; if (cur) cur.hits = HIT.hits.slice(); HIT.last = HIT.hits.length ? HIT.hits[HIT.hits.length - 1] : null; if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); } // short dip: keep counting the same hit
+  if (S.state !== 8){ if (HIT.on){ HIT.on = false; const secs = (now - HIT.start) / 1000; if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); (HIT.ends = HIT.ends || []).push(Date.now()); if (cur) cur.hits = HIT.hits.slice(); } } render(); return; } // not Ready: close any hit that was still open
+  if (!HIT.on && v >= up && HIT.endAt && now - HIT.endAt < HIT_MERGE && HIT.hits.length){ HIT.on = true; HIT.hits.pop(); if (HIT.ends) HIT.ends.pop(); HIT.start = HIT.lastStart; if (cur) cur.hits = HIT.hits.slice(); HIT.last = HIT.hits.length ? HIT.hits[HIT.hits.length - 1] : null; if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); } // short dip: keep counting the same hit
   else if (!HIT.on && v >= up){ HIT.on = true; HIT.start = now + HIT_DELAY; HIT.peak = v; HIT.party = false; buzz(15); if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
   else if (HIT.on){
     HIT.peak = Math.max(HIT.peak, v); HIT.live = Math.max(0, (now - HIT.start) / 1000);
     if (!HIT.party && store.bigHit !== false && HIT.live >= bigHitAt()){ HIT.party = true; bigHit(); }
     if (v <= Math.max(down, HIT.peak * .3)){ // ends when the pull fades, not only when it's fully gone
       HIT.on = false; HIT.endAt = now; HIT.lastStart = HIT.start; const secs = (now - HIT.start) / 1000;
-      if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); if (cur) cur.hits = HIT.hits.slice(); }
+      if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); (HIT.ends = HIT.ends || []).push(Date.now()); if (cur) cur.hits = HIT.hits.slice(); }
     }
   }
   render();
@@ -3267,7 +3267,7 @@ function trackSession(prev, st){
       const ranFor = cur.readyAt ? (Date.now() - cur.readyAt) / 1000 : 0;
       S.cyclesSinceOdo = (S.cyclesSinceOdo || 0) + 1;
       const gotHit = (cur.hits || HIT.hits || []).some(h => h >= 1);
-      if (cur.hit && (ranFor >= 20 || gotHit)){ logSession({ tax: cur.tax && ranFor >= RANK_TAX_SECS ? cur.tax : undefined, blk: cur.blk, t:cur.t, p:cur.p, name:cur.name, target:cur.target, peak:Math.round(cur.peak), dur:Math.round((Date.now()-cur.t)/1000), batt:cur.batt, hits:(cur.hits || HIT.hits).slice(0, 20), vapor:(S.profiles[cur.p] || {}).vapor, sc:sinceClean() + 1, run: cur.readyAt ? Math.round((Date.now() - cur.readyAt) / 1000) : null }); }
+      if (cur.hit && (ranFor >= 20 || gotHit)){ logSession({ hitAt: cur.readyAt ? (HIT.ends || []).slice(0, 20).map(t => Math.round((t - cur.readyAt) / 100) / 10) : undefined, tax: cur.tax && ranFor >= RANK_TAX_SECS ? cur.tax : undefined, blk: cur.blk, t:cur.t, p:cur.p, name:cur.name, target:cur.target, peak:Math.round(cur.peak), dur:Math.round((Date.now()-cur.t)/1000), batt:cur.batt, hits:(cur.hits || HIT.hits).slice(0, 20), vapor:(S.profiles[cur.p] || {}).vapor, sc:sinceClean() + 1, run: cur.readyAt ? Math.round((Date.now() - cur.readyAt) / 1000) : null }); }
       { const pi = cur.p; if (store.shuffle && store.shuffle[pi] && store.shuffle[pi].on) setTimeout(() => shuffleNext(pi), 2500); } // mood shuffle: next mood for this profile
       cur = null; store.openSess = null; save();
     }
@@ -3325,6 +3325,7 @@ function logSession(s){
   lbPush(true);
   rankLockCheck(rankBefore);
   if (rankBefore) afterSessionLogged(s, rankBefore);
+  { const hh = hotHeadTry(s); if (hh) setTimeout(() => toast(hh.ok ? 'Hot Head done! Badge unlocked' : `Hot Head: ${Math.min(hh.bl, 5)} / 5 blinkers${hh.bl >= 5 ? ', the last one was too early' : ''}`), 3200); }
 }
 
 function rankLock(){ if (IS_TEST && store.testRankLock > Date.now()) return store.testRankLock; try { const sv = LB.me && LB.me.locked_until ? Date.parse(LB.me.locked_until) : 0, u = Math.max(rankFor(rankSessions()).lockedUntil, sv || 0); return u > Date.now() ? u : 0; } catch(e){ return 0; } } // the server can lock you too // testRankLock: fake lock from the test tools
@@ -4491,6 +4492,7 @@ function playerStatsHtml(r, isMe){
 function bvKeyNow(t){ const n = new Date(); return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + ':' + t; }
 function bvResolve(k, row){ return k === 'dev' || k.startsWith('sp:') ? k : k.replace(':now', ':' + rbTierIdx(row && row.tier)); }
 function openBadge(key){
+  if (key === 'sp:hothead' && !arguments[1]){ hotHeadSheet(); return; }
   let art, title, sub, extra = '', subHtml = null;
   if (key === 'dev'){ art = devBadge(240); title = 'Developer'; sub = 'Made Emberline'; }
   else if (key.startsWith('sp:')){
@@ -4726,6 +4728,7 @@ const CATS = [
   { n:'Skill', c:'#ff6a3d', badges:[
     { id:'ironlungs', name:'Iron Lungs', req:'Take a single hit of 12 seconds or longer.', icon:'lungs', col:['#ffc2a8','#ff6a3d','#8a2410'], rar:'epic' },
     { id:'triple', name:'Triple Threat', req:'Hit 3 blinkers in one session.', icon:'threeFlames', col:['#ffd3a0','#ff8a1f','#9a3b00'], rar:'rare' },
+    { id:'hothead', name:'Hot Head', req:'On the Hot Head profile (644°F, 120s, Extreme), hit 5 blinkers in one session. The last one has to land in the final 30 seconds.', icon:'threeFlames', col:['#ffd2c2','#ff3b1f','#7a0f00'], rar:'legendary' },
     { id:'sniper', name:'Sniper', req:'5 sessions in a row with your best hit within 5 seconds of each other.', icon:'crosshair', col:['#ffb3b3','#ff3b4e','#7a0b18'], rar:'epic' } ]},
   { n:'Habits', c:'#30d1a0', badges:[
     { id:'clean', name:'Squeaky Clean', req:'Clean your Peak on time 10 times, before the clean meter turns red.', icon:'sparkle', col:['#c8fff0','#2fd3a7','#0b6b55'], rar:'rare' },
@@ -4796,6 +4799,8 @@ function spbStatus(){
   const withHits = ss.filter(s => hitsOf(s).length); let sn = false;
   for (let i = 0; i + 5 <= withHits.length && !sn; i++){ const b = withHits.slice(i, i + 5).map(best); if (Math.max(...b) - Math.min(...b) <= 5) sn = true; }
   out.sniper = { got: sn };
+  { const tries = ss.map(hotHeadTry).filter(Boolean), best = tries.reduce((m, t) => Math.max(m, Math.min(t.bl, 5)), 0);
+    out.hothead = { got: tries.some(t => t.ok), prog: tries.length ? 'Best try: ' + best + ' / 5 blinkers' : 'Load the Hot Head profile to start' }; }
   const log = store.cleanLog || []; let onTime = 0;
   log.forEach(c => { if (c.onTime != null){ if (c.onTime) onTime++; return; } const prev = ss.filter(x => x.t < c.t).pop(); if (prev && prev.sc != null && prev.sc <= (store.cleanEvery || 150)) onTime++; });
   out.clean = { got: onTime >= 10, prog: Math.min(onTime, 10) + ' / 10 on-time cleans' };
@@ -4841,6 +4846,56 @@ function spbStatus(){
     if (changed) save();
   }
   return out;
+}
+/* ===== Hot Head challenge: 644°F, 120s, Extreme, Boost +1°F / +60s, Hologram light =====
+   5 blinkers in one session, the last one ending in the final 30 seconds. Loading it into Profile 1 saves your
+   real Profile 1 first (settings and light), and one tap puts it back. */
+const HOTHEAD = { name:'Hot Head', tempF:644, time:120, vapor:1.5, boostF:1, boostT:60, mood:{ kind:'excl', id:'00018E59EDX1WJ09GN39DDAHN7', name:'Hologram' }, color:'#b6c7fc' };
+function hotHeadTry(s){
+  if (!s || Math.abs((s.target || 0) - HOTHEAD.tempF) > 2 || vaporName(s.vapor) !== 'Extreme') return null;
+  const bl = (s.hits || []).map((h, i) => ({ h, at: (s.hitAt || [])[i] })).filter(x => x.h >= blinkOf(s)), last = bl[bl.length - 1];
+  return { bl: bl.length, ok: bl.length >= 5 && !!last && last.at != null && typeof s.run === 'number' && last.at >= s.run - 30 };
+}
+async function hotHeadLoad(){
+  if (!needLive('load the challenge')) return;
+  const p = S.profiles[0], back = { name:p.name, tempC:p.tempC, time:p.time, boostF:p.boostF, boostT:p.boostT, vapor:p.vapor, color:p.color, mood:p.mood || null, pal:p.pal };
+  try { const r = await ble.readAll('/u/app/hc/0/colr'); if (r && r.length) back.colr = toHex(r); } catch(e){}
+  store.hhBackup = back; save(); // saved before anything changes
+  Object.assign(p, { name:HOTHEAD.name, tempC:f2c(HOTHEAD.tempF), time:HOTHEAD.time, vapor:HOTHEAD.vapor, boostF:HOTHEAD.boostF, boostT:HOTHEAD.boostT, mood:HOTHEAD.mood, color:HOTHEAD.color, lightDirty:true });
+  await saveProfile(0); render(); if (view === 'prof') drawProfiles();
+}
+async function hotHeadRestore(){
+  const b = store.hhBackup; if (!b) return;
+  if (!needLive('put your Profile 1 back')) return;
+  const p = S.profiles[0]; Object.assign(p, { name:b.name, tempC:b.tempC, time:b.time, boostF:b.boostF, boostT:b.boostT, vapor:b.vapor, color:b.color, mood:b.mood, pal:b.pal, lightDirty:false });
+  await saveProfile(0);
+  if (b.colr){ const blob = new Uint8Array(b.colr.match(/../g).map(x => parseInt(x, 16)));
+    try { if (isProxy()) await proxyColr('/u/app/hc/0/colr', blob); else if (S.api === 2) await ble.write('/u/app/hc/0/colr', blob); else await ble.writeBlob('/u/app/hc/0/colr', blob);
+      if (S.active === 0 && S.api !== 2){ try { isProxy() ? await proxyColr('/p/app/thc/colr', blob) : await ble.writeBlob('/p/app/thc/colr', blob); } catch(e){} } } catch(e){ toast('Settings are back, but the light couldn’t be restored: ' + e.message); } }
+  else { p.lightDirty = true; await saveProfile(0); }
+  store.hhBackup = null; save(); render(); if (view === 'prof') drawProfiles(); toast('Your Profile 1 is back');
+}
+function hotHeadSheet(){
+  document.querySelectorAll('.egg.hh').forEach(e => e.remove());
+  const b = spbById('hothead'), st = spbStatus().hothead || {}, loaded = !!store.hhBackup, unit = v => store.unit === 'C' ? Math.round((v - 32) * 5 / 9) + '°C' : v + '°F';
+  const el = document.createElement('div'); el.className = 'egg hh';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Hot Head challenge" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
+    <div style="display:grid;justify-items:center;gap:6px"><div style="width:120px">${SPB.badge(b)}</div><span class="label">Challenge · ${st.got ? 'Unlocked' : 'Locked'}</span><h2 style="margin:0">Hot Head</h2></div>
+    <p style="margin:0">Hit <b>5 blinkers</b> in one session on the Hot Head profile. The last one has to land in the <b>final 30 seconds</b>.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">${[unit(HOTHEAD.tempF), HOTHEAD.time + 's', 'Extreme', 'Boost +' + (store.unit === 'C' ? '1°C' : '1°F') + ' · +60s', 'Hologram light'].map(t => `<span class="chip" style="padding:4px 10px;border-radius:99px;background:var(--fill-2);font-size:13px">${t}</span>`).join('')}</div>
+    ${st.prog ? `<p class="muted" style="margin:0;font-size:14px">${esc(st.prog)}</p>` : ''}
+    ${loaded ? `<p class="muted" style="margin:0;font-size:13px">Profile 1 is set to Hot Head. Your own Profile 1 is saved and comes back with one tap.</p>
+      <button class="btn primary" id="hhRestore" style="width:100%">Put my Profile 1 back</button>`
+    : `<p class="muted" style="margin:0;font-size:13px">This saves your Profile 1 first (settings and light), then sets it to Hot Head. You can put it back any time.</p>
+      <button class="btn primary" id="hhLoad" style="width:100%">Load Hot Head into Profile 1</button>`}
+    <button class="btn" id="hhClose" style="width:100%">Close</button></div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const close = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.addEventListener('click', async e => {
+    if (e.target === el || e.target.id === 'hhClose') return close();
+    if (e.target.id === 'hhLoad' || e.target.id === 'hhRestore'){ e.target.disabled = true; e.target.textContent = 'Saving…';
+      try { await (e.target.id === 'hhLoad' ? hotHeadLoad() : hotHeadRestore()); } finally { close(); setTimeout(hotHeadSheet, 300); } }
+  });
 }
 function drawBadgeBook(){
   const el = $('#badgeBook'); if (!el) return;
@@ -7018,7 +7073,7 @@ function drawTestTools(){
     <div class="shop-actions"><button class="btn small" data-tt="1">+1 blinker</button><button class="btn small" data-tt="10">+10</button><button class="btn small" data-tt="99">Set 99</button><button class="btn small" data-tt="reset">Reset</button></div>
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
+    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
@@ -7206,6 +7261,9 @@ $('#goldSheet').addEventListener('click', e => {
 $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
   if (k === 'taxnote'){ rankTaxNotice(true); return; }
+  if (k === 'hothead'){ hotHeadSheet(); return; }
+  if (k === 'hhmath'){ const s = (hits, hitAt) => hotHeadTry({ target:644, vapor:1.5, run:120, hits, hitAt }); const a = s([9,9,9,9,9], [20,40,60,80,100]), b = s([9,9,9,9,9], [20,40,60,80,70]);
+    toast(`Last blinker at 100s of 120: ${a.ok ? 'counts' : 'no'} · at 70s: ${b.ok ? 'counts' : 'too early'}`); return; }
   if (k === 'lowtemp'){ const t0 = Date.now(), one = target => rankFor([{ t: t0, run: 30, sc: 1, hits: [9], target }], t0).rp; toast(`Set to 440°F: ${one(440)} RP · 450°F: ${one(450)} RP · 500°F: ${one(500)} RP`); return; }
   if (k === 'frlb'){ const m = lbMonth(); LB.me = LB.me || { id:'me-test', username:'You', rp:140, tier:'Flame', month:m }; // made-up friends to see the dropdown
     SOC.loaded = true; SOC.followingRows = [{ id:'f1', username:'Kayne_ken', rp:912, tier:'Champion', month:m }, { id:'f2', username:'bmo', rp:212, tier:'Blaze', month:m }, { id:'f3', username:'NotFollowingBack', rp:999, tier:'Champion', month:m }];
