@@ -1697,6 +1697,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
     <div class="card soc-find"><span class="label">Find people</span>
       <div class="soc-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" id="socQ" placeholder="Search usernames" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
       <div class="soc-list" id="socResults"></div></div>
+    <div class="card" id="socFriends" hidden></div>
     <div class="card lb" id="lbCard"></div>
     <div class="card" id="socFollowing"></div>
   </section>
@@ -4910,6 +4911,20 @@ async function socToggleFollow(r){
     toast(e.code === 'username_required' ? 'Make your profile first' : 'Couldn’t update. Try again.');
   }
 }
+// friends leaderboard: you plus everyone you follow who follows you back, by this month's RP (a dropdown above the main board)
+function socDrawFriends(){
+  const el = $('#socFriends'); if (!el) return;
+  const me = LB.me; if (!me || !me.username || !SOC.loaded){ el.hidden = true; return; }
+  const m = lbMonth(), fr = (SOC.followingRows || []).filter(r => SOC.followerSet && SOC.followerSet.has(r.id) && !r.banned);
+  let mine = { rp: me.rp || 0, tier: me.tier }; try { const r = myRank(); mine = { rp: r.rp, tier: r.tier.n }; } catch(e){}
+  const rows = fr.map(r => Object.assign({}, r, r.month === m ? {} : { rp: 0, tier: 'Ember' })).concat([Object.assign({}, me, mine)]).sort((a, b) => (b.rp || 0) - (a.rp || 0));
+  const place = rows.findIndex(r => r.id === me.id) + 1;
+  const row = (r, i) => `<div class="lb-row${r.id === me.id ? ' me' : ''}" data-soc="${r.id}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier || 'Ember')}</small></span><b>${r.rp || 0}<small> RP</small></b></div>`;
+  el.hidden = false;
+  el.innerHTML = `<details class="bb-all fr-lb"${store.frOpen ? ' open' : ''}><summary><span>Friends leaderboard</span><span class="muted">${fr.length ? `#${place} of ${rows.length}` : 'No friends yet'}</span><svg class="mt-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+    <div class="lb-list" style="margin-top:8px">${fr.length ? rows.map(row).join('') : '<p class="muted" style="margin:0;font-size:14px">Friends are people you follow who follow you back. Follow some players to fill this in.</p>'}</div></details>`;
+  el.querySelector('details').addEventListener('toggle', e => { store.frOpen = e.target.open; save(); });
+}
 function socRow(r){
   const meId = LB.me && LB.me.id, on = SOC.following.has(r.id);
   return `<div class="soc-row" data-soc="${r.id}" role="button" tabindex="0">${lbAvatar(r.avatar_url, r.username, 42)}
@@ -4949,6 +4964,7 @@ function socDrawFollowing(){
   const fl = $('#socFollowing'), me = LB.me; if (!fl) return;
   fl.hidden = !(me && me.username);
   setHTML(fl, `<span class="label">Following</span>${SOC.followingRows.length ? `<div class="soc-list">${SOC.followingRows.slice().sort((a, b) => (b.rp || 0) - (a.rp || 0)).map(socRow).join('')}</div>` : '<p class="muted" style="margin:0">You aren’t following anyone yet. Search for friends above or tap someone on the leaderboard.</p>'}`);
+  socDrawFriends();
   applyHaptics();
 }
 // search as you type
@@ -4974,7 +4990,7 @@ document.addEventListener('click', e => {
   if (f && e.target.closest('#v-social')){ e.stopPropagation(); const id = f.dataset.follow;
     const r = (SOC.results || []).concat(SOC.followingRows, LB.rows || []).find(x => x.id === id); if (r) socToggleFollow(r); return; }
   const row = e.target.closest('[data-soc]');
-  if (row){ const id = row.dataset.soc; const r = (SOC.results || []).concat(SOC.followingRows, LB.rows || []).find(x => x.id === id); if (r) openPlayer(r); return; }
+  if (row){ const id = row.dataset.soc; const r = (SOC.results || []).concat(SOC.followingRows, LB.rows || [], LB.me ? [LB.me] : []).find(x => x.id === id); if (r) openPlayer(r); return; }
   if (e.target.closest('#socEdit') || e.target.closest('#socCreate')){ LB.edit = true; LB.err = ''; drawLeaderboard(); setTimeout(() => { const c = $('#lbCard'); if (c) c.scrollIntoView({ behavior:'smooth', block:'start' }); }, 60); }
 });
 function lbRowHtml(r, i, meId){ return `<div class="lb-row${r.id === meId ? ' me' : ''}" data-lbi="${i}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier)}</small>${(r.showcase || []).length ? `<span class="lb-show">${r.showcase.map(k => showBadge(k, undefined, r)).join('')}</span>` : ''}</span><span class="lb-medal">${rankBadge(new Date().getMonth(), rbTierIdx(r.tier), 34)}</span><b>${r.rp}<small> RP</small></b>${lbMoveHtml(r, i)}</div>`; }
@@ -6988,7 +7004,7 @@ function drawTestTools(){
     <div class="shop-actions"><button class="btn small" data-tt="1">+1 blinker</button><button class="btn small" data-tt="10">+10</button><button class="btn small" data-tt="99">Set 99</button><button class="btn small" data-tt="reset">Reset</button></div>
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
+    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
@@ -7176,6 +7192,9 @@ $('#goldSheet').addEventListener('click', e => {
 $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
   if (k === 'taxnote'){ rankTaxNotice(true); return; }
+  if (k === 'frlb'){ const m = lbMonth(); LB.me = LB.me || { id:'me-test', username:'You', rp:140, tier:'Flame', month:m }; // made-up friends to see the dropdown
+    SOC.loaded = true; SOC.followingRows = [{ id:'f1', username:'Kayne_ken', rp:912, tier:'Champion', month:m }, { id:'f2', username:'bmo', rp:212, tier:'Blaze', month:m }, { id:'f3', username:'NotFollowingBack', rp:999, tier:'Champion', month:m }];
+    SOC.followerSet = new Set(['f1', 'f2']); store.frOpen = true; show('social'); setTimeout(socDrawFriends, 300); return; }
   if (k === 'newmood'){ show('lights'); toast('July 2026 Drop is at the end of Exclusive moods (Peak only)'); return; }
   if (k === 'pstats'){ openPlayer({ id:'test-player', username:'TestPlayer', tier:'Blaze', rp:212, blinkers:37, created_at:'2026-10-05T23:08:00Z', stats:{ sessions:41, hits:96, best:12.4, days:6, blAll:37 } }); setTimeout(() => { const n = document.querySelector('#lbProfile [data-pstats]'); if (n) n.click(); }, 300); return; } // a made-up profile with stats open
   if (k === 'champbl'){ const t0 = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 9).getTime(), one = blk => rankFor([{ t: t0, run: 30, sc: 1, hits: [9, 11.5], blk }], t0).blinkers;
