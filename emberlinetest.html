@@ -5304,7 +5304,7 @@ function show(v){
   if (v === 'lights'){ drawLights(); drawMoods(); ltEnter(); }
   if (v === 'set'){ drawSettings(); drawDevice(); drawAccount(); wireAcctForm('ac'); drawTestTools(); }
   if (v === 'shop'){ closeShopForm(); drawShops(); }
-  if (v === 'stats'){ drawStats.sig = null; autoSync(); lbStart(); drawBadgeBook(); }
+  if (v === 'stats'){ drawStats.sig = null; autoSync(); lbStart(); drawBadgeBook(); setTimeout(() => rankTaxNotice(), 900); }
   if (v === 'social'){ lbStart(); socLoad(); }
   draw(); syncRanges(); window.scrollTo(0,0);
   sec.querySelectorAll('.pcard, .shop').forEach((c,j) => c.style.setProperty('--j', j));
@@ -6846,7 +6846,7 @@ function drawTestTools(){
     <div class="shop-actions"><button class="btn small" data-tt="1">+1 blinker</button><button class="btn small" data-tt="10">+10</button><button class="btn small" data-tt="99">Set 99</button><button class="btn small" data-tt="reset">Reset</button></div>
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -7032,6 +7032,7 @@ $('#goldSheet').addEventListener('click', e => {
 });
 $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
+  if (k === 'taxnote'){ rankTaxNotice(true); return; }
   if (k.startsWith('tax:')){ show('home'); setTimeout(() => taxPop(k.slice(4)), 350); return; } // the animation, on the gauge
   if (k === 'lock' || k === 'unlock' || k === 'b2b' || k === 'taxmath'){ rankTest(k); drawTestTools(); return; }
   const real = blinkerCount() - (store.blinkerBonus || 0);
@@ -7184,6 +7185,30 @@ function edShareAsk(force){
   const st = (store.edShare || {})[S.edition];
   if (!force && st && st.ok && Date.now() - st.at < 7 * 864e5) return; // shared recently
   edShareSend().then(ok => { if (force) toast(ok ? `${S.edition} lights shared` : 'Could not read the lights'); }).catch(e => { if (force) toast('Share failed: ' + (e.message || e)); });
+}
+// rank changes notice: once, on Stats, only for ranks the tax hits (Blaze and up)
+let rankNoteShown = false;
+function rankTaxNotice(force, n){
+  n = n || 0;
+  if (!force && (rankNoteShown || store.rankTaxSeen || demo)) return;
+  let tier = ''; try { tier = myRank().tier.n; } catch(e){ return; }
+  if (force && !RANK_TAX[tier]) tier = 'Blaze'; // test button: show what a Blaze player sees
+  const amt = RANK_TAX[tier]; if (!amt) return;
+  if ((document.querySelector('.egg') || greetOpen) && n < 20){ setTimeout(() => rankTaxNotice(force, n + 1), 1500); return; } // wait for other popups
+  if (view !== 'stats' && !force) return;
+  rankNoteShown = true; if (!force){ store.rankTaxSeen = true; save(); }
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Ranked changes" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
+    <span class="label" style="text-align:center">Ranked</span>
+    <h2 style="text-align:center;margin:0">Ranked just changed</h2>
+    <div style="display:grid;gap:2px"><b>Rank tax</b><span class="muted" style="font-size:14px">In the top ranks, every session that runs 30 seconds or longer now costs RP: Blaze −3, Inferno −5, Champion −8. You'll see it drop onto the gauge when preheat finishes.</span></div>
+    <div style="display:grid;gap:2px"><b>No more cool-down</b><span class="muted" style="font-size:14px">Back-to-back sessions count now. No waiting for your ${esc(devWord())} to cool off.</span></div>
+    <p style="margin:0;font-size:14px">You're in <b>${esc(tier)}</b>, so each session costs <b style="color:#ff3b4a">${amt} RP</b>. Blinkers still earn +5, so make them count.</p>
+    <button class="btn primary" id="rtnOk" style="width:100%">Got it</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now();
+  el.querySelector('#rtnOk').addEventListener('click', () => { if (Date.now() - opened < 500) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); });
 }
 const WN_ITEMS = [
   ['Preheat light', 'Pick a color or any mood (yours or Puffco’s) to show while a profile heats up. Find it on each profile in Profiles.'],
