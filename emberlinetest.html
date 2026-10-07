@@ -4854,12 +4854,17 @@ const hhVapor = () => isProxy() ? 1 : 1.5; // Extreme on a Peak, Intense on a Pr
 const HOTHEAD = { name:'Hot Head', tempF:644, time:120, vapor:1.5, boostF:1, boostT:60, mood:{ kind:'excl', id:'00018E59EDX1WJ09GN39DDAHN7', name:'Hologram' }, color:'#b6c7fc' };
 // the saved Profile 1 belongs to the device it came from (switching devices must not show or restore it)
 const hhKey = () => (ble.dev && ble.dev.id) || store.lastDeviceId || 'none';
+// which kind of device a saved copy came from: Peak light data starts with a "lamp" map, Proxy light data doesn't
+const hhSeries = b => b.series || (b.colr ? (/^a[12]646c616d70/.test(b.colr) || b.colr.length === 16 ? 'peach' : 'toad') : null);
 function hhBack(){
   store.hhBackups = store.hhBackups || {};
-  if (store.hhBackup){ // saved before backups were kept per device: give it to the device whose Profile 1 is still Hot Head
-    if (S.mode === 'live' && S.profiles[0] && S.profiles[0].name === HOTHEAD.name){ store.hhBackups[hhKey()] = store.hhBackup; store.hhBackup = null; save(); }
+  const here = S.series || 'peach';
+  if (store.hhBackup){ // saved before backups were kept per device: give it to a device of the same kind whose Profile 1 is still Hot Head
+    const ser = hhSeries(store.hhBackup);
+    if (S.mode === 'live' && S.profiles[0] && S.profiles[0].name === HOTHEAD.name && (!ser || ser === here)){ store.hhBackups[hhKey()] = store.hhBackup; store.hhBackup = null; save(); }
   }
-  return store.hhBackups[hhKey()] || null;
+  const b = store.hhBackups[hhKey()] || null, ser = b && hhSeries(b);
+  return b && (!ser || ser === here) ? b : null; // never put a Peak's profile onto a Proxy or the other way round
 }
 function hotHeadTry(s){
   if (!s || Math.abs((s.target || 0) - HOTHEAD.tempF) > 2 || vaporName(s.vapor) !== (s.series === 'toad' ? 'Intense' : 'Extreme')) return null; // Proxy plays it on Intense
@@ -4868,7 +4873,7 @@ function hotHeadTry(s){
 }
 async function hotHeadLoad(){
   if (!needLive('load the challenge')) return;
-  const p = S.profiles[0], back = { name:p.name, tempC:p.tempC, time:p.time, boostF:p.boostF, boostT:p.boostT, vapor:p.vapor, color:p.color, mood:p.mood || null, pal:p.pal };
+  const p = S.profiles[0], back = { series: S.series || 'peach', name:p.name, tempC:p.tempC, time:p.time, boostF:p.boostF, boostT:p.boostT, vapor:p.vapor, color:p.color, mood:p.mood || null, pal:p.pal };
   try { const r = await ble.readAll('/u/app/hc/0/colr'); if (r && r.length) back.colr = toHex(r); } catch(e){}
   store.hhBackups = store.hhBackups || {}; store.hhBackups[hhKey()] = back; save(); // saved before anything changes, for this device
   Object.assign(p, { name:HOTHEAD.name, tempC:f2c(HOTHEAD.tempF), time:HOTHEAD.time, vapor:hhVapor(), boostF:HOTHEAD.boostF, boostT:HOTHEAD.boostT, mood:HOTHEAD.mood, color:HOTHEAD.color, lightDirty:true });
