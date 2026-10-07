@@ -3173,7 +3173,6 @@ setInterval(() => { if (!phRestore || S.state !== 7) return; const tgt = S.liveT
 /* session tracking from state transitions */
 let cur = null;
 function trackSession(prev, st){
-  if ((st === 7 || st === 8) && !HIT.loop && S.mode === 'live' && HIT.supported !== false) hitLoopStart(); // came back after a disconnect while Ready
   checkWarn();
   if (st === 7 && prev !== 7){ hitReset(); hitLoopStart(); phStart(); }
   if (prev === 7 && st !== 7) phEnd(); // start listening during preheat so hits count the moment it's Ready
