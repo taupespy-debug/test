@@ -3041,14 +3041,21 @@ function releaseWake(){ try { wakeLock && wakeLock.release(); } catch(e){} wakeL
 function needLive(what){ if (S.mode === 'live') return true; toast(`Connect your ${devWord()} to ${what}`); if (view !== 'home') show('home'); return false; }
 
 async function detectLedApi(){
-  try {
-    const raw = await ble.u32('/p/sys/fw/api');
-    S.series = (raw >>> 16) === 1 ? 'toad' : 'peach';   // same as Puffco's app: api series 1 = Proxy
-    const api = raw & 0xffff;
-    if (S.series === 'toad'){ S.api = 3; return; } // Proxy counts its api versions separately: it always uses the newer light format
-    if (api < 27){ S.api = 2; return; }
-  } catch(e){}
+  let raw = null;
+  for (let i = 0; i < 3 && raw == null; i++){ try { raw = await ble.u32('/p/sys/fw/api'); } catch(e){ await sleep(250); } } // retry: a missed read used to keep the last device's type
+  if (raw != null) S.series = (raw >>> 16) === 1 ? 'toad' : 'peach';   // same as Puffco's app: api series 1 = Proxy
+  else S.series = await guessSeries();
+  if (S.series === 'toad'){ S.api = 3; return; } // Proxy counts its api versions separately: it always uses the newer light format
+  if (raw != null && (raw & 0xffff) < 27){ S.api = 2; return; }
   try { await ble.read('/u/app/hc/0/phcl', 8); S.api = 2; } catch(e){ S.api = 3; }
+}
+// no api read: the Proxy stores temps as whole numbers (x10), a Peak as decimals, so the raw temp bytes tell them apart.
+// Otherwise a Proxy Haze (model 1) showed up as a Peak Opal (also model 1)
+async function guessSeries(){
+  for (const path of ['/p/app/htr/temp', '/p/htr/temp']){
+    try { const r = await ble.read(path, 4); if (r && r.length >= 4){ const n = new DataView(r.buffer, r.byteOffset, 4).getInt32(0, true); return n > 0 && n < 10000 ? 'toad' : 'peach'; } } catch(e){}
+  }
+  return /^proxy/i.test((ble.dev && ble.dev.name) || '') ? 'toad' : 'peach';
 }
 
 async function readProfiles(){
