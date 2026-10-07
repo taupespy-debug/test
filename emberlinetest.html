@@ -1113,6 +1113,9 @@ img,svg{-webkit-user-drag:none;-webkit-touch-callout:none}
 .lb-ver{font-style:normal;font-size:11px;margin-left:5px;padding:1px 5px;border-radius:99px;background:var(--accent);color:var(--accent-ink);vertical-align:2px}
 .lb-row b{font:700 16px var(--f-round);font-variant-numeric:tabular-nums}
 .lb-row b small{font-size:11px;color:var(--muted);font-weight:600}
+.lb-mv{flex:none;width:18px;margin-left:-4px;display:grid;justify-items:center;gap:1px;font:700 11px var(--f-round);font-variant-numeric:tabular-nums}
+.lb-mv svg{width:10px;height:8px;fill:currentColor}
+.lb-mv.up{color:#30d158}.lb-mv.down{color:#ff453a}
 .lb-form{display:flex;align-items:center;gap:12px}
 .lb-form input[type=text]{flex:1;min-width:0;background:var(--fill);border:0;border-radius:14px;padding:12px 14px;font-weight:600}
 .lb-pic{display:grid;justify-items:center;gap:4px;font-size:12px;color:var(--muted);cursor:pointer}
@@ -4279,6 +4282,7 @@ async function lbPush(force){
 async function lbLoad(){
   try {
     LB.rows = await sbRows(`/rest/v1/players?select=*&month=eq.${lbMonth()}&order=rp.desc,updated_at.asc&limit=100`);
+    lbMarkSeen(LB.rows);
     LB.err = '';
   } catch(e){ LB.err = 'Couldn’t load the leaderboard. Check your connection.'; }
   drawLeaderboard();
@@ -4849,7 +4853,19 @@ document.addEventListener('click', e => {
   if (row){ const id = row.dataset.soc; const r = (SOC.results || []).concat(SOC.followingRows, LB.rows || []).find(x => x.id === id); if (r) openPlayer(r); return; }
   if (e.target.closest('#socEdit') || e.target.closest('#socCreate')){ LB.edit = true; LB.err = ''; drawLeaderboard(); setTimeout(() => { const c = $('#lbCard'); if (c) c.scrollIntoView({ behavior:'smooth', block:'start' }); }, 60); }
 });
-function lbRowHtml(r, i, meId){ return `<div class="lb-row${r.id === meId ? ' me' : ''}" data-lbi="${i}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier)}</small>${(r.showcase || []).length ? `<span class="lb-show">${r.showcase.map(k => showBadge(k, undefined, r)).join('')}</span>` : ''}</span><span class="lb-medal">${rankBadge(new Date().getMonth(), rbTierIdx(r.tier), 34)}</span><b>${r.rp}<small> RP</small></b></div>`; }
+function lbRowHtml(r, i, meId){ return `<div class="lb-row${r.id === meId ? ' me' : ''}" data-lbi="${i}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier)}</small>${(r.showcase || []).length ? `<span class="lb-show">${r.showcase.map(k => showBadge(k, undefined, r)).join('')}</span>` : ''}</span><span class="lb-medal">${rankBadge(new Date().getMonth(), rbTierIdx(r.tier), 34)}</span><b>${r.rp}<small> RP</small></b>${lbMoveHtml(r, i)}</div>`; }
+// up / down arrows: your place now vs what you saw on your last visit (a visit ends after 10 min away)
+function lbMarkSeen(rows){
+  const m = lbMonth(), now = Date.now(), cur = {}; rows.forEach((r, i) => { cur[r.id] = i + 1; });
+  let st = store.lbPos; if (!st || st.month !== m) st = store.lbPos = { month: m, seen: null, base: null };
+  if (!st.seen || now - st.seen.at > 6e5) st.base = st.seen ? st.seen.pos : null; // new visit: compare against last time
+  st.seen = { pos: cur, at: now }; save();
+}
+function lbMoveHtml(r, i){
+  const b = store.lbPos && store.lbPos.month === lbMonth() && store.lbPos.base, was = b && b[r.id], d = was ? was - (i + 1) : 0;
+  if (!d) return '<span class="lb-mv"></span>';
+  return `<span class="lb-mv ${d > 0 ? 'up' : 'down'}" aria-label="${d > 0 ? 'up' : 'down'} ${Math.abs(d)}"><svg viewBox="0 0 10 8" aria-hidden="true"><path d="${d > 0 ? 'M5 0l5 8H0z' : 'M5 8L0 0h10z'}"/></svg>${Math.abs(d)}</span>`;
+}
 // leaderboard shows the top 5 (plus you) until you open the rest
 const LB_SHOW = 5;
 function lbMoreBtn(n){ if (n <= LB_SHOW) return ''; return `<button class="btn lb-more" data-lbmore aria-expanded="${!!LB.expand}">${LB.expand ? 'Show less' : `Show all ${n}`}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg></button>`; }
@@ -6849,7 +6865,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -7036,6 +7052,7 @@ $('#goldSheet').addEventListener('click', e => {
 $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
   if (k === 'taxnote'){ rankTaxNotice(true); return; }
+  if (k === 'lbmoves'){ const rows = LB.rows || []; if (!rows.length){ toast('Open Social first so the leaderboard loads'); return; } const st = store.lbPos, base = {}; rows.forEach((r, i) => { base[r.id] = Math.max(1, i + 1 + [2, -1, 0, 3, -2][i % 5]); }); st.base = base; save(); show('social'); setTimeout(drawLeaderboard, 300); toast('Fake moves on (real ones come back next visit)'); return; } // only changes the arrows, not RP
   if (k === 'patherr'){ show('home'); setConnUI('error', bleError(new TypeError("undefined is not an object (evaluating 'window.webkit.messageHandlers.bluetooth.postMessage')"), 'request')); return; }
   if (k.startsWith('tax:')){ show('home'); setTimeout(() => taxPop(k.slice(4)), 350); return; } // the animation, on the gauge
   if (k === 'lock' || k === 'unlock' || k === 'b2b' || k === 'taxmath'){ rankTest(k); drawTestTools(); return; }
