@@ -2471,6 +2471,8 @@ let manualDisconnect = false, reconnectRun = 0, failStreak = 0;
 function bleError(e, stage){
   const name = e && e.name || '', m = String(e && e.message || e || '');
   if (name === 'NotFoundError' && /cancel|chooser|no device selected/i.test(m)) return { quiet:true };
+  // Path's Bluetooth bridge isn't there (page opened in a window Path didn't set up, or an old Path)
+  if (/messageHandlers/.test(m)) return { title:'Path’s Bluetooth didn’t load', msg:'Fully close Path (swipe it away), open it again, and type the Emberline link into Path’s address bar. Don’t open it from a link in another app. If it keeps happening, update Path in the App Store.' };
   if (name === 'NotFoundError' && stage === 'request') return { title:'No Peak found', msg:'Make sure your Peak is awake (press the button once), close to your phone, and not connected to the Puffco app. Then try again. If it still doesn’t show, turn on "Show all Bluetooth devices" in Settings.' };
   if (name === 'NotAllowedError' || name === 'SecurityError') return { title:'Bluetooth permission is off', msg: IS_IOS ? 'Open iPhone Settings → Path (or Privacy & Security → Bluetooth) and allow Bluetooth, then come back and tap Connect.' : 'Allow Bluetooth for this site in your browser settings, then tap Connect again.' };
   if (name === 'NotSupportedError') return { title:'Bluetooth isn’t supported here', msg:'This browser can’t talk to Bluetooth devices. Use Path browser on iPhone, or Chrome on Android or a computer.' };
@@ -6846,7 +6848,8 @@ function drawTestTools(){
     <div class="shop-actions"><button class="btn small" data-tt="1">+1 blinker</button><button class="btn small" data-tt="10">+10</button><button class="btn small" data-tt="99">Set 99</button><button class="btn small" data-tt="reset">Reset</button></div>
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
+    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -7033,6 +7036,7 @@ $('#goldSheet').addEventListener('click', e => {
 $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
   if (k === 'taxnote'){ rankTaxNotice(true); return; }
+  if (k === 'patherr'){ show('home'); setConnUI('error', bleError(new TypeError("undefined is not an object (evaluating 'window.webkit.messageHandlers.bluetooth.postMessage')"), 'request')); return; }
   if (k.startsWith('tax:')){ show('home'); setTimeout(() => taxPop(k.slice(4)), 350); return; } // the animation, on the gauge
   if (k === 'lock' || k === 'unlock' || k === 'b2b' || k === 'taxmath'){ rankTest(k); drawTestTools(); return; }
   const real = blinkerCount() - (store.blinkerBonus || 0);
