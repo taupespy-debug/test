@@ -3224,7 +3224,7 @@ function logSession(s){
   if (rankBefore) afterSessionLogged(s, rankBefore);
 }
 
-function rankLock(){ if (IS_TEST && store.testRankLock > Date.now()) return store.testRankLock; try { const u = rankFor(rankSessions()).lockedUntil; return u > Date.now() ? u : 0; } catch(e){ return 0; } } // testRankLock: fake lock from the test tools
+function rankLock(){ if (IS_TEST && store.testRankLock > Date.now()) return store.testRankLock; try { const sv = LB.me && LB.me.locked_until ? Date.parse(LB.me.locked_until) : 0, u = Math.max(rankFor(rankSessions()).lockedUntil, sv || 0); return u > Date.now() ? u : 0; } catch(e){ return 0; } } // the server can lock you too // testRankLock: fake lock from the test tools
 function rankLockCheck(before){ // say it once, the moment the lock starts
   const u = rankLock(); if (!u || (before && before.lockedUntil === u)) return;
   setTimeout(() => rankLockAlert(u), 800);
@@ -4264,7 +4264,7 @@ function lbPayload(){
     return { rp: same ? me.rp || 0 : 0, tier: same ? me.tier : 'Ember', blinkers: same ? me.blinkers || 0 : 0, month: m, gear: myGear() }; }
   const r = myRank(), m = lbMonth(), me = LB.me && LB.me.month === m ? LB.me : null;
   const rp = r.rp, bl = Math.max(r.blinkers, me ? me.blinkers || 0 : 0);
-  return { rp, tier: rp > r.rp && me ? me.tier : r.tier.n, blinkers: bl, month: m, gear: myGear() };
+  return { rp, base: me ? me.rp || 0 : undefined, tier: rp > r.rp && me ? me.tier : r.tier.n, blinkers: bl, month: m, gear: myGear() }; // base: the leaderboard RP this built on, so the server lets the rank tax lower it
 }
 async function lbPush(force){
   const L = lbStore(); if (!L.joined || !lbUsesPuffco()) return;
