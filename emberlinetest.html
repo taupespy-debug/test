@@ -3729,6 +3729,7 @@ function applyHaptics(){
   if (document.documentElement.dataset.ui === 'cockpit') return;
   document.querySelectorAll('[data-bv] > .hz').forEach(x => x.remove());
   document.querySelectorAll(HZ_SEL).forEach(el => {
+    if (el.closest('.soc-list')){ const x = el.querySelector(':scope > .hz'); if (x){ x.remove(); el.classList.remove('hz-host'); } return; } // no haptic on Follow in the friends / search lists
     let sw = el.querySelector(':scope > .hz');
     if (!sw){ sw = document.createElement('input'); sw.type = 'checkbox'; sw.setAttribute('switch', ''); sw.className = 'hz'; sw.tabIndex = -1; sw.setAttribute('aria-hidden', 'true'); el.classList.add('hz-host'); el.appendChild(sw); }
     if (sw.disabled !== !!el.disabled) sw.disabled = !!el.disabled;
