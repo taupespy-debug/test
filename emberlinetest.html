@@ -123,7 +123,7 @@ h1,h2,h3{font-family:var(--f-display);margin:0;text-wrap:balance}
 .label{font-size:13px;letter-spacing:.02em;text-transform:uppercase;color:var(--muted);font-weight:500}
 
 /* ambient color field that the glass refracts */
-:root.has-wall .ambient{inset:0;background:var(--wall) center/cover no-repeat!important;animation:none!important;transform:none!important;filter:none!important;opacity:1!important}
+:root.has-wall .ambient{inset:-60px;background:var(--wall) center/cover no-repeat!important;animation:none!important;transform:none!important;filter:blur(26px) saturate(1.15)!important;opacity:1!important} /* blurred like the normal background; overscan hides the soft edges */
 .ambient{position:fixed;inset:-20%;z-index:-1;pointer-events:none;
   background:
     radial-gradient(40% 32% at 18% 12%, color-mix(in srgb,var(--accent) 55%,transparent), transparent 70%),
