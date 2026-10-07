@@ -2495,10 +2495,14 @@ document.addEventListener('click', e => {
 document.addEventListener('change', e => {
   if (e.target.id !== 'wallFile') return; const f = e.target.files && e.target.files[0]; if (!f) return;
   const img = new Image(), url = URL.createObjectURL(f);
-  img.onload = () => { // shrink it so it fits in the phone's storage
-    const k = Math.min(1, 1400 / Math.max(img.width, img.height)), c = document.createElement('canvas');
-    c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
-    try { localStorage.setItem('emberWall', c.toDataURL('image/jpeg', .82)); } catch(err){ toast('That picture is too big to save. Try another one.'); return; }
+  img.onload = () => { // it's shown blurred, so a small copy looks the same; shrink until it fits in the phone's storage
+    URL.revokeObjectURL(url); let ok = false;
+    for (const [px, q] of [[640, .72], [480, .66], [320, .6]]){
+      const k = Math.min(1, px / Math.max(img.width, img.height)), c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      try { localStorage.removeItem('emberWall'); localStorage.setItem('emberWall', c.toDataURL('image/jpeg', q)); ok = true; break; } catch(err){}
+    }
+    if (!ok){ toast('Your phone storage is full, so the photo couldn’t be saved.'); return; }
     store.wall = 'photo'; save(); applyWall.src = null; applyWall(); drawRichWall(); toast('Wallpaper set');
   };
   img.onerror = () => { URL.revokeObjectURL(url); toast('That picture couldn’t be opened.'); };
