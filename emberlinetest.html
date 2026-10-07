@@ -2137,7 +2137,8 @@ class Lorax {
     st('gatt'); const gatt = await withTimeout(this.dev.gatt.connect(), quick ? 8000 : 15000, 'gatt');
     st('service'); let svc;
     try { svc = await withTimeout(gatt.getPrimaryService(SVC), 10000, 'service'); } catch(e){ e.code = 'noservice'; throw e; }
-    if (!quick){ try { const v = await svc.getCharacteristic(VERSION); await withTimeout(v.readValue(), 5000, 'gatt'); } catch(e){} } // triggers bonding (already bonded on a reconnect)
+    if (!quick){ const first = !devList().some(d => d.id === this.dev.id); if (first) st('pair'); // a phone that never paired with this Peak may show a pairing prompt: give the person time to tap Pair
+      try { const v = await svc.getCharacteristic(VERSION); await withTimeout(v.readValue(), first ? 25000 : 5000, 'gatt'); } catch(e){} } // triggers bonding (already bonded on a reconnect)
     const cmd = await svc.getCharacteristic(CMD), rep = await svc.getCharacteristic(REPLY);
     if (this.rep && this._onRep){ try { this.rep.removeEventListener('characteristicvaluechanged', this._onRep); } catch(e){} }
     this._onRep = e => this._onReply(e.target.value);
@@ -2603,7 +2604,14 @@ async function startConnect(pickNew, auto){
   try {
     if (pickNew || !ble.dev){ await ble.request(store.showAll, auto ? store.lastDeviceName : null, auto ? store.lastDeviceId : null); }
     stage = 'gatt'; setConnUI('connecting', { label:'Connecting…' });
-    await ble.attach(s => { stage = s; if (s === 'auth') setConnUI('connecting', { label:'Unlocking…' }); });
+    const onStage = s => { stage = s; if (s === 'auth') setConnUI('connecting', { label:'Unlocking…' }); else if (s === 'pair') setConnUI('connecting', { label:'Tap Pair if your phone asks' }); };
+    try { await ble.attach(onStage); }
+    catch(e){ // the first try right after picking the device often fails on iPhone: retry once before showing an error
+      if (e && e.code === 'noservice') throw e;
+      try { ble.disconnect(true); } catch(_){}
+      setConnUI('connecting', { label:'Connecting again…' }); await sleep(700);
+      stage = 'gatt'; await ble.attach(onStage);
+    }
     stage = 'read'; setConnUI('connecting', { label:'Reading your Peak…' });
     await afterConnect();
   } catch(e){
