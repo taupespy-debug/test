@@ -2687,7 +2687,7 @@ function hitSample(v, now){
   else if (!HIT.on && v >= up){ HIT.on = true; HIT.start = now + HIT_DELAY; HIT.peak = v; HIT.party = false; buzz(15); if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
   else if (HIT.on){
     HIT.peak = Math.max(HIT.peak, v); HIT.live = Math.max(0, (now - HIT.start) / 1000);
-    if (!HIT.party && store.bigHit !== false && HIT.live >= (+store.bigHitSecs || 8)){ HIT.party = true; bigHit(); }
+    if (!HIT.party && store.bigHit !== false && HIT.live >= bigHitAt()){ HIT.party = true; bigHit(); }
     if (v <= Math.max(down, HIT.peak * .3)){ // ends when the pull fades, not only when it's fully gone
       HIT.on = false; HIT.endAt = now; HIT.lastStart = HIT.start; const secs = (now - HIT.start) / 1000;
       if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); if (cur) cur.hits = HIT.hits.slice(); }
@@ -2699,7 +2699,7 @@ setInterval(() => { if (S.state === 8) checkWarn(); }, 500);
 /* long hit: phone buzzes 3 times, Peak goes Disco for 10 seconds, then back to what it was showing */
 const DISCO_MS = 10000;
 function bigHit(){
-  blinker(+store.bigHitSecs || 8);
+  blinker(bigHitAt());
   if (S.mode !== 'live') return;
   const disco = MOODS.excl.find(x => /disco/i.test(x.name));
   let blob = null; try { blob = S.api === 2 ? '#ff00ff' : disco ? moodPayload({ kind:'excl', id: disco.id, name: disco.name }) : null; } catch(e){}
@@ -2797,7 +2797,7 @@ function hitTick(){
   const t = HIT.live.toFixed(1);
   document.querySelectorAll('.hit-live').forEach(el => { const sm = el.querySelector('small'); el.textContent = t + 's'; if (sm) el.prepend(sm); });
   const ck = document.querySelector('#ckStatus'); if (ck && S.state === 8) ck.textContent = 'HIT ' + t;
-  if (!HIT.party && store.bigHit !== false && HIT.live >= (+store.bigHitSecs || 8)){ HIT.party = true; bigHit(); }
+  if (!HIT.party && store.bigHit !== false && HIT.live >= bigHitAt()){ HIT.party = true; bigHit(); }
   hitRaf = requestAnimationFrame(hitTick);
 }
 function hitText(){
@@ -3203,12 +3203,12 @@ function trackSession(prev, st){
   }
   if (cur){
     cur.peak = Math.max(cur.peak, tF);
-    if (st === 8){ cur.hit = true; if (!cur.readyAt){ cur.readyAt = Date.now(); cur.tax = taxPop(); saveOpenSess(); } }
+    if (st === 8){ cur.hit = true; if (!cur.readyAt){ cur.readyAt = Date.now(); cur.tax = taxPop(); cur.blk = champBlink(); saveOpenSess(); } }
     if (st === 9 || st <= 6){
       const ranFor = cur.readyAt ? (Date.now() - cur.readyAt) / 1000 : 0;
       S.cyclesSinceOdo = (S.cyclesSinceOdo || 0) + 1;
       const gotHit = (cur.hits || HIT.hits || []).some(h => h >= 1);
-      if (cur.hit && (ranFor >= 20 || gotHit)){ logSession({ tax: cur.tax && ranFor >= RANK_TAX_SECS ? cur.tax : undefined, t:cur.t, p:cur.p, name:cur.name, target:cur.target, peak:Math.round(cur.peak), dur:Math.round((Date.now()-cur.t)/1000), batt:cur.batt, hits:(cur.hits || HIT.hits).slice(0, 20), vapor:(S.profiles[cur.p] || {}).vapor, sc:sinceClean() + 1, run: cur.readyAt ? Math.round((Date.now() - cur.readyAt) / 1000) : null }); }
+      if (cur.hit && (ranFor >= 20 || gotHit)){ logSession({ tax: cur.tax && ranFor >= RANK_TAX_SECS ? cur.tax : undefined, blk: cur.blk, t:cur.t, p:cur.p, name:cur.name, target:cur.target, peak:Math.round(cur.peak), dur:Math.round((Date.now()-cur.t)/1000), batt:cur.batt, hits:(cur.hits || HIT.hits).slice(0, 20), vapor:(S.profiles[cur.p] || {}).vapor, sc:sinceClean() + 1, run: cur.readyAt ? Math.round((Date.now() - cur.readyAt) / 1000) : null }); }
       { const pi = cur.p; if (store.shuffle && store.shuffle[pi] && store.shuffle[pi].on) setTimeout(() => shuffleNext(pi), 2500); } // mood shuffle: next mood for this profile
       cur = null; store.openSess = null; save();
     }
@@ -4072,6 +4072,8 @@ function celShow({ kind, tier, from }){
 }
 // end of a session: show what it earned inside the gauge ring
 // rank tax: big red "-3 RP" drops onto the gauge when preheat finishes (charged if the session runs 30s+)
+function champBlink(){ try { return !rankLock() && myRank().tier.n === 'Champion' ? CHAMP_BLINK : undefined; } catch(e){ return undefined; } }
+const bigHitAt = () => Math.max(+store.bigHitSecs || 8, (cur && cur.blk) || 0); // the celebration waits for a blinker that counts
 function taxPop(force){
   let tier = force; if (!tier){ try { if (rankLock()) return 0; tier = myRank().tier.n; } catch(e){ return 0; } }
   const amt = RANK_TAX[tier]; if (!amt) return 0;
@@ -4086,7 +4088,7 @@ function sessionPop(s, gained){
   const wrap = $('#gWrap'); if (!wrap) return;
   let el = $('#sessPop');
   if (!el){ el = document.createElement('div'); el.id = 'sessPop'; el.className = 'sess-pop'; wrap.appendChild(el); }
-  const hits = s.hits || [], best = hits.length ? Math.max(...hits) : 0, bl = hits.filter(h => h >= 8).length;
+  const hits = s.hits || [], best = hits.length ? Math.max(...hits) : 0, bl = hits.filter(h => h >= blinkOf(s)).length;
   const secs = s.run != null ? s.run : s.dur;
   el.innerHTML = `<span class="sp-k">Session done</span>
     <b class="sp-rp">${gained > 0 ? '+' : ''}${gained}<small> RP</small></b>
@@ -4116,6 +4118,8 @@ function afterSessionLogged(s, before){
 const RANK_TIERS = [ { n:'Ember', min:0, c:'#ff6a3d' }, { n:'Flame', min:50, c:'#ff9f0a' }, { n:'Blaze', min:150, c:'#ffd60a' }, { n:'Inferno', min:300, c:'#ff2d55' }, { n:'Champion', min:500, c:'#e9bb4f' } ];
 const RANK_DIRTY = 120, RANK_DAY_SESS = Infinity; // every session after the first earns its point
 const RANK_TAX = { Blaze:3, Inferno:5, Champion:8 }, RANK_TAX_SECS = 30; // rank tax: high tiers pay RP for every session that runs 30s+
+const CHAMP_BLINK = 11; // Champions need an 11s hit for a blinker to count (everyone else 8s)
+const blinkOf = s => (s && s.blk) || 8; // the blinker length a session was played under
 const rankTier = rp => RANK_TIERS.slice().reverse().find(t => rp >= t.min) || RANK_TIERS[0];
 const RANK_DAY_MAX = 1000, RANK_LOCK_MS = 864e5; // going past 1000 RP in one day locks you out of ranked for 24h
 function rankFor(sessions, when){
@@ -4127,7 +4131,7 @@ function rankFor(sessions, when){
     if (s.t < lockUntil){ r.locked++; continue; } // locked out of ranked: nothing counts for 24h
     const ext = typeof s.vapor === 'number' && vaporName(s.vapor) === 'Extreme' ? 1 : 0;
     const day = new Date(s.t).toDateString(), first = !seen.has(day), nth = (seen.get(day) || 0);
-    const bl = (s.hits || []).filter(h => h >= 8).length;
+    const bl = (s.hits || []).filter(h => h >= blinkOf(s)).length;
     const tax = typeof s.run === 'number' && s.run >= RANK_TAX_SECS ? s.tax || 0 : 0; // set when preheat finished, from the tier you were in then
     const gain = (s.sc > RANK_DIRTY ? -1 : first ? 3 + ext : 1 + ext) + bl * (5 + ext) - tax, dr = dayRp.get(day) || 0;
     if (dr + gain > RANK_DAY_MAX){ lockUntil = r.lockedUntil = s.t + RANK_LOCK_MS; r.locked++; continue; } // over 1000 RP in a day: this session doesn't count and ranked locks
@@ -4164,7 +4168,7 @@ function drawRank(){ drawRankInner(); applyHaptics(); }
 // "Last session" box on the rank card: what you did and what it was worth
 function lastSessionHtml(){
   const all = rankSessions().slice().sort((a, b) => a.t - b.t), s = all[all.length - 1]; if (!s) return '';
-  const hits = s.hits || [], best = hits.length ? Math.max(...hits) : 0, blinks = hits.filter(h => h >= 8).length;
+  const hits = s.hits || [], best = hits.length ? Math.max(...hits) : 0, blinks = hits.filter(h => h >= blinkOf(s)).length;
   const m0 = new Date(); m0.setDate(1); m0.setHours(0, 0, 0, 0);
   let rp = 0; try { if (s.t >= m0.getTime()) rp = rankFor(all).rp - rankFor(all.slice(0, -1)).rp; } catch(e){}
   const mins = Math.round((Date.now() - s.t) / 60000), when = mins < 1 ? 'just now' : mins < 60 ? mins + 'm ago' : mins < 1440 ? Math.round(mins / 60) + 'h ago' : new Date(s.t).toLocaleDateString([], { month:'short', day:'numeric' });
@@ -4201,7 +4205,7 @@ function drawRankInner(){
         return `<div class="rb-shelf-wrap"><span class="label">Your badges</span><div class="rb-shelf">${dev ? `<div class="rb-item" data-bv="dev">${devBadge(54)}<span>Developer</span></div>` : ''}${h.map(b => `<div class="rb-item" data-bv="${b.y}-${String(b.m + 1).padStart(2, '0')}:${b.t}">${rankBadge(b.m, b.t, 58, b.y)}<span>${RB_MONTHS[b.m].slice(0, 3)} · ${RB_TIERS[b.t].n}</span></div>`).join('')}</div></div>`; })()}
     <details class="rank-how"><summary>How points work</summary>
       <div class="how-list">
-        <div><span>Blinker <small>a single hit of 8s or longer</small></span><b class="pos">+5</b></div>
+        <div><span>Blinker <small>a single hit of 8s or longer (11s in Champion)</small></span><b class="pos">+5</b></div>
         <div><span>First dab of the day</span><b class="pos">+3</b></div>
         <div><span>Every other session</span><b class="pos">+1</b></div>
         <div><span>On Extreme vapor <small>added to each of the above</small></span><b class="pos">+1</b></div>
@@ -6918,7 +6922,7 @@ function drawTestTools(){
     <div class="shop-actions"><button class="btn small" data-tt="1">+1 blinker</button><button class="btn small" data-tt="10">+10</button><button class="btn small" data-tt="99">Set 99</button><button class="btn small" data-tt="reset">Reset</button></div>
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
+    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button></div>`;
 }
 function drawAccountStats(){
@@ -7106,6 +7110,8 @@ $('#goldSheet').addEventListener('click', e => {
 $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
   if (k === 'taxnote'){ rankTaxNotice(true); return; }
+  if (k === 'champbl'){ const t0 = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 9).getTime(), one = blk => rankFor([{ t: t0, run: 30, sc: 1, hits: [9, 11.5], blk }], t0).blinkers;
+    toast(`Hits 9s + 11.5s: ${one()} blinkers normally, ${one(CHAMP_BLINK)} in Champion`); return; }
   if (k === 'fstoggle'){ fsToggle(); return; } // what rich's triple tap on Settings does
   if (k === 'lbmoves'){ const rows = LB.rows || []; if (!rows.length){ toast('Open Social first so the leaderboard loads'); return; } const st = store.lbPos, base = {}; rows.forEach((r, i) => { base[r.id] = Math.max(1, i + 1 + [2, -1, 0, 3, -2][i % 5]); }); st.base = base; save(); show('social'); setTimeout(drawLeaderboard, 300); toast('Fake moves on (real ones come back next visit)'); return; } // only changes the arrows, not RP
   if (k === 'patherr'){ show('home'); setConnUI('error', bleError(new TypeError("undefined is not an object (evaluating 'window.webkit.messageHandlers.bluetooth.postMessage')"), 'request')); return; }
