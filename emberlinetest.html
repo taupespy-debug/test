@@ -4179,11 +4179,13 @@ const RANK_DIRTY = 120, RANK_DAY_SESS = Infinity; // every session after the fir
 const RANK_TAX = { Blaze:3, Inferno:5, Champion:8 }, RANK_TAX_SECS = 30; // rank tax: high tiers pay RP for every session that runs 30s+
 const CHAMP_BLINK = 11; // Champions need an 11s hit for a blinker to count (everyone else 8s)
 const blinkOf = s => (s && s.blk) || 8; // the blinker length a session was played under
+const RANK_MIN_F = 450, RANK_TEMP_FROM = Date.parse('2026-10-07T21:00:00Z'); // from this update on, a session only counts if its profile was set above 450°F
+const lowTemp = s => s.t >= RANK_TEMP_FROM && typeof s.target === 'number' && s.target <= RANK_MIN_F;
 const rankTier = rp => RANK_TIERS.slice().reverse().find(t => rp >= t.min) || RANK_TIERS[0];
 const RANK_DAY_MAX = 1000, RANK_LOCK_MS = 864e5; // going past 1000 RP in one day locks you out of ranked for 24h
 function rankFor(sessions, when){
   const d = new Date(when || Date.now()), m0 = new Date(d.getFullYear(), d.getMonth(), 1).getTime(), m1 = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
-  const ss = sessions.filter(s => s.t >= m0 && s.t < m1 && !(typeof s.run === 'number' && s.run < 20)).sort((a, b) => a.t - b.t); // ranked only counts sessions that ran 20s+
+  const ss = sessions.filter(s => s.t >= m0 && s.t < m1 && !(typeof s.run === 'number' && s.run < 20) && !lowTemp(s)).sort((a, b) => a.t - b.t); // ranked only counts sessions that ran 20s+
   const r = { lockedUntil:0, locked:0, tax:0, taxed:0, rp:0, sessions:0, firsts:0, blinkers:0, extreme:0, dirty:0, sessPts:0, firstPts:0, blinkPts:0 };
   const seen = new Map(), dayRp = new Map(); let lockUntil = 0;
   for (const s of ss){
@@ -4232,7 +4234,7 @@ function lastSessionHtml(){
   let rp = 0; try { if (s.t >= m0.getTime()) rp = rankFor(all).rp - rankFor(all.slice(0, -1)).rp; } catch(e){}
   const mins = Math.round((Date.now() - s.t) / 60000), when = mins < 1 ? 'just now' : mins < 60 ? mins + 'm ago' : mins < 1440 ? Math.round(mins / 60) + 'h ago' : new Date(s.t).toLocaleDateString([], { month:'short', day:'numeric' });
   const len = typeof s.run === 'number' ? s.run : s.dur || 0;
-  const lk = rankLock(), why = lk && s.t >= lk - RANK_LOCK_MS ? 'Not counted: locked out of ranked' : typeof s.run === 'number' && s.run < 20 ? 'Not counted: shorter than 20s' : s.t < m0.getTime() ? 'From last month' : '';
+  const lk = rankLock(), why = lk && s.t >= lk - RANK_LOCK_MS ? 'Not counted: locked out of ranked' : lowTemp(s) ? `Not counted: set to ${RANK_MIN_F}°F (232°C) or lower` : typeof s.run === 'number' && s.run < 20 ? 'Not counted: shorter than 20s' : s.t < m0.getTime() ? 'From last month' : '';
   return `<div class="last-sess"><div class="row between"><span class="label">Last session</span><span class="muted" style="font-size:12px">${esc(s.name || 'Session')} · ${when}</span></div>
     <div class="ls-grid"><div><b>${rp > 0 ? '+' + rp : rp}</b><span>RP</span></div><div><b>${hits.length}</b><span>hit${hits.length === 1 ? '' : 's'}</span></div><div><b>${best ? best.toFixed(1) + 's' : '-'}</b><span>best hit</span></div><div><b>${blinks}</b><span>blinker${blinks === 1 ? '' : 's'}</span></div><div><b>${len ? len + 's' : '-'}</b><span>length</span></div></div>
     ${why ? `<p class="muted" style="margin:0;font-size:12px">${why}</p>` : ''}</div>`;
@@ -4272,7 +4274,7 @@ function drawRankInner(){
         <div><span>Rank tax <small>each 30s+ session in Blaze / Inferno / Champion</small></span><b class="neg">−3 / −5 / −8</b></div>
       </div>
       <div class="how-tiers">${RANK_TIERS.map((t, i) => `<span style="--c:${t.c}">${rankBadge(new Date().getMonth(), i)}${t.n}<small>${t.min}</small></span>`).join('')}</div>
-      <p class="how-note">Points reset on the 1st of every month.</p>
+      <p class="how-note">Points reset on the 1st of every month. Sessions only count if your profile is set above 450°F (232°C).</p>
     </details>`;
 }
 /* ===== Leaderboard (Supabase) ===== */
@@ -4369,7 +4371,7 @@ function gearHtml(list, empty){
 // your stats for your profile: this month's counted sessions, hits, best hit, days you dabbed, and all-time blinkers
 function myStats(){
   const d = new Date(), m0 = new Date(d.getFullYear(), d.getMonth(), 1).getTime(), all = rankSessions();
-  const ss = all.filter(s => s.t >= m0 && !(typeof s.run === 'number' && s.run < 20)), hits = ss.flatMap(s => s.hits || []);
+  const ss = all.filter(s => s.t >= m0 && !(typeof s.run === 'number' && s.run < 20) && !lowTemp(s)), hits = ss.flatMap(s => s.hits || []);
   return { sessions: ss.length, hits: hits.length, best: hits.length ? Math.round(Math.max(...hits) * 10) / 10 : 0,
     days: new Set(ss.map(s => new Date(s.t).toDateString())).size, blAll: Math.max(all.reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0), serverBlinkers()) }; // never lower than another device already sent
 }
@@ -7016,7 +7018,7 @@ function drawTestTools(){
     <div class="shop-actions"><button class="btn small" data-tt="1">+1 blinker</button><button class="btn small" data-tt="10">+10</button><button class="btn small" data-tt="99">Set 99</button><button class="btn small" data-tt="reset">Reset</button></div>
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
+    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
@@ -7204,6 +7206,7 @@ $('#goldSheet').addEventListener('click', e => {
 $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
   if (k === 'taxnote'){ rankTaxNotice(true); return; }
+  if (k === 'lowtemp'){ const t0 = Date.now(), one = target => rankFor([{ t: t0, run: 30, sc: 1, hits: [9], target }], t0).rp; toast(`Set to 440°F: ${one(440)} RP · 450°F: ${one(450)} RP · 500°F: ${one(500)} RP`); return; }
   if (k === 'frlb'){ const m = lbMonth(); LB.me = LB.me || { id:'me-test', username:'You', rp:140, tier:'Flame', month:m }; // made-up friends to see the dropdown
     SOC.loaded = true; SOC.followingRows = [{ id:'f1', username:'Kayne_ken', rp:912, tier:'Champion', month:m }, { id:'f2', username:'bmo', rp:212, tier:'Blaze', month:m }, { id:'f3', username:'NotFollowingBack', rp:999, tier:'Champion', month:m }];
     SOC.followerSet = new Set(['f1', 'f2']); store.frOpen = true; show('social'); setTimeout(socDrawFriends, 300); return; }
