@@ -4852,6 +4852,15 @@ function spbStatus(){
    real Profile 1 first (settings and light), and one tap puts it back. */
 const hhVapor = () => isProxy() ? 1 : 1.5; // Extreme on a Peak, Intense on a Proxy
 const HOTHEAD = { name:'Hot Head', tempF:644, time:120, vapor:1.5, boostF:1, boostT:60, mood:{ kind:'excl', id:'00018E59EDX1WJ09GN39DDAHN7', name:'Hologram' }, color:'#b6c7fc' };
+// the saved Profile 1 belongs to the device it came from (switching devices must not show or restore it)
+const hhKey = () => (ble.dev && ble.dev.id) || store.lastDeviceId || 'none';
+function hhBack(){
+  store.hhBackups = store.hhBackups || {};
+  if (store.hhBackup){ // saved before backups were kept per device: give it to the device whose Profile 1 is still Hot Head
+    if (S.mode === 'live' && S.profiles[0] && S.profiles[0].name === HOTHEAD.name){ store.hhBackups[hhKey()] = store.hhBackup; store.hhBackup = null; save(); }
+  }
+  return store.hhBackups[hhKey()] || null;
+}
 function hotHeadTry(s){
   if (!s || Math.abs((s.target || 0) - HOTHEAD.tempF) > 2 || vaporName(s.vapor) !== (s.series === 'toad' ? 'Intense' : 'Extreme')) return null; // Proxy plays it on Intense
   const bl = (s.hits || []).map((h, i) => ({ h, at: (s.hitAt || [])[i] })).filter(x => x.h >= blinkOf(s)), last = bl[bl.length - 1];
@@ -4861,24 +4870,24 @@ async function hotHeadLoad(){
   if (!needLive('load the challenge')) return;
   const p = S.profiles[0], back = { name:p.name, tempC:p.tempC, time:p.time, boostF:p.boostF, boostT:p.boostT, vapor:p.vapor, color:p.color, mood:p.mood || null, pal:p.pal };
   try { const r = await ble.readAll('/u/app/hc/0/colr'); if (r && r.length) back.colr = toHex(r); } catch(e){}
-  store.hhBackup = back; save(); // saved before anything changes
+  store.hhBackups = store.hhBackups || {}; store.hhBackups[hhKey()] = back; save(); // saved before anything changes, for this device
   Object.assign(p, { name:HOTHEAD.name, tempC:f2c(HOTHEAD.tempF), time:HOTHEAD.time, vapor:hhVapor(), boostF:HOTHEAD.boostF, boostT:HOTHEAD.boostT, mood:HOTHEAD.mood, color:HOTHEAD.color, lightDirty:true });
   await saveProfile(0); render(); if (view === 'prof') drawProfiles();
 }
 async function hotHeadRestore(){
-  const b = store.hhBackup; if (!b) return;
   if (!needLive('put your Profile 1 back')) return;
+  const b = hhBack(); if (!b) return;
   const p = S.profiles[0]; Object.assign(p, { name:b.name, tempC:b.tempC, time:b.time, boostF:b.boostF, boostT:b.boostT, vapor:b.vapor, color:b.color, mood:b.mood, pal:b.pal, lightDirty:false });
   await saveProfile(0);
   if (b.colr){ const blob = new Uint8Array(b.colr.match(/../g).map(x => parseInt(x, 16)));
     try { if (isProxy()) await proxyColr('/u/app/hc/0/colr', blob); else if (S.api === 2) await ble.write('/u/app/hc/0/colr', blob); else await ble.writeBlob('/u/app/hc/0/colr', blob);
       if (S.active === 0 && S.api !== 2){ try { isProxy() ? await proxyColr('/p/app/thc/colr', blob) : await ble.writeBlob('/p/app/thc/colr', blob); } catch(e){} } } catch(e){ toast('Settings are back, but the light couldn’t be restored: ' + e.message); } }
   else { p.lightDirty = true; await saveProfile(0); }
-  store.hhBackup = null; save(); render(); if (view === 'prof') drawProfiles(); toast('Your Profile 1 is back');
+  delete store.hhBackups[hhKey()]; save(); render(); if (view === 'prof') drawProfiles(); toast('Your Profile 1 is back');
 }
 function hotHeadSheet(){
   document.querySelectorAll('.egg.hh').forEach(e => e.remove());
-  const b = spbById('hothead'), st = spbStatus().hothead || {}, loaded = !!store.hhBackup, unit = v => store.unit === 'C' ? Math.round((v - 32) * 5 / 9) + '°C' : v + '°F';
+  const b = spbById('hothead'), st = spbStatus().hothead || {}, loaded = !!hhBack(), unit = v => store.unit === 'C' ? Math.round((v - 32) * 5 / 9) + '°C' : v + '°F';
   const el = document.createElement('div'); el.className = 'egg hh';
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Hot Head challenge" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
     <div style="display:grid;justify-items:center;gap:6px"><div style="width:120px">${SPB.badge(b)}</div><span class="label">Challenge · ${st.got ? 'Unlocked' : 'Locked'}</span><h2 style="margin:0">Hot Head</h2></div>
