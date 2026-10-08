@@ -63,13 +63,13 @@
     <span class="spl-note" id="splNote"></span>
   </div>
 </div>
-<script>(function(){var t0=Date.now(),done=false,loaded=false,ready=false;
-function hide(){if(done)return;done=true;var el=document.getElementById('spl');if(!el)return;el.classList.add('out');setTimeout(function(){el.remove()},600)}
+<script>(function(){var t0=Date.now(),done=false,loaded=false,ready=false,tick=0;
+function hide(){if(done)return;done=true;clearInterval(tick);var el=document.getElementById('spl');if(!el)return;el.classList.add('out');setTimeout(function(){el.remove()},600)}
 function check(){var t=Date.now()-t0;if(loaded&&t>=1600&&(ready||t>=3200))hide()}
 // the app starts Bluetooth while this screen is up and calls this once connected (or once it gives up)
 window.emberSplashReady=function(){ready=true;check()};
 window.emberSplashNote=function(txt){var n=document.getElementById('splNote');if(n){n.textContent=txt;n.classList.add('on')}};
-function onLoad(){loaded=true;check();setInterval(check,150)}
+function onLoad(){loaded=true;check();tick=setInterval(check,150)}
 if(document.readyState==='complete')onLoad();else window.addEventListener('load',onLoad);setTimeout(hide,7000)})();</script>
 <title>Emberline</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Saira+Semi+Condensed:wght@400;500;600;700&family=Pixelify+Sans:wght@400;600;700&family=Silkscreen:wght@400;700&family=Anton&family=Barlow+Condensed:wght@500;600;700&display=swap">
@@ -840,6 +840,7 @@ input:not([type=range]):not([type=checkbox]):not([type=color]),textarea,select{f
 .discord-btn:active{transform:scale(.97)}
 /* smoother scrolling: the drifting background forces every glass panel to re-blur each frame, so hold it still while scrolling */
 html.scrolling .ambient{animation-play-state:paused}
+html.bg *,html.bg *::before,html.bg *::after{animation-play-state:paused!important} /* in the background: nothing moves */
 .card,.tile{contain:layout style}
 /* real haptics on iPhone: a see-through native switch sits under your finger on key buttons, so the tap flips it and iOS gives a real tick */
 .hz-host{position:relative}
@@ -3085,6 +3086,7 @@ function forceReconnect(){
   if (was && !manualDisconnect) autoReconnect();
 }
 document.addEventListener('visibilitychange', async () => {
+  document.documentElement.classList.toggle('bg', document.hidden);
   if (document.hidden){ stopPolling(); return; }
   if (manualDisconnect || store.autoConnect === false && C.state !== 'live' && C.state !== 'reconnecting') return;
   if (S.mode === 'live' && !ble.connected){ forceReconnect(); return; } // link died while we were away
@@ -3213,9 +3215,10 @@ async function slowPoll(){
   try { S.stealth = (await ble.u8('/u/app/ui/stlm')) === 1; } catch(e){}
 }
 
+let idleTick = 0;
 async function poll(){
   if (busy || S.mode !== 'live') return;
-  busy = true;
+  busy = true; let quiet = false;
   try {
     const prev = S.state;
     try { S.state = await ble.u8('/p/app/stat/id'); failStreak = 0; }
@@ -3224,6 +3227,10 @@ async function poll(){
       const linkDown = !(ble.dev && ble.dev.gatt && ble.dev.gatt.connected);
       if ((linkDown && failStreak >= 2) || failStreak >= 8){ failStreak = 0; forceReconnect(); return; }
     }
+    // sitting idle (not heating, Ready or Boost): keep watching for a start, but read the rest and redraw only every 3rd tick.
+    // Reading everything and redrawing the whole app twice a second kept the phone warm for nothing
+    const busyNow = s => s >= 7 && s <= 9;
+    if (!busyNow(S.state) && !busyNow(prev) && S.state === prev && (++idleTick % 3) !== 0){ quiet = true; return; }
     try { const t = await ble.f32('/p/app/htr/temp'); if (isFinite(t)) S.tempC = t; } catch(e){ try { const t = await ble.f32('/p/htr/temp'); if (isFinite(t)) S.tempC = t; } catch(e2){} } // no reading (no chamber): keep the last temp
     // while Ready, keep the Bluetooth line clear for the inhale sensor: read the timer every other tick and skip the rest
     const hitting = S.state === 8 && HIT.loop, odd = (slowTick & 1) === 1;
@@ -3238,7 +3245,7 @@ async function poll(){
     if (Date.now() > hcsHold && !hitting){ try { const a = await ble.u8('/p/app/hcs'); if (a <= 3 && a !== S.active){ S.active = a; applyProfileBright(a); if (view === 'prof') drawProfiles(); } } catch(e){} }
     trackSession(prev, S.state);
     if (++slowTick % 14 === 0) await slowPoll();
-  } finally { busy = false; render(); }
+  } finally { busy = false; if (!quiet) render(); }
 }
 
 document.addEventListener('input', e => { const t = e.target.closest && e.target.closest('[data-ph]'); if (t) t.parentElement.style.cssText = 'background:' + t.value; });
@@ -7255,20 +7262,24 @@ function gaugeTarget(){
   return clamp((S.tempC - 20) / (tgt - 20), 0, 1);                                         // heating / cooling: ring shows temp
 }
 function gaugeLoop(){
-  if (view === 'home'){
+  if (view === 'home' && !document.hidden){
     const tf = gaugeTarget(), k = reduce ? 1 : 0.085;
     if (S.mode !== 'live') G.temp = S.tempC;
     G.frac += (tf - G.frac) * k;
     G.temp += (S.tempC - G.temp) * (reduce ? 1 : 0.12);
     const glowTarget = S.state === 7 ? .75 : S.state === 8 ? 1 : 0;
     G.glow += (glowTarget - G.glow) * 0.05;
-    const f = $('#gFill'), off = (ARC * (1 - G.frac)).toFixed(2);
-    if (!f.classList.contains('ignite')) f.setAttribute('stroke-dashoffset', off);
-    $('#gHalo').setAttribute('stroke-dashoffset', off);
-    const a = (135 + 270 * G.frac) * Math.PI / 180, hx = (CX + R * Math.cos(a)).toFixed(2), hy = (CY + R * Math.sin(a)).toFixed(2);
-    $('#gHead').setAttribute('cx', hx); $('#gHead').setAttribute('cy', hy);
-    $('#gHeadGlow').setAttribute('cx', hx); $('#gHeadGlow').setAttribute('cy', hy);
-    $('#gWrap').style.setProperty('--glow', G.glow.toFixed(3));
+    // only touch the page when something moved: rewriting the gauge 60 times a second, even standing still, heats the phone
+    const f = $('#gFill'), off = (ARC * (1 - G.frac)).toFixed(1), ign = f.classList.contains('ignite');
+    if (off !== G.off || ign !== G.ign){
+      G.off = off; G.ign = ign;
+      if (!ign) f.setAttribute('stroke-dashoffset', off);
+      $('#gHalo').setAttribute('stroke-dashoffset', off);
+      const a = (135 + 270 * G.frac) * Math.PI / 180, hx = (CX + R * Math.cos(a)).toFixed(1), hy = (CY + R * Math.sin(a)).toFixed(1);
+      $('#gHead').setAttribute('cx', hx); $('#gHead').setAttribute('cy', hy);
+      $('#gHeadGlow').setAttribute('cx', hx); $('#gHeadGlow').setAttribute('cy', hy);
+    }
+    const gl = G.glow.toFixed(2); if (gl !== G.gl){ G.gl = gl; $('#gWrap').style.setProperty('--glow', gl); }
     const t = S.mode === 'live' ? fmtT(G.temp) : '--';
     if (t !== G.shown){ G.shown = t; $('#gTemp').innerHTML = `${t}<sup>${U()}</sup>`; }
     if (store.ui === 'cockpit') updateCluster();
