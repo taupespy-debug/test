@@ -1136,6 +1136,7 @@ img,svg{-webkit-user-drag:none;-webkit-touch-callout:none}
 .lb-mv.up{color:#30d158}.lb-mv.down{color:#ff453a}
 .lb-form{display:flex;align-items:center;gap:12px}
 .lb-form input[type=text]{flex:1;min-width:0;background:var(--fill);border:0;border-radius:14px;padding:12px 14px;font-weight:600}
+#lbRef,#sqCode{width:100%;min-width:0;background:var(--fill);border:0;border-radius:14px;padding:12px 14px;color:var(--fg);font:inherit;font-size:16px} /* 16px: iPhone doesn't zoom in */
 .lb-pic{display:grid;justify-items:center;gap:4px;font-size:12px;color:var(--muted);cursor:pointer}
 .lb-pic-av{position:relative;display:inline-grid}
 .lb-pic-pen{right:-3px;bottom:-3px;width:24px;height:24px}
@@ -4771,7 +4772,7 @@ const CATS = [
     { id:'comeback', name:'Comeback', req:'Finish a month at Ember, then reach Blaze or higher the next month.', icon:'arrowUp', col:['#d6ffd9','#3ddc84','#0e6b34'], rar:'rare' },
     { id:'b2b', name:'Back to Back', req:'Reach Champion two months in a row.', icon:'crowns', col:['#fff4c9','#f3cf6b','#7a5414'], rar:'legendary' } ]},
   { n:'Social', c:'#3ddc84', badges:[
-    { id:'squad', name:'Squad Up', req:'Get 3 friends to join Emberline with your invite link. A friend counts once they make a ranked profile and do 3 sessions.', icon:'squad', col:['#d6ffe6','#3ddc84','#0e5a2e'], rar:'epic' } ]},
+    { id:'squad', name:'Squad Up', req:'Get 3 friends to join Emberline with your invite link or invite code (your username). A friend counts once they make a ranked profile and do 3 sessions.', icon:'squad', col:['#d6ffe6','#3ddc84','#0e5a2e'], rar:'epic' } ]},
   { n:'Limited', c:'#c06bff', badges:[
     { id:'founder', name:'Founder', req:'Joined Emberline in its first month. Can never be earned again.', icon:'founder', col:['#f0d9ff','#a24bff','#3a0070'], rar:'legendary' },
     { id:'420', name:'4/20', req:'Have a session on April 20th.', icon:'leaf', col:['#d8ffc9','#4cd964','#145c1c'], rar:'rare' },
@@ -4954,6 +4955,23 @@ async function shareLink(url, text){
   try { await navigator.clipboard.writeText(url); toast('Link copied. Paste it to share'); }
   catch(e){ const t = document.createElement('textarea'); t.value = url; t.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); toast('Link copied. Paste it to share'); } catch(_){ prompt('Copy this link', url); } t.remove(); }
 }
+// invite code box on the join form. A link already filled it in, unless the link carried an id instead of a name
+function inviteField(){
+  const r = store.inviteRef, fromLink = r && /^[0-9a-f]{32}$/.test(r);
+  return fromLink ? '<p class="muted" style="margin:0;font-size:13px">✓ Invited by a friend’s link</p>'
+    : `<input type="text" id="lbRef" maxlength="32" placeholder="Invite code (optional): your friend’s username" autocomplete="off" autocapitalize="off" value="${esc(r || '')}">`;
+}
+// your profile is under 7 days old and nobody invited you yet: you can still enter a code
+const canEnterCode = me => !!(me && me.username && !me.referred_by && Date.now() - Date.parse(me.created_at) < 7 * 864e5);
+async function enterInviteCode(code){
+  code = String(code || '').trim().replace(/^@/, '');
+  if (!/^[A-Za-z0-9_.]{3,32}$/.test(code)){ toast('Type your friend’s Emberline username'); return false; }
+  store.inviteRef = code; save();
+  try { const r = await lbCall(lbPayload()); if (r && r.player){ LB.me = r.player; lbStore().meCache = r.player; save(); }
+    if (r && r.player && r.player.referred_by){ toast('Done! Your friend gets credit once you’ve done 3 sessions'); return true; }
+    delete store.inviteRef; save(); toast('Couldn’t find a player called ' + code); return false;
+  } catch(e){ toast('Couldn’t save the code. Try again.'); return false; }
+}
 const shareInvite = () => shareLink(inviteUrl(), 'Join me on Emberline: a free, faster app for the Puffco Peak Pro and Proxy. Open the link in the Path browser and make a ranked profile.');
 function squadSheet(){
   document.querySelectorAll('.egg.sq').forEach(e => e.remove());
@@ -4962,19 +4980,22 @@ function squadSheet(){
   const el = document.createElement('div'); el.className = 'egg sq';
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Squad Up challenge" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
     <div style="display:grid;justify-items:center;gap:6px"><div style="width:120px">${SPB.badge(b)}</div><span class="bv-rar r-epic">Epic</span><span class="label">Challenge · ${st.got ? 'Unlocked' : 'Locked'}</span><h2 style="margin:0">Squad Up</h2></div>
-    <p style="margin:0">Get <b>3 friends</b> to join Emberline with your invite link. A friend counts once they make a ranked profile and do <b>3 sessions</b>.</p>
+    <p style="margin:0">Get <b>3 friends</b> to join Emberline with your invite link or code. A friend counts once they make a ranked profile and do <b>3 sessions</b>.</p>
     ${has ? `<div style="display:grid;gap:6px"><div style="display:flex;justify-content:space-between;font-size:14px"><b>${done} / ${SQUAD_GOAL} friends</b>${waiting ? `<span class="muted">${waiting} joined, waiting on sessions</span>` : ''}</div>
       <div style="height:8px;border-radius:99px;background:var(--fill-2);overflow:hidden"><div style="height:100%;width:${done / SQUAD_GOAL * 100}%;background:#3ddc84;border-radius:99px"></div></div></div>
       <p class="muted" style="margin:0;font-size:13px;word-break:break-all">${esc(inviteUrl())}</p>
-      <button class="btn primary" id="sqShare" style="width:100%">Share my invite link</button>`
+      <p style="margin:0;font-size:14px">Or have them type your invite code when they make their profile: <b style="user-select:all">${esc(me.username)}</b></p>
+      <button class="btn primary" id="sqShare" style="width:100%">Share my invite link</button>
+      ${canEnterCode(me) ? `<div style="display:grid;gap:6px;padding-top:4px"><span class="label">Got invited?</span><div class="row" style="gap:8px"><input type="text" id="sqCode" maxlength="32" placeholder="Friend’s username" autocomplete="off" autocapitalize="off" style="flex:1;min-width:0"><button class="btn small" id="sqCodeGo">Add</button></div></div>` : ''}`
     : `<p class="muted" style="margin:0;font-size:13px">Sign in to Puffco and make a ranked profile in Social to get your invite link.</p>`}
-    <p class="muted" style="margin:0;font-size:12px">Friends have to open your link before they make their profile. Accounts on your own Peak or phone don't count.</p>
+    <p class="muted" style="margin:0;font-size:12px">Friends use your link or code when they make their profile (or within 7 days). Accounts on your own Peak or phone don't count.</p>
     <button class="btn" id="sqClose" style="width:100%">Close</button></div>`;
   document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
   const close = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
   el.addEventListener('click', e => {
     if (e.target === el || e.target.id === 'sqClose') return close();
     if (e.target.id === 'sqShare') shareInvite();
+    if (e.target.id === 'sqCodeGo'){ const b = e.target; b.disabled = true; enterInviteCode(($('#sqCode') || {}).value).then(ok => { if (ok){ close(); setTimeout(squadSheet, 300); } else b.disabled = false; }); }
   });
 }
 // Social: invite card under your profile
@@ -5189,6 +5210,7 @@ function drawLeaderboard(){
         <input type="text" id="lbName" maxlength="20" placeholder="Username" autocomplete="nickname" value="${esc(me.username || L.username || '')}" ${nameLockedUntil() ? 'readonly' : ''}>
       </div>
       ${nameLockedUntil() ? `<p class="muted" style="margin:-4px 0 0;font-size:13px">You can change your username again ${nameWait()}.</p>` : (L.joined && me.username ? `<p class="muted" style="margin:-4px 0 0;font-size:13px">${(me.name_changes || 0) >= 1 ? 'After a change, you’ll have to wait 3 days to change it again.' : 'Your first name change is free. After that, once every 3 days.'}</p>` : '')}
+      ${L.joined ? '' : inviteField()}
       <textarea id="lbBio" class="lb-bio" maxlength="160" rows="3" placeholder="Bio (optional): your setup, favorite temp, anything">${esc(LB.bioDraft != null ? LB.bioDraft : (me.bio || ''))}</textarea>
       <p class="muted" style="margin:0;font-size:13px">Tied to your Puffco login${acct() && acct().email ? ` (${esc(acct().email)})` : ''}. Sign in with it on any phone and your profile comes back. Usernames are one per person.</p>
       ${L.joined ? '' : '<p class="muted" style="margin:0;font-size:13px"><b style="color:var(--fg)">Heads up:</b> keep Emberline open during sessions or they won’t count. Path pauses the app in the background.</p>'}
@@ -5482,6 +5504,9 @@ document.addEventListener('click', e => { const b = e.target.closest('[data-zdev
 async function lbSave(){
   const L = lbStore(), name = ($('#lbName').value || '').trim();
   if (!/^[A-Za-z0-9_.]{3,20}$/.test(name)){ LB.err = LB_ERRS.username_invalid; drawLeaderboard(); return; }
+  const code = (($('#lbRef') && $('#lbRef').value) || '').trim().replace(/^@/, '');
+  if (code && !/^[A-Za-z0-9_.]{3,32}$/.test(code)){ LB.err = 'That invite code doesn’t look right. It’s your friend’s Emberline username.'; drawLeaderboard(); return; }
+  if (code){ store.inviteRef = code; save(); } // lbCall sends it
   LB.busy = true; LB.err = ''; drawLeaderboard();
   const wasJoined = !!L.joined;
   try {
@@ -5497,7 +5522,8 @@ async function lbSave(){
         : 'Saved, but the server didn’t keep some badges. Try again.';
       LB.edit = true; LB.pick = sent.slice(); LB.busy = false; drawLeaderboard(); return;
     }
-    toast(wasJoined ? 'Profile saved' : 'You’re on the leaderboard');
+    if (code && r.player && !r.player.referred_by){ delete store.inviteRef; save(); toast('Couldn’t find a player called ' + code + '. You can add the code later from Squad Up.'); }
+    else toast(wasJoined ? 'Profile saved' : 'You’re on the leaderboard');
     if (!wasJoined) setTimeout(keepOpenNotice, 700);
     LB.busy = false; lbLoad();
   } catch(e){ LB.busy = false; LB.err = e.code === 'puffco_blocked' ? e.message : (LB_ERRS[e.code] || (/load failed|failed to fetch|network/i.test(e.message) ? 'Couldn’t reach the leaderboard server.' : 'Couldn’t save: ' + e.message)); drawLeaderboard(); }
@@ -7353,7 +7379,7 @@ $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
   if (k === 'taxnote'){ rankTaxNotice(true); return; }
   if (k === 'hothead'){ hotHeadSheet(); return; }
-  if (k === 'squad'){ const me = LB.me || lbStore().meCache; if (me){ me.invites = 2; me.invites_joined = 3; } squadSheet(); if (!me) toast('Make a ranked profile first to see your link'); return; }
+  if (k === 'squad'){ const me = LB.me || lbStore().meCache; if (me){ me.invites = 2; me.invites_joined = 3; if (!me.referred_by) me.created_at = new Date().toISOString(); } squadSheet(); if (!me) toast('Make a ranked profile first to see your link'); return; }
   if (k === 'squadref'){ toast(`Your link: ${inviteUrl()} · Saved invite from a link: ${store.inviteRef || 'none'}`); return; }
   if (k === 'hhmath'){ const s = (hits, hitAt) => hotHeadTry({ target:644, vapor:1.5, run:120, hits, hitAt }); const a = s([9,9,9,9,9], [20,40,60,80,100]), b = s([9,9,9,9,9], [20,40,60,80,70]);
     toast(`Last blinker at 100s of 120: ${a.ok ? 'counts' : 'no'} · at 70s: ${b.ok ? 'counts' : 'too early'}`); return; }
