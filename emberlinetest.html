@@ -2630,8 +2630,12 @@ async function startConnect(pickNew, auto){
     try { await ble.attach(onStage); }
     catch(e){ // the first try right after picking the device often fails on iPhone: retry once before showing an error
       if (e && e.code === 'noservice') throw e;
+      setConnUI('connecting', { label:'Connecting again…' });
+      // wait for the first try's disconnect to really land: on iPhone it can arrive late and knock down the retry
+      const d = ble.dev, up = !!(d && d.gatt && d.gatt.connected);
       try { ble.disconnect(true); } catch(_){}
-      setConnUI('connecting', { label:'Connecting again…' }); await sleep(700);
+      if (up && d) await new Promise(r => { const t = setTimeout(r, 2500); d.addEventListener('gattserverdisconnected', () => { clearTimeout(t); setTimeout(r, 50); }, { once:true }); });
+      ble._silent = false; ble.cmd = null; await sleep(700);
       stage = 'gatt'; await ble.attach(onStage);
     }
     stage = 'read'; setConnUI('connecting', { label:'Reading your Peak…' });
@@ -2677,7 +2681,7 @@ async function afterConnect(quick){
   resumeOpenSess();
   connectIntro(); // the logo lights up now while the rest loads
   try { S.active = clamp(await ble.u8('/p/app/hcs'), 0, 3); } catch(e){}
-  try { S.battery = clamp(Math.round(await ble.f32('/p/bat/soc')), 0, 100); } catch(e){}
+  try { const b = await ble.f32('/p/bat/soc'); if (isFinite(b)) S.battery = clamp(Math.round(b), 0, 100); } catch(e){}
   store.lastDeviceId = ble.dev.id; store.lastDeviceName = S.name;
   rememberDevice(); save();
   // show the app as connected right away (saved profile names/colors fill in instantly), then fill in the rest
@@ -4202,10 +4206,10 @@ const RANK_DIRTY = 120, RANK_DAY_SESS = Infinity; // every session after the fir
 const RANK_TAX = { Blaze:3, Inferno:5, Champion:8 }, RANK_TAX_SECS = 30; // rank tax: high tiers pay RP for every session that runs 30s+
 const CHAMP_BLINK = 11; // Champions need an 11s hit for a blinker to count (everyone else 8s)
 const blinkOf = s => (s && s.blk) || 8; // the blinker length a session was played under
-const RANK_MIN_F = 450, RANK_TEMP_FROM = Date.parse('2026-10-07T21:00:00Z'); // from this update on, a session only counts if its profile was set above 450°F
-const lowTemp = s => { const f = typeof s.setF === 'number' ? s.setF : s.target; return s.t >= RANK_TEMP_FROM && typeof f === 'number' && f <= RANK_MIN_F; }; // the device's real target wins over the profile we think was picked
+const RANK_MIN_F = 450, RANK_TEMP_FROM = Date.parse('2026-10-07T21:00:00Z'); // from this update on, a session only counts if its profile was set to 450°F or hotter
+const lowTemp = s => { const f = typeof s.setF === 'number' ? s.setF : s.target; return s.t >= RANK_TEMP_FROM && typeof f === 'number' && f < RANK_MIN_F; }; // the device's real target wins over the profile we think was picked
 // why a session earned no RP (shown under it, so a 0 doesn't look like a bug)
-function notCounted(s){ const lk = rankLock(); return lk && s.t >= lk - RANK_LOCK_MS ? 'Not counted: locked out of ranked' : lowTemp(s) ? `Not counted for ranked: set to ${RANK_MIN_F}°F (232°C) or lower. Ranked needs a hotter profile.` : typeof s.run === 'number' && s.run < 20 ? 'Not counted: shorter than 20s' : ''; }
+function notCounted(s){ const lk = rankLock(); return lk && s.t >= lk - RANK_LOCK_MS ? 'Not counted: locked out of ranked' : lowTemp(s) ? `Not counted for ranked: set below ${RANK_MIN_F}°F (232°C). Ranked needs ${RANK_MIN_F}°F or hotter.` : typeof s.run === 'number' && s.run < 20 ? 'Not counted: shorter than 20s' : ''; }
 const rankTier = rp => RANK_TIERS.slice().reverse().find(t => rp >= t.min) || RANK_TIERS[0];
 const RANK_DAY_MAX = 1000, RANK_LOCK_MS = 864e5; // going past 1000 RP in one day locks you out of ranked for 24h
 function rankFor(sessions, when){
@@ -4299,7 +4303,7 @@ function drawRankInner(){
         <div><span>Rank tax <small>each 30s+ session in Blaze / Inferno / Champion</small></span><b class="neg">−3 / −5 / −8</b></div>
       </div>
       <div class="how-tiers">${RANK_TIERS.map((t, i) => `<span style="--c:${t.c}">${rankBadge(new Date().getMonth(), i)}${t.n}<small>${t.min}</small></span>`).join('')}</div>
-      <p class="how-note">Points reset on the 1st of every month. Sessions only count if your profile is set above 450°F (232°C).</p>
+      <p class="how-note">Points reset on the 1st of every month. Sessions only count if your profile is set to 450°F (232°C) or hotter.</p>
     </details>`;
 }
 /* ===== Leaderboard (Supabase) ===== */
