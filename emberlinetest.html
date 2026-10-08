@@ -1711,6 +1711,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
     <div class="card soc-find"><span class="label">Find people</span>
       <div class="soc-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" id="socQ" placeholder="Search usernames" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
       <div class="soc-list" id="socResults"></div></div>
+    <div class="card" id="socInvite" hidden></div>
     <div class="card" id="socFriends" hidden></div>
     <div class="card lb" id="lbCard"></div>
     <div class="card" id="socFollowing"></div>
@@ -2088,6 +2089,9 @@ let store = Object.assign({}, DEFAULT_STORE);
 try { const raw = localStorage.getItem(KEY); if (raw) store = Object.assign({}, DEFAULT_STORE, JSON.parse(raw)); } catch(e){}
 if (!Array.isArray(store.shops)) store.shops = JSON.parse(JSON.stringify(DEFAULT_SHOPS));
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(store)); } catch(e){} }
+// invite link (?ref=<player id>): remember who sent you until your ranked profile is made, then drop it from the address
+{ const r = new URLSearchParams(location.search).get('ref');
+  if (r && /^[A-Za-z0-9_.]{3,32}$/.test(r)){ store.inviteRef = r; save(); try { const u = new URL(location.href); u.searchParams.delete('ref'); history.replaceState(null, '', u.pathname + u.search + u.hash); } catch(e){} } }
 
 /* ================= device state ================= */
 const STATE_NAMES = {0:'Starting',1:'Starting',2:'Starting',3:'Off',4:'Sleep',5:'Idle',6:'Selecting',7:'Preheating',8:'Ready',9:'Fading',10:'Version',11:'Battery',12:'Test',13:'Pairing'};
@@ -4340,7 +4344,11 @@ async function lbCall(body){
     const a = acct(); let pid = a.data && a.data.user && a.data.user.id;
     if (pid == null){ try { const me = await authed('/api/users/me'); pid = me && me.id; if (a.data && a.data.user && pid != null) a.data.user.id = pid; } catch(_){} } // phone-side Puffco check
     const id = { puffcoToken: acct().auth.accessToken, puffcoId: pid, device: devInfo() };
-    return sbJSON('/functions/v1/player', { method:'POST', body: JSON.stringify(Object.assign(id, body)) });
+    if (store.inviteRef) id.ref = store.inviteRef; // who invited you (the server only uses it on a new profile)
+    const r = await sbJSON('/functions/v1/player', { method:'POST', body: JSON.stringify(Object.assign(id, body)) });
+    const pl = r && r.player; // done with the invite once it stuck, or once it can't anymore (profile over 7 days old, or your own link)
+    if (store.inviteRef && pl && (pl.referred_by || Date.now() - Date.parse(pl.created_at) > 7 * 864e5 || pl.id === store.inviteRef || String(pl.username || '').toLowerCase() === store.inviteRef.toLowerCase())){ delete store.inviteRef; save(); }
+    return r;
   };
   try { return await send(); }
   catch(e){
@@ -4510,6 +4518,7 @@ function bvKeyNow(t){ const n = new Date(); return n.getFullYear() + '-' + Strin
 function bvResolve(k, row){ return k === 'dev' || k.startsWith('sp:') ? k : k.replace(':now', ':' + rbTierIdx(row && row.tier)); }
 function openBadge(key){
   if (key === 'sp:hothead' && !arguments[1]){ hotHeadSheet(); return; }
+  if (key === 'sp:squad' && !arguments[1]){ squadSheet(); return; }
   let art, title, sub, extra = '', subHtml = null;
   if (key === 'dev'){ art = devBadge(240); title = 'Developer'; sub = 'Made Emberline'; }
   else if (key.startsWith('sp:')){
@@ -4737,6 +4746,7 @@ const I = {
     return L(0, 34, 6) + L(-32, 29, 5.5) + L(32, 29, 5.5) + L(-64, 22, 4.5) + L(64, 22, 4.5) + L(-100, 13, 3.5) + L(100, 13, 3.5) + `<path d="M30 44v10" stroke="${c}" stroke-width="3" stroke-linecap="round"/>`; },
   discord: c => `<path d="M14 18c4-3 8-4 12-4l1 2c-3 0-6 1-9 3 8-4 16-4 24 0-3-2-6-3-9-3l1-2c4 0 8 1 12 4 4 6 6 13 5 21-4 3-8 5-12 5l-2-4c2-1 4-2 5-3-7 3-15 3-22 0 1 1 3 2 5 3l-2 4c-4 0-8-2-12-5-1-8 1-15 5-21z" fill="${c}"/><ellipse cx="23" cy="31" rx="3.4" ry="3.8" fill="#120e19"/><ellipse cx="37" cy="31" rx="3.4" ry="3.8" fill="#120e19"/>`,
   bug: c => `<ellipse cx="30" cy="34" rx="11" ry="14" fill="${c}"/><circle cx="30" cy="17" r="6" fill="${c}"/><path d="M30 21v26" stroke="#120e19" stroke-width="2"/><path d="M19 28l-8-4M19 36H9M20 43l-8 5M41 28l8-4M41 36h10M40 43l8 5M27 12l-4-5M33 12l4-5" stroke="${c}" stroke-width="3" stroke-linecap="round"/>`,
+  squad: c => [[-14, 5, .78], [14, 5, .78], [0, 0, 1]].map(([dx, dy, k]) => `<g transform="translate(${30 + dx} ${32 + dy}) scale(${k})"><circle cy="-9" r="7.5" fill="${c}" stroke="#120e19" stroke-width="${k === 1 ? 3 : 0}"/><path d="M-13 16c0-9 5.5-13.5 13-13.5S13 7 13 16z" fill="${c}" stroke="#120e19" stroke-width="${k === 1 ? 3 : 0}"/></g>`).join(''),
   secret: c => `<text x="30" y="41" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="900" font-size="32" fill="${c}">???</text>`
 };
 
@@ -4760,6 +4770,8 @@ const CATS = [
     { id:'podium', name:'Podium', req:'Finish a month in the top 3 on the leaderboard. Handed out at the start of the next month.', icon:'podium', col:['#fff4c9','#e9bb4f','#8a6115'], rar:'epic' },
     { id:'comeback', name:'Comeback', req:'Finish a month at Ember, then reach Blaze or higher the next month.', icon:'arrowUp', col:['#d6ffd9','#3ddc84','#0e6b34'], rar:'rare' },
     { id:'b2b', name:'Back to Back', req:'Reach Champion two months in a row.', icon:'crowns', col:['#fff4c9','#f3cf6b','#7a5414'], rar:'legendary' } ]},
+  { n:'Social', c:'#3ddc84', badges:[
+    { id:'squad', name:'Squad Up', req:'Get 3 friends to join Emberline with your invite link. A friend counts once they make a ranked profile and do 3 sessions.', icon:'squad', col:['#d6ffe6','#3ddc84','#0e5a2e'], rar:'epic' } ]},
   { n:'Limited', c:'#c06bff', badges:[
     { id:'founder', name:'Founder', req:'Joined Emberline in its first month. Can never be earned again.', icon:'founder', col:['#f0d9ff','#a24bff','#3a0070'], rar:'legendary' },
     { id:'420', name:'4/20', req:'Have a session on April 20th.', icon:'leaf', col:['#d8ffc9','#4cd964','#145c1c'], rar:'rare' },
@@ -4854,6 +4866,7 @@ function spbStatus(){
   out['420'] = { got: ss.some(x => { const d = new Date(x.t); return d.getMonth() === 3 && d.getDate() === 20; }) };
   out.discord = { got: aw.includes('discord') };
   out.bughunter = { got: aw.includes('bughunter') };
+  out.squad = { got: aw.includes('squad'), prog: me && me.username ? `${Math.min(me.invites || 0, 3)} / 3 friends joined` : 'Make a ranked profile to get your invite link' };
   out.secret = { got: ss.some(x => { const d = new Date(x.t); return (d.getHours() % 12) === 4 && d.getMinutes() === 20; }) };
   aw.forEach(id => { out[id] = Object.assign({}, out[id], { got: true }); }); // badges given by hand in Supabase (players.awards) always count
   // once earned, a badge stays earned (deleting a zone, trimming old sessions or a slow leaderboard load can't take it back)
@@ -4931,6 +4944,50 @@ function hotHeadSheet(){
       try { await (e.target.id === 'hhLoad' ? hotHeadLoad() : hotHeadRestore()); } finally { close(); setTimeout(hotHeadSheet, 300); } }
   });
 }
+/* ===== Squad Up challenge: 3 friends join with your invite link =====
+   The link carries your player id. The server ties the friend's new profile to you and counts them once they've done
+   3 sessions (not banned, not on your own Peak or phone). At 3 it adds "squad" to your awards for good. */
+const SQUAD_GOAL = 3;
+function inviteUrl(){ const me = LB.me || lbStore().meCache; return 'https://emberlineapp.github.io/emberline/' + (me && me.id && me.username ? '?ref=' + me.id : ''); }
+async function shareLink(url, text){
+  try { if (navigator.share){ await navigator.share({ title:'Emberline', text, url }); return; } } catch(e){ if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); toast('Link copied. Paste it to share'); }
+  catch(e){ const t = document.createElement('textarea'); t.value = url; t.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); toast('Link copied. Paste it to share'); } catch(_){ prompt('Copy this link', url); } t.remove(); }
+}
+const shareInvite = () => shareLink(inviteUrl(), 'Join me on Emberline: a free, faster app for the Puffco Peak Pro and Proxy. Open the link in the Path browser and make a ranked profile.');
+function squadSheet(){
+  document.querySelectorAll('.egg.sq').forEach(e => e.remove());
+  const b = spbById('squad'), st = spbStatus().squad || {}, me = LB.me || lbStore().meCache, has = !!(me && me.username);
+  const done = Math.min((me && me.invites) || 0, SQUAD_GOAL), joined = (me && me.invites_joined) || 0, waiting = Math.max(0, joined - ((me && me.invites) || 0));
+  const el = document.createElement('div'); el.className = 'egg sq';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Squad Up challenge" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
+    <div style="display:grid;justify-items:center;gap:6px"><div style="width:120px">${SPB.badge(b)}</div><span class="bv-rar r-epic">Epic</span><span class="label">Challenge · ${st.got ? 'Unlocked' : 'Locked'}</span><h2 style="margin:0">Squad Up</h2></div>
+    <p style="margin:0">Get <b>3 friends</b> to join Emberline with your invite link. A friend counts once they make a ranked profile and do <b>3 sessions</b>.</p>
+    ${has ? `<div style="display:grid;gap:6px"><div style="display:flex;justify-content:space-between;font-size:14px"><b>${done} / ${SQUAD_GOAL} friends</b>${waiting ? `<span class="muted">${waiting} joined, waiting on sessions</span>` : ''}</div>
+      <div style="height:8px;border-radius:99px;background:var(--fill-2);overflow:hidden"><div style="height:100%;width:${done / SQUAD_GOAL * 100}%;background:#3ddc84;border-radius:99px"></div></div></div>
+      <p class="muted" style="margin:0;font-size:13px;word-break:break-all">${esc(inviteUrl())}</p>
+      <button class="btn primary" id="sqShare" style="width:100%">Share my invite link</button>`
+    : `<p class="muted" style="margin:0;font-size:13px">Sign in to Puffco and make a ranked profile in Social to get your invite link.</p>`}
+    <p class="muted" style="margin:0;font-size:12px">Friends have to open your link before they make their profile. Accounts on your own Peak or phone don't count.</p>
+    <button class="btn" id="sqClose" style="width:100%">Close</button></div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const close = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.addEventListener('click', e => {
+    if (e.target === el || e.target.id === 'sqClose') return close();
+    if (e.target.id === 'sqShare') shareInvite();
+  });
+}
+// Social: invite card under your profile
+function squadCard(){
+  const el = $('#socInvite'), me = LB.me; if (!el) return;
+  if (!me || !me.username){ el.hidden = true; return; }
+  const done = Math.min(me.invites || 0, SQUAD_GOAL), got = (me.awards || []).includes('squad');
+  el.hidden = false;
+  setHTML(el, `<div class="row" style="gap:12px;align-items:center"><button class="sq-art" data-bv="sp:squad" aria-label="Squad Up badge" style="width:52px;flex:none;padding:0;border:0;background:none">${SPB.badge(spbById('squad'))}</button>
+    <div style="flex:1;min-width:0"><span class="label">Invite friends</span><div style="font-size:14px;margin-top:2px">${got ? 'Squad Up unlocked. Keep inviting!' : `Get 3 friends on Emberline for the Squad Up badge · <b style="white-space:nowrap">${done} / ${SQUAD_GOAL}</b>`}</div></div>
+    <button class="btn small primary" id="sqInvite">Invite</button></div>`);
+}
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('#sqInvite')) shareInvite(); });
 function drawBadgeBook(){
   const el = $('#badgeBook'); if (!el) return;
   const st = spbStatus(), first = !store.spbUnlocked; store.spbUnlocked = store.spbUnlocked || {};
@@ -5067,7 +5124,7 @@ function socDrawFollowing(){
   const fl = $('#socFollowing'), me = LB.me; if (!fl) return;
   fl.hidden = !(me && me.username);
   setHTML(fl, `<span class="label">Following</span>${SOC.followingRows.length ? `<div class="soc-list">${SOC.followingRows.slice().sort((a, b) => (b.rp || 0) - (a.rp || 0)).map(socRow).join('')}</div>` : '<p class="muted" style="margin:0">You aren’t following anyone yet. Search for friends above or tap someone on the leaderboard.</p>'}`);
-  socDrawFriends();
+  socDrawFriends(); squadCard();
   applyHaptics();
 }
 // search as you type
@@ -5664,7 +5721,7 @@ $('#bStart').onclick = async () => { if (S.mode !== 'live') return startConnect(
 $('#bStop').onclick = () => modeCmd(8);
 $('#bBoost').onclick = () => boostCmd();
 $('#shareBtn').onclick = async () => {
-  const url = 'https://emberlineapp.github.io/emberline/', data = { title:'Emberline', text:'Emberline: a free, faster app for the Puffco Peak Pro and Proxy. Open it in the Path browser.', url };
+  const url = inviteUrl(), data = { title:'Emberline', text:'Emberline: a free, faster app for the Puffco Peak Pro and Proxy. Open it in the Path browser.', url };
   try { if (navigator.share){ await navigator.share(data); return; } } catch(e){ if (e && e.name === 'AbortError') return; }
   try { await navigator.clipboard.writeText(url); toast('Link copied. Paste it to share Emberline'); }
   catch(e){ const t = document.createElement('textarea'); t.value = url; t.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); toast('Link copied. Paste it to share Emberline'); } catch(_){ toast(url); } t.remove(); }
@@ -7107,7 +7164,7 @@ function drawTestTools(){
     <div class="shop-actions"><button class="btn small" data-tt="1">+1 blinker</button><button class="btn small" data-tt="10">+10</button><button class="btn small" data-tt="99">Set 99</button><button class="btn small" data-tt="reset">Reset</button></div>
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
+    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
@@ -7296,6 +7353,8 @@ $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
   if (k === 'taxnote'){ rankTaxNotice(true); return; }
   if (k === 'hothead'){ hotHeadSheet(); return; }
+  if (k === 'squad'){ const me = LB.me || lbStore().meCache; if (me){ me.invites = 2; me.invites_joined = 3; } squadSheet(); if (!me) toast('Make a ranked profile first to see your link'); return; }
+  if (k === 'squadref'){ toast(`Your link: ${inviteUrl()} · Saved invite from a link: ${store.inviteRef || 'none'}`); return; }
   if (k === 'hhmath'){ const s = (hits, hitAt) => hotHeadTry({ target:644, vapor:1.5, run:120, hits, hitAt }); const a = s([9,9,9,9,9], [20,40,60,80,100]), b = s([9,9,9,9,9], [20,40,60,80,70]);
     toast(`Last blinker at 100s of 120: ${a.ok ? 'counts' : 'no'} · at 70s: ${b.ok ? 'counts' : 'too early'}`); return; }
   if (k === 'lowtemp'){ const t0 = Date.now(), one = target => rankFor([{ t: t0, run: 30, sc: 1, hits: [9], target }], t0).rp; toast(`Set to 440°F: ${one(440)} RP · 450°F: ${one(450)} RP · 500°F: ${one(500)} RP`); return; }
