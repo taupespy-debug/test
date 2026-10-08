@@ -2705,7 +2705,7 @@ async function afterConnect(quick){
     if (isProxy()){ try { const pv = await ble.readAll('/p/app/led/pclr'); if (pv.length > 1){ try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(_){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } } } catch(e){} } // same as test C, which turns it back to normal
     try { await readSerial(); } catch(e){}
     try { await readBatteryDetail(); } catch(e){}
-    if (store.cleanBaseOdo == null && S.odo != null){ store.cleanBaseOdo = S.odo - (store.localSince || 0); save(); }
+    cleanBaseSync();
     if (ble.dev && ble.dev.id === id) S.readFor = id;
   })();
 }
@@ -3205,8 +3205,8 @@ async function slowPoll(){
     const dS = S.battery - S.chgRef.soc, dT = (now - S.chgRef.t) / 1000;
     S.chgGuess = dS >= 2 && dT > 60 ? (100 - S.battery) * dT / dS : null;
   } else { S.chgRef = null; S.chgEta = null; S.chgGuess = null; }
-  try { S.odo = Math.round(await ble.f32('/p/app/odom/0/nc', 12)); }
-  catch(e){ try { S.odo = Math.round(await ble.f32('/p/app/info/dtot', 12)); } catch(e2){} }
+  { let o = null; try { o = Math.round(await ble.f32('/p/app/odom/0/nc', 12)); } catch(e){ try { o = Math.round(await ble.f32('/p/app/info/dtot', 12)); } catch(e2){} }
+    if (o != null && isFinite(o) && o >= 0){ S.odo = o; S.odoFor = cleanKey(); } } // odoFor: which device this count is from
   try { S.dpd = await ble.f32('/p/app/info/dpd', 12); } catch(e){}
   try { odoSync(); } catch(e){}
   if (Date.now() > hcsHold){ try { S.active = clamp(await ble.u8('/p/app/hcs'),0,3); } catch(e){} }
@@ -3364,9 +3364,24 @@ function rankLockAlert(u){
 }
 
 /* ================= clean tracking ================= */
+// each Peak / Proxy has its own dab counter, so each gets its own "count at last clean". One shared number
+// compared a Proxy's small count to a Peak's big one and the meter sat at 0
+const cleanKey = () => (ble.dev && ble.dev.id) || store.lastDeviceId || 'none';
+const cleanBase = () => { const b = store.cleanBases && store.cleanBases[cleanKey()]; return typeof b === 'number' ? b : null; };
+function setCleanBase(v){ store.cleanBases = store.cleanBases || {}; store.cleanBases[cleanKey()] = v; store.cleanBaseOdo = v; }
+function cleanBaseSync(){
+  if (S.odo == null || S.odoFor !== cleanKey()) return;
+  const b = cleanBase();
+  if (b == null){
+    // first time on this device: the old shared number only fits if it was this device's (counter just past it)
+    const old = store.cleanBaseOdo, used = Object.values(store.cleanBases || {}), first = !used.length;
+    const fits = old != null && S.odo >= old && S.odo - old < 1000 && !used.includes(old);
+    setCleanBase(fits ? old : S.odo - (first ? Math.min(store.localSince || 0, S.odo) : 0)); save();
+  } else if (S.odo < b){ setCleanBase(S.odo); save(); } // counter went backwards (reset or a different device): start over
+}
 function sinceClean(){
   if (demo) return demo.since;
-  if (S.odo != null && store.cleanBaseOdo != null && S.mode === 'live') return Math.max(0, S.odo - store.cleanBaseOdo);
+  if (S.odo != null && S.odoFor === cleanKey() && cleanBase() != null && S.mode === 'live') return Math.max(0, S.odo - cleanBase());
   return store.localSince;
 }
 let lastWarned = -1;
@@ -3379,7 +3394,7 @@ function markCleaned(){
   if (demo){ demo.since = 0; demo.lastClean = now; }
   else {
     store.localSince = 0; store.lastClean = now; store.cleanLog.push({t:now, odo:S.odo, onTime: sinceClean() <= store.cleanEvery});
-    if (S.odo != null) store.cleanBaseOdo = S.odo;
+    if (S.odo != null) setCleanBase(S.odo);
     save();
   }
   toast('Clean logged. Counter reset.'); render();
@@ -5811,7 +5826,7 @@ $('#cleanEvery').onchange = e => { store.cleanEvery = clamp(Math.round(+e.target
 $('#sinceSave').onclick = () => {
   const n = clamp(Math.round(+$('#sinceEdit').value || 0), 0, 5000);
   if (demo) demo.since = n;
-  else { store.localSince = n; if (S.odo != null && S.mode === 'live') store.cleanBaseOdo = S.odo - n; save(); }
+  else { store.localSince = n; if (S.odo != null && S.mode === 'live') setCleanBase(S.odo - n); save(); }
   toast(`Counter set to ${n}`); draw();
 };
 $('#tAll').onchange = e => { store.showAll = e.target.checked; save(); };
