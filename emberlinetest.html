@@ -2546,7 +2546,7 @@ async function spotPasteCode(code){
   code = String(code || '').trim().replace(/^.*[?&]code=([^&]+).*$/, '$1'); // the whole link pasted is fine too
   if (!code){ toast('Paste the code from the other browser'); return; }
   if (!store.spot || !store.spot.verifier){ toast('Tap Copy sign-in link first, then sign in with that link'); return; }
-  try { await spotToken({ grant_type:'authorization_code', code, redirect_uri: spotRedirect(), client_id: store.spot.cid || SPOT_CID, code_verifier: store.spot.verifier }); toast('Spotify connected'); drawRichSpot(); spotTick(); }
+  try { await spotToken({ grant_type:'authorization_code', code, redirect_uri: spotRedirect(), client_id: store.spot.cid || SPOT_CID, code_verifier: store.spot.verifier }); toast('Spotify connected'); spotMe(); drawRichSpot(); spotTick(); }
   catch(e){ toast('That code didn’t work: ' + e.message + '. Codes last about 10 minutes, get a new one.'); }
 }
 // signed in, but this browser didn't start it (Path sent Spotify to Chrome or Safari): show the code to paste back in Path
@@ -2569,38 +2569,49 @@ async function spotToken(body){
   const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error_description || j.error || ('Spotify said ' + r.status));
   store.spot = Object.assign({}, store.spot, { token: j.access_token, exp: Date.now() + (j.expires_in - 60) * 1000, refresh: j.refresh_token || store.spot.refresh, verifier: null }); save();
 }
+// which Spotify account is connected (shown in Settings)
+async function spotMe(){
+  try { const r = await spotApi('', 'GET', 'https://api.spotify.com/v1/me'); if (!r.ok){ SPOT.err = 'Spotify said ' + r.status + (r.status === 403 ? ': this account isn’t allowed in the Spotify app (add it under User Management)' : ''); return; }
+    const j = await r.json(); store.spot.name = j.display_name || j.id || 'Spotify user'; save(); } catch(e){ SPOT.err = e.message; }
+  try { drawRichSpot(); } catch(e){}
+}
 // back from Spotify's sign in page with ?code=
 (async () => {
   const q = new URLSearchParams(location.search), code = q.get('code');
   if (!code) return;
   try { const u = new URL(location.href); u.searchParams.delete('code'); u.searchParams.delete('state'); history.replaceState(null, '', u.pathname + u.search + u.hash); } catch(e){}
   if (!store.spot || !store.spot.verifier){ setTimeout(() => spotCodeSheet(code), 1800); return; } // started in another browser
-  try { await spotToken({ grant_type:'authorization_code', code, redirect_uri: spotRedirect(), client_id: store.spot.cid, code_verifier: store.spot.verifier }); toast('Spotify connected'); spotTick(); }
+  try { await spotToken({ grant_type:'authorization_code', code, redirect_uri: spotRedirect(), client_id: store.spot.cid, code_verifier: store.spot.verifier }); toast('Spotify connected'); spotMe(); spotTick(); }
   catch(e){ toast('Spotify sign in failed: ' + e.message); }
   try { drawRichSpot(); } catch(e){}
 })();
-async function spotApi(path, method){
-  if (!store.spot.token || Date.now() > (store.spot.exp || 0)) await spotToken({ grant_type:'refresh_token', refresh_token: store.spot.refresh, client_id: store.spot.cid });
-  const r = await fetch('https://api.spotify.com/v1/me/player' + path, { method: method || 'GET', headers:{ Authorization: 'Bearer ' + store.spot.token } });
+async function spotApi(path, method, full){
+  if (!store.spot.token || Date.now() > (store.spot.exp || 0)) await spotToken({ grant_type:'refresh_token', refresh_token: store.spot.refresh, client_id: store.spot.cid || SPOT_CID });
+  const r = await fetch(full || 'https://api.spotify.com/v1/me/player' + path, { method: method || 'GET', headers:{ Authorization: 'Bearer ' + store.spot.token } });
   if (r.status === 401){ store.spot.token = null; save(); }
   return r;
 }
 async function spotTick(){
-  if (!spotOn() || SPOT.busy || document.hidden || view !== 'home'){ if (!spotOn()) drawSpot(); return; }
+  if (!spotOn() || SPOT.busy || document.hidden || (view !== 'home' && view !== 'set')){ if (!spotOn()) drawSpot(); return; }
   SPOT.busy = true;
-  try { const r = await spotApi('/currently-playing');
+  try { const r = await spotApi('/currently-playing'); SPOT.err = ''; SPOT.checked = Date.now();
     if (r.status === 204){ SPOT.now = null; }
+    else if (!r.ok){ SPOT.err = 'Spotify said ' + r.status + (r.status === 403 ? ' (this account isn’t allowed in your Spotify app)' : r.status === 401 ? ' (sign in again)' : ''); }
     else if (r.ok){ const j = await r.json(), it = j && j.item;
       SPOT.now = it ? { name: it.name, by: (it.artists || it.show && [it.show] || []).map(a => a.name).join(', '), art: ((it.album || it).images || [])[0], playing: !!j.is_playing } : null;
       if (SPOT.now && SPOT.now.art) SPOT.now.art = SPOT.now.art.url; }
-  } catch(e){} finally { SPOT.busy = false; drawSpot(); }
+  } catch(e){ SPOT.err = e.message; } finally { SPOT.busy = false; drawSpot(); if (view === 'set') try { drawRichSpot(); } catch(_){} }
 }
 setInterval(spotTick, 5000);
 const SP_IC = { prev:'<path d="M6 5h2v14H6zM20 5v14L9 12z"/>', next:'<path d="M16 5h2v14h-2zM4 5v14l11-7z"/>', play:'<path d="M7 4v16l13-8z"/>', pause:'<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>' };
 function drawSpot(){
   const el = $('#spot'); if (!el) return;
-  const n = SPOT.now; if (!spotOn() || !n){ el.hidden = true; return; }
+  if (!spotOn()){ el.hidden = true; return; }
   el.hidden = false;
+  const n = SPOT.now;
+  if (!n){ const msg = SPOT.err ? esc(SPOT.err) : SPOT.checked ? 'Nothing playing on Spotify' : 'Checking Spotify…';
+    const h = `<span class="sp-art" style="display:grid;place-items:center"><svg viewBox="0 0 24 24" width="22" height="22" fill="#1ed760" aria-hidden="true"><circle cx="12" cy="12" r="11"/><path d="M6.5 9.5c3.8-1.1 7.6-.8 11 1M7.2 12.6c3-.8 6.1-.5 8.8.9M7.8 15.4c2.4-.6 4.6-.4 6.6.7" stroke="#000" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg></span><div class="sp-txt"><b>Spotify</b><span>${msg}</span></div>`;
+    if (el._h !== h){ el._h = h; el.innerHTML = h; } return; }
   const ic = k => `<svg viewBox="0 0 24 24" aria-hidden="true">${SP_IC[k]}</svg>`;
   const html = `${n.art ? `<img src="${esc(n.art)}" alt="">` : '<span class="sp-art"></span>'}<div class="sp-txt"><b>${esc(n.name || '')}</b><span>${esc(n.by || '')}</span></div>
     <button data-sp="previous" aria-label="Back">${ic('prev')}</button><button class="sp-pp" data-sp="${n.playing ? 'pause' : 'play'}" aria-label="${n.playing ? 'Pause' : 'Play'}">${ic(n.playing ? 'pause' : 'play')}</button><button data-sp="next" aria-label="Skip">${ic('next')}</button>`;
@@ -2619,8 +2630,12 @@ function drawRichSpot(){
   const el = $('#richSpot'); if (!el) return;
   if (!isRich()){ el.hidden = true; return; }
   el.hidden = false; const sp = store.spot || {};
+  if (sp.refresh && !sp.name && !SPOT.meAsked){ SPOT.meAsked = true; spotMe(); spotTick(); }
   el.innerHTML = `<span class="label">Spotify on the Session screen · only you have this</span>
-    ${sp.refresh ? `<p class="muted" style="margin:0;font-size:14px">Connected. What's playing shows under the gauge, with back, pause and skip (needs Premium).</p><button class="btn small" id="spOut">Disconnect Spotify</button>`
+    ${sp.refresh ? `<p style="margin:0;font-size:15px">Connected as <b>${esc(sp.name || '…')}</b></p>
+      <p class="muted" style="margin:0;font-size:13px">${SPOT.err ? esc(SPOT.err) : SPOT.now ? 'Now playing: ' + esc(SPOT.now.name) + ' · ' + esc(SPOT.now.by) : SPOT.checked ? 'Nothing playing right now' : 'Checking…'}</p>
+      <p class="muted" style="margin:0;font-size:12px">It shows under the gauge on the Session screen, with back, pause and skip (needs Premium).</p>
+      <button class="btn small" id="spOut">Disconnect Spotify</button>`
     : `<p class="muted" style="margin:0;font-size:13px">Shows what's playing on your Spotify under the gauge. This page's link has to be a Redirect URI in the Spotify app: <span class="mono" style="word-break:break-all;user-select:all">${esc(spotRedirect())}</span></p>
       <button class="btn primary" id="spIn">Connect Spotify</button>
       <button class="btn" id="spCopy">Copy sign-in link (for Chrome or Safari)</button>
