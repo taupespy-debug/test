@@ -2523,11 +2523,12 @@ function drawRichWall(){
    A website can't see or control other apps' music on iPhone, so this talks to Spotify's own API: sign in once
    (PKCE, no server needed), then it shows what's playing and skip / pause / back (control needs Premium) */
 const SPOT = { now:null, busy:false, err:'' };
+const SPOT_CID = '06f39ce667fb49b38a61e7f7702c253e'; // rich's Spotify developer app (a Client ID is public, PKCE needs no secret)
 const spotRedirect = () => location.origin + location.pathname;
 const spotOn = () => isRich() && store.spot && store.spot.refresh;
 function b64url(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 async function spotLogin(){
-  const cid = ((store.spot && store.spot.cid) || '').trim(); if (!cid){ toast('Paste your Spotify Client ID first'); return; }
+  const cid = ((store.spot && store.spot.cid) || SPOT_CID).trim(); store.spot = Object.assign({}, store.spot, { cid });
   const v = b64url(crypto.getRandomValues(new Uint8Array(48)));
   store.spot = Object.assign({}, store.spot, { verifier: v }); save();
   const ch = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v)));
@@ -2590,14 +2591,12 @@ function drawRichSpot(){
   el.hidden = false; const sp = store.spot || {};
   el.innerHTML = `<span class="label">Spotify on the Session screen · only you have this</span>
     ${sp.refresh ? `<p class="muted" style="margin:0;font-size:14px">Connected. What's playing shows under the gauge, with back, pause and skip (needs Premium).</p><button class="btn small" id="spOut">Disconnect Spotify</button>`
-    : `<p class="muted" style="margin:0;font-size:13px">Make an app at developer.spotify.com (Web API), add this as a Redirect URI, then paste its Client ID:</p>
-      <p class="mono" style="margin:0;font-size:12px;word-break:break-all;user-select:all">${esc(spotRedirect())}</p>
-      <input type="text" id="spCid" placeholder="Client ID" autocomplete="off" autocapitalize="off" value="${esc(sp.cid || '')}" style="width:100%;background:var(--fill);border:0;border-radius:14px;padding:12px 14px;color:var(--fg);font:inherit;font-size:16px">
+    : `<p class="muted" style="margin:0;font-size:13px">Shows what's playing on your Spotify under the gauge. This page's link has to be a Redirect URI in the Spotify app: <span class="mono" style="word-break:break-all;user-select:all">${esc(spotRedirect())}</span></p>
       <button class="btn primary" id="spIn">Connect Spotify</button>`}`;
 }
 document.addEventListener('click', e => {
   if (!e.target.closest('#richSpot')) return;
-  if (e.target.id === 'spIn'){ store.spot = Object.assign({}, store.spot, { cid: (($('#spCid') || {}).value || '').trim() }); save(); spotLogin(); }
+  if (e.target.id === 'spIn'){ store.spot = Object.assign({}, store.spot, { cid: SPOT_CID }); save(); spotLogin(); }
   if (e.target.id === 'spOut'){ store.spot = { cid: (store.spot || {}).cid }; SPOT.now = null; save(); drawRichSpot(); drawSpot(); toast('Spotify disconnected'); }
 });
 function wallPick(){ const i = $('#wallFile'); if (i){ i.value = ''; i.click(); } }
