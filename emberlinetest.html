@@ -131,7 +131,7 @@ h1,h2,h3{font-family:var(--f-display);margin:0;text-wrap:balance}
     radial-gradient(45% 35% at 30% 78%, color-mix(in srgb,var(--tint2) 34%,transparent), transparent 72%),
     radial-gradient(40% 30% at 85% 90%, color-mix(in srgb,var(--accent) 38%,transparent), transparent 70%),
     var(--bg);
-  filter:saturate(1.1);animation:drift 28s ease-in-out infinite alternate}
+  } /* kept still on purpose: a moving background makes the phone re-blur every glass card on every frame (the app ran hot) */
 @keyframes drift{to{transform:translate3d(3%,-2%,0) rotate(4deg) scale(1.05)}}
 
 /* Liquid Glass material */
@@ -645,8 +645,8 @@ nav button[aria-current="page"] svg{transform:translateY(-1px) scale(1.12)}
     0 10px 28px rgba(0,0,0,.35),0 0 34px color-mix(in srgb,var(--pc) 40%,transparent)}
 .lg-pill::before{content:"";position:absolute;inset:0;border-radius:inherit;padding:1.5px;z-index:2;
   background:conic-gradient(from var(--lg-a),transparent 0 20%,rgba(255,255,255,.95) 28%,transparent 38% 68%,color-mix(in srgb,var(--pc) 60%,#fff) 76%,transparent 86%);
-  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);
-  animation:lgSpin 4s linear infinite}
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}
+.gauge-wrap[data-mode="ready"] .lg-pill::before{animation:lgSpin 4s linear infinite} /* only spins while it's showing */
 .lg-pill::after{content:"";position:absolute;inset:0;border-radius:inherit;z-index:1;pointer-events:none;
   background:radial-gradient(120% 70% at 30% -10%,rgba(255,255,255,.45),transparent 55%),radial-gradient(80% 60% at 85% 120%,color-mix(in srgb,var(--pc) 35%,transparent),transparent 60%)}
 @keyframes lgSpin{to{--lg-a:360deg}}
@@ -1292,7 +1292,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
   radial-gradient(70% 50% at 50% 110%,rgba(156,110,31,.25),transparent 70%),#080604!important}
 :root[data-gold] .ambient::before{content:"";position:absolute;inset:0;opacity:.55;
   background-image:radial-gradient(1.2px 1.2px at 12% 18%,#ffe9a8 50%,transparent 51%),radial-gradient(1px 1px at 72% 12%,#fff3c9 50%,transparent 51%),radial-gradient(1.4px 1.4px at 40% 64%,#f3cf6b 50%,transparent 51%),radial-gradient(1px 1px at 86% 58%,#ffe9a8 50%,transparent 51%),radial-gradient(1.2px 1.2px at 24% 86%,#fff3c9 50%,transparent 51%),radial-gradient(1px 1px at 60% 38%,#f3cf6b 50%,transparent 51%);
-  animation:goldDust 9s ease-in-out infinite alternate}
+  }
 @keyframes goldDust{to{transform:translateY(-14px);opacity:.25}}
 :root[data-gold] .card,:root[data-gold] .tile,:root[data-gold] nav .in,:root[data-gold] .navbtn{border:1px solid transparent;
   background:linear-gradient(#16110a,#100c06) padding-box,linear-gradient(135deg,rgba(255,236,180,.55),rgba(156,110,31,.25) 35%,rgba(243,207,107,.45) 65%,rgba(94,65,15,.3)) border-box!important;
