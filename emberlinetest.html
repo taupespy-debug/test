@@ -3085,24 +3085,14 @@ function forceReconnect(){
   ble.cmd = null;
   if (was && !manualDisconnect) autoReconnect();
 }
-// in the background: stop all Bluetooth reads, then let go of the device after a bit. While Path holds a Bluetooth
-// connection iPhone keeps it awake, and that's what made phones hot with Path in the background. Coming back reconnects
-let bgDrop = 0;
 document.addEventListener('visibilitychange', async () => {
   document.documentElement.classList.toggle('bg', document.hidden);
-  if (document.hidden){
-    stopPolling(); hitLoopStop();
-    clearTimeout(bgDrop);
-    const mid = S.state >= 7 && S.state <= 9; // a session was running: give it time to finish first
-    bgDrop = setTimeout(() => { if (document.hidden && S.mode === 'live' && ble.connected){ try { ble.disconnect(true); } catch(e){} ble.cmd = null; } }, mid ? 300000 : 45000);
-    return;
-  }
-  clearTimeout(bgDrop);
+  if (document.hidden){ stopPolling(); return; }
   if (manualDisconnect || store.autoConnect === false && C.state !== 'live' && C.state !== 'reconnecting') return;
   if (S.mode === 'live' && !ble.connected){ forceReconnect(); return; } // link died while we were away
   if (S.mode === 'live' && ble.connected){
     // iOS often kills the link while the app is in the background without telling the page
-    try { await withTimeout(ble.u8('/p/app/stat/id'), 900, 'gatt'); startPolling(); poll(); if ((S.state === 7 || S.state === 8) && !HIT.loop) hitLoopStart(); }
+    try { await withTimeout(ble.u8('/p/app/stat/id'), 900, 'gatt'); startPolling(); poll(); }
     catch(e){ forceReconnect(); }
   }
   else if (C.state !== 'connecting' && store.lastDeviceName && S.mode !== 'live') autoReconnect();
