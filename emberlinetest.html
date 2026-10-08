@@ -221,6 +221,93 @@ section.view>*{min-width:0}
 .state-chip.ready{background:color-mix(in srgb,var(--good) 26%,transparent);color:var(--good)}
 
 .chips{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:4px;border-radius:22px;background:var(--fill)}
+/* avatar frames */
+.afr{position:relative;display:inline-grid;place-items:center;flex:none;vertical-align:middle}
+.afr>svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.afr .af-under{z-index:0}.afr .af-over{z-index:2}
+.afr-av{position:relative;z-index:1;display:grid;place-items:center;border-radius:50%;overflow:hidden}
+.afr-av>*{width:100%!important;height:100%!important;margin:0!important}
+.afr.af-hex .afr-av{border-radius:0;clip-path:polygon(50% 0,93% 25%,93% 75%,50% 100%,7% 75%,7% 25%)}
+.af-demo{display:grid;place-items:center;background:linear-gradient(135deg,#7a2bd6,#ff6a3d);color:#fff;font-weight:800;font-size:2.2em;border-radius:50%}
+.afr.af-hex .af-demo{border-radius:0}
+.af-live .af-flick{transform-box:fill-box;transform-origin:50% 100%;animation:afFlick 1.2s ease-in-out infinite}
+@keyframes afFlick{30%{transform:scale(1.08,.9) skewX(-4deg)}60%{transform:scale(.94,1.12) skewX(4deg)}}
+.af-rise,.af-fall{opacity:0}
+.af-live .af-rise{animation:afRise 2.4s ease-out infinite}
+@keyframes afRise{15%{opacity:1}100%{transform:translateY(-40px);opacity:0}}
+.af-live .af-spin{transform-origin:75px 75px;animation:afSpin 6s linear infinite}
+.af-live .af-spinr{transform-origin:75px 75px;animation:afSpin 9s linear infinite reverse}
+@keyframes afSpin{to{transform:rotate(360deg)}}
+.af-seg{opacity:.2}.af-live .af-seg{animation:afSeg 2.4s linear infinite}
+@keyframes afSeg{0%{opacity:.15}5%,60%{opacity:1}100%{opacity:.15}}
+.af-live .af-bob{animation:afBob 2.6s ease-in-out infinite}
+@keyframes afBob{50%{transform:translateY(-4px)}}
+.af-live .af-puff{transform-box:fill-box;transform-origin:center;animation:afPuff 3s ease-in-out infinite}
+@keyframes afPuff{50%{transform:scale(1.25);opacity:.4}}
+.af-live .af-g1{animation:afG1 2.2s steps(1) infinite}.af-live .af-g2{animation:afG2 2.2s steps(1) infinite}
+@keyframes afG1{90%{transform:translate(3px,-2px)}94%{transform:translate(-3px,1px)}97%{transform:none}}
+@keyframes afG2{0%{transform:translate(1px,1px)}91%{transform:translate(-4px,2px)}95%{transform:translate(3px,-1px)}}
+.af-live .af-pupil{animation:afPupil 1.6s cubic-bezier(.5,1.8,.5,.8) infinite}
+@keyframes afPupil{0%,100%{transform:translate(0,4px)}25%{transform:translate(-4px,-2px)}50%{transform:translate(4px,-3px)}75%{transform:translate(-2px,4px)}}
+.af-live .af-drip{transform-box:fill-box;transform-origin:50% 0;animation:afDrip 2.4s ease-in infinite}
+@keyframes afDrip{0%,30%,100%{transform:none}70%{transform:scaleY(1.8)}}
+.af-live .af-ear{transform-box:fill-box;transform-origin:50% 100%;animation:afEar 3s ease-in-out infinite}
+@keyframes afEar{0%,80%,100%{transform:none}85%{transform:rotate(-12deg)}90%{transform:rotate(6deg)}}
+.af-live .af-wag{transform-origin:118px 120px;animation:afWag 1.2s ease-in-out infinite alternate}
+@keyframes afWag{from{transform:rotate(-10deg)}to{transform:rotate(14deg)}}
+.af-squirt{stroke-dasharray:240}.af-live .af-squirt{animation:afSquirt 2.8s ease-in-out infinite}
+@keyframes afSquirt{0%{stroke-dashoffset:240}50%,80%{stroke-dashoffset:0}100%{stroke-dashoffset:-240}}
+.af-live .af-duck{animation:afDuck .9s ease-in-out infinite alternate}
+@keyframes afDuck{to{transform:translateY(-3px) rotate(-6deg)}}
+.af-live .af-wave{animation:afWave 2s linear infinite}
+@keyframes afWave{to{stroke-dashoffset:-24}}
+.af-live .af-tilt{transform-box:fill-box;transform-origin:50% 100%;animation:afTilt 2s ease-in-out infinite alternate}
+@keyframes afTilt{from{transform:rotate(-8deg)}to{transform:rotate(8deg)}}
+.af-live .af-fall{animation:afFall 2.6s linear infinite}
+@keyframes afFall{0%{transform:translateY(-20px);opacity:0}10%{opacity:1}100%{transform:translateY(150px) rotate(540deg);opacity:0}}
+.af-live .af-honk{transform-box:fill-box;transform-origin:center;animation:afHonk 1.8s ease-in-out infinite}
+@keyframes afHonk{0%,70%,100%{transform:none}78%{transform:scale(1.35)}86%{transform:scale(.9)}}
+.af-live .af-hop{animation:afHop 1s ease-in-out infinite}
+@keyframes afHop{0%,55%,100%{transform:none}40%{transform:translateY(-7px)}}
+.af-live .af-eyes{transform-box:fill-box;transform-origin:center;animation:afEyes 3.5s infinite}
+@keyframes afEyes{0%,92%,100%{transform:none}95%{transform:scaleY(.1)}}
+.af-live .af-wig{transform-box:fill-box;transform-origin:center;animation:afWig 1.4s ease-in-out infinite}
+@keyframes afWig{25%{transform:rotate(-7deg)}75%{transform:rotate(7deg)}}
+.af-glint{opacity:0}.af-live .af-glint{animation:afGlint 2.6s ease-in-out infinite}
+@keyframes afGlint{0%,70%,100%{opacity:0}80%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.afr *{animation:none!important}}
+/* item shop */
+.ishop{position:fixed;inset:0;z-index:70;overflow:auto;-webkit-overflow-scrolling:touch;background:radial-gradient(90% 50% at 50% 0%,#2d7cf0,#1a3fa8 40%,#0b1640 80%);color:#fff;opacity:0;transform:translateY(16px);transition:opacity .25s,transform .25s;padding:calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 30px)}
+.ishop.on{opacity:1;transform:none}
+.ish-in{max-width:760px;margin:0 auto;display:grid;gap:10px}
+.ish-top{display:flex;align-items:center;justify-content:space-between}
+.ishop h1{margin:0;font:900 italic 40px/1 var(--f-round,system-ui);letter-spacing:-.01em;text-shadow:0 4px 0 #0a1a55}
+.ishop h2{margin:10px 0 0;font:900 italic 22px var(--f-round,system-ui);text-shadow:0 3px 0 #0a1a55}
+.ish-x{width:40px;height:40px;border-radius:99px;border:0;background:#0a1a55;color:#fff;font-size:18px}
+.ish-tabs{display:flex;gap:8px}.ish-tabs button{flex:1;padding:10px;border:0;border-radius:8px;background:#0a1a5599;color:#fff;font:900 italic 16px var(--f-round,system-ui)}
+.ish-tabs button[aria-pressed="true"]{background:#ffe14d;color:#1b1b1b}
+.ish-timer{justify-self:start;background:#0a1a55;padding:5px 12px;border-radius:6px;font:800 italic 14px var(--f-round,system-ui)}.ish-timer b{color:#ffe14d}
+.ish-row{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+.ish-row.feat{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}.ish-row.feat .ish-tile:first-child{grid-column:1/-1}
+.ish-tile{position:relative;border:0;padding:0;border-radius:8px;overflow:hidden;height:210px;display:grid;grid-template-rows:1fr auto;color:#fff;text-align:left;background:radial-gradient(circle at 50% 35%,var(--r1),var(--r2) 72%);box-shadow:0 0 0 3px #0003 inset,0 6px 14px #0006}
+.ish-tile.big{height:250px}
+.ish-price.eq{background:#ffe14d;color:#1b1b1b}
+.ish-bundle .afr{margin:-8px -2px!important}
+.ish-streaks{position:absolute;inset:0;background:repeating-linear-gradient(115deg,#fff0 0 22px,#ffffff14 22px 26px);-webkit-mask:linear-gradient(#000,#0000 70%);mask:linear-gradient(#000,#0000 70%)}
+.ish-art{display:grid;place-items:center;position:relative}
+.ish-info{position:relative;display:grid;gap:1px;padding:14px 10px 8px;background:linear-gradient(#0000,#0009 35%)}
+.ish-info b{font:900 italic 18px/1.05 var(--f-round,system-ui);text-transform:uppercase}
+.ish-info small{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;opacity:.85}
+.ish-info{padding-right:78px!important}
+.ish-price{position:absolute;right:8px;bottom:8px;font:900 italic 15px var(--f-round,system-ui);background:#000a;padding:3px 8px;border-radius:4px;color:#fff}
+.ish-price s{opacity:.65;font-size:12px}
+.ish-bundle{position:relative;border:0;border-radius:8px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:16px 12px 40px;background:linear-gradient(110deg,#ff4fb0,#ff8a1f);color:#fff;text-align:left;box-shadow:0 6px 14px #0006}
+.ish-binfo{flex:1;min-width:150px;display:grid;padding-left:12px}.ish-binfo b{font:900 italic 24px var(--f-round,system-ui)}.ish-binfo small{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.ish-me{display:flex;align-items:center;gap:22px;padding:18px;border-radius:10px;background:#0a1a5599}.ish-me b{display:block;font:900 italic 20px var(--f-round,system-ui)}.ish-me small{opacity:.8}
+.ish-note{margin:6px 0 0;font-size:12px;opacity:.75}
+.ish-entry{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;border:0;cursor:pointer;color:#fff!important;background:linear-gradient(110deg,#2d7cf0,#6a1bb5)!important;font:900 italic 20px var(--f-round,system-ui)}
+.ish-entry small{font:700 12px var(--f-body,system-ui);opacity:.85}
+
 .spot{display:flex;align-items:center;gap:10px;margin:2px 0 10px;padding:8px;border-radius:18px;background:var(--fill)}
 .spot img,.spot .sp-art{width:44px;height:44px;border-radius:10px;object-fit:cover;flex:none;background:rgba(255,255,255,.08)}
 .spot .sp-txt{flex:1;min-width:0;display:grid;line-height:1.2}
@@ -1719,6 +1806,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
   <section class="view" id="v-social" hidden>
     <h1 class="largetitle">Social</h1>
     <div class="card soc-me" id="socMe"></div>
+    <button class="card ish-entry" id="ishOpen">ITEM SHOP<small>Avatar frames · new every day</small></button>
     <div class="card soc-find"><span class="label">Find people</span>
       <div class="soc-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" id="socQ" placeholder="Search usernames" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
       <div class="soc-list" id="socResults"></div></div>
@@ -4648,7 +4736,7 @@ function openPlayer(r){
   let el = $('#lbProfile'); if (!el){ el = document.createElement('div'); el.id = 'lbProfile'; el.className = 'welcome'; document.body.appendChild(el); }
   const sc = r.showcase || [], meId = LB.me && LB.me.id, isMe = r.id === meId;
   el.innerHTML = `<div class="wl-card lbp"><div class="row between"><span class="label">Profile</span><button class="btn small ghost" id="lbpClose">Close</button></div>
-    <div class="lbp-head">${lbAvatar(r.avatar_url, r.username, 96)}<b class="lbp-name" data-pstats role="button" tabindex="0">${esc(r.username)}${r.dev ? devBadge(26) : ''}<svg class="lbp-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
+    <div class="lbp-head">${isMe ? framed(lbAvatar(r.avatar_url, r.username, 96), 96, myFrame(), true) : lbAvatar(r.avatar_url, r.username, 96)}<b class="lbp-name" data-pstats role="button" tabindex="0">${esc(r.username)}${r.dev ? devBadge(26) : ''}<svg class="lbp-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
       <div class="soc-counts"><span><b data-cnt="followers">–</b> followers</span><span><b data-cnt="following">–</b> following</span></div></div>
     <div class="lbp-stats" id="lbpStats" hidden></div>
     ${r.bio ? `<p class="soc-bio">${esc(r.bio)}</p>` : ''}
@@ -5178,6 +5266,121 @@ function squadCard(){
     <button class="btn small primary" id="sqInvite">Invite</button></div>`);
 }
 document.addEventListener('click', e => { if (e.target.closest && e.target.closest('#sqInvite')) shareInvite(); });
+/* ===== Avatar frames + Item Shop (test build) =====
+   Every frame is drawn in a 150x150 box around a 100px avatar (25..125). Animations only run inside .af-live
+   (the shop, your profile), never in lists, so phones don't heat up. Buying isn't wired yet (needs Stripe). */
+let afUid = 0;
+const AF_RAR = { uncommon:{ n:'Uncommon', c:['#87e339','#319236'] }, rare:{ n:'Rare', c:['#49c6ff','#1b5fd6'] }, epic:{ n:'Epic', c:['#d870ff','#6a1bb5'] }, legendary:{ n:'Legendary', c:['#ffb64a','#c94d16'] } };
+const FRAMES = [
+  { id:'ember', name:'Ember Crown', rar:'legendary', price:8, over: u => `<defs><linearGradient id="${u}f" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#ff3b1f"/><stop offset=".6" stop-color="#ff9d2e"/><stop offset="1" stop-color="#ffe7a3"/></linearGradient></defs>
+    <circle cx="75" cy="75" r="53" fill="none" stroke="url(#${u}f)" stroke-width="5"/><g fill="url(#${u}f)">
+    <path class="af-flick" d="M75 4c6 10 10 14 10 22a10 10 0 0 1-20 0c0-8 4-12 10-22z"/>
+    <path class="af-flick" style="animation-delay:-.7s" d="M48 12c4 7 7 10 7 15a7 7 0 0 1-14 0c0-5 3-8 7-15z" transform="rotate(-22 48 28)"/>
+    <path class="af-flick" style="animation-delay:-.4s" d="M102 12c4 7 7 10 7 15a7 7 0 0 1-14 0c0-5 3-8 7-15z" transform="rotate(22 102 28)"/>
+    <path class="af-flick" style="animation-delay:-1s" d="M29 32c3 5 5 8 5 11a5 5 0 0 1-10 0c0-3 2-6 5-11z" transform="rotate(-45 29 43)"/>
+    <path class="af-flick" style="animation-delay:-.5s" d="M121 32c3 5 5 8 5 11a5 5 0 0 1-10 0c0-3 2-6 5-11z" transform="rotate(45 121 43)"/></g>
+    <circle class="af-rise" cx="60" cy="40" r="1.8" fill="#ffd27a"/><circle class="af-rise" style="animation-delay:.8s" cx="92" cy="38" r="1.5" fill="#ffd27a"/><circle class="af-rise" style="animation-delay:1.6s" cx="78" cy="30" r="2" fill="#ffd27a"/>` },
+  { id:'hex', name:'Hex Rune', rar:'epic', price:6, hex:true, over: u => `<defs><linearGradient id="${u}h" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d6c2ff"/><stop offset=".5" stop-color="#9b4dff"/><stop offset="1" stop-color="#3a0b80"/></linearGradient></defs>
+    <polygon points="75,19 125,47.5 125,102.5 75,131 25,102.5 25,47.5" fill="none" stroke="url(#${u}h)" stroke-width="6" stroke-linejoin="round"/>
+    <g class="af-spin"><polygon points="75,8 134,42 134,108 75,142 16,108 16,42" fill="none" stroke="#b46bff" stroke-width="1.5" stroke-dasharray="6 10" opacity=".8"/></g>
+    <g class="af-spinr"><circle cx="75" cy="8" r="3.5" fill="#fff"/><circle cx="75" cy="142" r="2.5" fill="#e3ccff"/></g>` },
+  { id:'glass', name:'Liquid Glass', rar:'rare', price:5, under: u => `<circle cx="75" cy="75" r="60" fill="#b46bff22"/>`, over: u => `<defs><linearGradient id="${u}g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff"/></linearGradient></defs>
+    <circle cx="75" cy="75" r="56" fill="none" stroke="#ffffff40" stroke-width="5"/><g class="af-spin" style="animation-duration:3.5s"><path d="M75 19 A56 56 0 0 1 131 75" fill="none" stroke="url(#${u}g)" stroke-width="5" stroke-linecap="round"/><path d="M75 131 A56 56 0 0 1 19 75" fill="none" stroke="#b46bff" stroke-width="5" stroke-linecap="round" opacity=".8"/></g>` },
+  { id:'blinker', name:'Blinker', rar:'epic', price:6, over: u => { const a = i => { const r = 60, s = (i * 45 - 90 + 4) * Math.PI / 180, e = (i * 45 - 90 + 41) * Math.PI / 180; return `M${(75 + r * Math.cos(s)).toFixed(1)} ${(75 + r * Math.sin(s)).toFixed(1)} A${r} ${r} 0 0 1 ${(75 + r * Math.cos(e)).toFixed(1)} ${(75 + r * Math.sin(e)).toFixed(1)}`; };
+    return `<g fill="none" stroke="#ff3b1f" stroke-width="7" stroke-linecap="round">${[0,1,2,3,4,5,6,7].map(i => `<path class="af-seg" style="animation-delay:${i * .3}s" d="${a(i)}"/>`).join('')}</g>
+    <rect x="45" y="128" width="60" height="16" rx="8" fill="#ff3b1f"/><text x="75" y="140" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="800" font-size="10" letter-spacing="1.2" fill="#fff">BLINKER</text>`; } },
+  { id:'laurel', name:'Champion Laurel', rar:'legendary', price:8, over: u => `<defs><linearGradient id="${u}l" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff4c9"/><stop offset=".5" stop-color="#e9bb4f"/><stop offset="1" stop-color="#8a6115"/></linearGradient></defs>
+    <circle cx="75" cy="75" r="53" fill="none" stroke="url(#${u}l)" stroke-width="5"/><g fill="url(#${u}l)">
+    ${[[24,100,-30],[18,84,-10],[17,67,8],[22,51,25]].map(([x,y,r]) => `<ellipse cx="${x}" cy="${y}" rx="4" ry="9" transform="rotate(${r} ${x} ${y})"/><ellipse cx="${150 - x}" cy="${y}" rx="4" ry="9" transform="rotate(${-r} ${150 - x} ${y})"/>`).join('')}
+    <path class="af-bob" d="M55 24 L60 8 L68 18 L75 4 L82 18 L90 8 L95 24 Z"/></g>` },
+  { id:'vapor', name:'Vapor Cloud', rar:'rare', price:5, under: u => `<defs><filter id="${u}b"><feGaussianBlur stdDeviation="5"/></filter></defs>
+    <g class="af-spin" style="animation-duration:7s" filter="url(#${u}b)" opacity=".8"><path d="M75 10 C110 12 140 40 138 70" stroke="#cfd8ff" stroke-width="12" fill="none" stroke-linecap="round"/><path d="M75 140 C40 138 10 110 12 80" stroke="#b9a7ff" stroke-width="10" fill="none" stroke-linecap="round"/></g>`,
+    over: u => `<circle class="af-puff" cx="122" cy="30" r="6" fill="#fff" opacity=".7"/><circle class="af-puff" style="animation-delay:1s" cx="28" cy="122" r="5" fill="#fff" opacity=".6"/>` },
+  { id:'glitch', name:'Neon Glitch', rar:'epic', price:6, over: u => `<g class="af-g1"><circle cx="75" cy="75" r="54" fill="none" stroke="#00f0ff" stroke-width="3"/></g><g class="af-g2" style="mix-blend-mode:screen"><circle cx="75" cy="75" r="54" fill="none" stroke="#ff2bd6" stroke-width="3"/></g>` },
+  { id:'orbit', name:'Orbit', rar:'rare', price:5, over: u => `<circle cx="75" cy="75" r="58" fill="none" stroke="#2fd3a755" stroke-width="1.5"/><circle cx="75" cy="75" r="68" fill="none" stroke="#2fd3a733" stroke-width="1" stroke-dasharray="2 5"/>
+    <g class="af-spin" style="animation-duration:4s"><circle cx="75" cy="17" r="5" fill="#c8fff0"/><circle cx="75" cy="17" r="10" fill="#2fd3a7" opacity=".25"/></g><g class="af-spinr" style="animation-duration:6.5s"><circle cx="143" cy="75" r="3.5" fill="#ffd27a"/><circle cx="7" cy="75" r="2.5" fill="#ff9ae6"/></g>` },
+  { id:'googly', name:'Googly Eyes', rar:'uncommon', price:5, over: u => `<circle cx="75" cy="75" r="52" fill="none" stroke="#fff" stroke-width="4"/>
+    <circle cx="52" cy="24" r="16" fill="#fff" stroke="#111" stroke-width="2.5"/><circle class="af-pupil" cx="52" cy="24" r="7.5" fill="#111"/><circle cx="98" cy="24" r="16" fill="#fff" stroke="#111" stroke-width="2.5"/><circle class="af-pupil" style="animation-delay:-.4s;animation-duration:1.9s" cx="98" cy="24" r="7.5" fill="#111"/>` },
+  { id:'pizza', name:'Pizza Party', rar:'rare', price:5, under: u => `<g class="af-spin" style="animation-duration:14s"><circle cx="75" cy="75" r="66" fill="#e0a64a"/><circle cx="75" cy="75" r="60" fill="#ffd45c"/>
+    <g fill="#d6402b"><circle cx="75" cy="17" r="7"/><circle cx="127" cy="55" r="6.5"/><circle cx="118" cy="114" r="7"/><circle cx="40" cy="126" r="6.5"/><circle cx="21" cy="68" r="7"/><circle cx="106" cy="23" r="5"/><circle cx="30" cy="35" r="5"/></g></g>`,
+    over: u => `<g fill="#ffd45c"><path class="af-drip" d="M58 121 q3 0 3 6 v6 a3 3 0 0 1 -6 0 v-6 q0 -6 3 -6z"/><path class="af-drip" style="animation-delay:.9s" d="M92 122 q3 0 3 5 v8 a3 3 0 0 1 -6 0 v-8 q0 -5 3 -5z"/></g>` },
+  { id:'cat', name:'Cat Mode', rar:'uncommon', price:5, under: u => `<path class="af-wag" d="M118 120 C140 125 148 100 136 88" stroke="#3a3a3a" stroke-width="9" fill="none" stroke-linecap="round"/>`,
+    over: u => `<g class="af-ear"><path d="M32 46 L36 8 L64 30 Z" fill="#3a3a3a"/><path d="M38 38 L40 18 L55 31 Z" fill="#ff9ab8"/></g><g class="af-ear" style="animation-delay:1.3s"><path d="M118 46 L114 8 L86 30 Z" fill="#3a3a3a"/><path d="M112 38 L110 18 L95 31 Z" fill="#ff9ab8"/></g>
+    <g stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".9"><path d="M20 88 h-14"/><path d="M21 95 l-13 4"/><path d="M130 88 h14"/><path d="M129 95 l13 4"/></g>` },
+  { id:'hotdog', name:'Hot Dog', rar:'rare', price:5, under: u => `<rect x="4" y="42" width="142" height="66" rx="33" fill="#c9773a"/><rect x="10" y="48" width="130" height="54" rx="27" fill="#e89a55"/>`,
+    over: u => `<path class="af-squirt" d="M14 58 C24 48 34 68 46 58 S68 48 80 58 S102 68 114 58 S132 48 138 58" fill="none" stroke="#ffd21f" stroke-width="5" stroke-linecap="round"/>` },
+  { id:'duck', name:'Rubber Ducky', rar:'rare', price:5, under: u => `<circle cx="75" cy="75" r="62" fill="#3aa0ff55"/><circle class="af-wave" cx="75" cy="75" r="62" fill="none" stroke="#9fd6ff" stroke-width="3" stroke-dasharray="8 4"/>`,
+    over: u => `<g class="af-spin" style="animation-duration:7s"><g transform="translate(75 8)"><g class="af-duck"><ellipse cx="0" cy="8" rx="12" ry="8" fill="#ffd21f"/><circle cx="7" cy="-2" r="7" fill="#ffd21f"/><path d="M13 -2 l7 2 -7 2z" fill="#ff8a1f"/><circle cx="9" cy="-4" r="1.5" fill="#111"/><path d="M-12 6 l-5 -4 2 7z" fill="#ffd21f"/></g></g></g>` },
+  { id:'party', name:'Party Hat', rar:'uncommon', price:5, over: u => `<g class="af-tilt"><path d="M58 32 L80 -12 L100 28 Z" fill="#ff3ea5"/><path d="M66 16 L84 8 M62 24 L92 12" stroke="#ffe14d" stroke-width="4"/><circle cx="80" cy="-13" r="6" fill="#ffe14d"/><path d="M56 32 Q79 40 102 28" stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round"/></g>
+    ${[[20,'#3ddc84',0],[120,'#4aa8ff',.6],[40,'#ffe14d',1.2],[104,'#ff3ea5',1.8],[134,'#ffe14d',.3]].map(([x,c,d]) => `<rect class="af-fall" style="animation-delay:${d}s" x="${x}" y="0" width="6" height="3" fill="${c}"/>`).join('')}` },
+  { id:'clown', name:'Honk Honk', rar:'uncommon', price:5, under: u => `<circle cx="75" cy="75" r="64" fill="#fff"/><g class="af-spinr" style="animation-duration:10s">${[['75','15','#ff3b30'],['127','45','#4aa8ff'],['127','105','#ffd21f'],['75','135','#3ddc84'],['23','105','#b46bff'],['23','45','#ff8a1f']].map(([x,y,c]) => `<circle cx="${x}" cy="${y}" r="7" fill="${c}"/>`).join('')}</g>
+    <circle cx="16" cy="40" r="16" fill="#ff5c2b"/><circle cx="8" cy="58" r="13" fill="#ff5c2b"/><circle cx="134" cy="40" r="16" fill="#ff5c2b"/><circle cx="142" cy="58" r="13" fill="#ff5c2b"/>`,
+    over: u => `<circle class="af-honk" cx="75" cy="128" r="13" fill="#ff1f3d"/><circle cx="71" cy="124" r="4" fill="#fff" opacity=".7"/>` },
+  { id:'buddies', name:'Flame Buddies', rar:'epic', price:5, over: u => { const b = (x, y, s, d) => `<g class="af-hop" style="animation-delay:${d}s"><g transform="translate(${x} ${y}) scale(${s})"><path d="M0 20 C-14 12 -12 -6 0 -20 C2 -8 14 -6 14 8 C14 16 8 22 0 20Z" fill="url(#${u}b)"/><g class="af-eyes" style="animation-delay:${d * 2}s"><circle cx="-3" cy="8" r="2.2" fill="#111"/><circle cx="5" cy="8" r="2.2" fill="#111"/></g><path d="M-3 14 q4 3 8 0" stroke="#111" stroke-width="1.6" fill="none" stroke-linecap="round"/></g></g>`;
+    return `<defs><linearGradient id="${u}b" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#ff3b1f"/><stop offset="1" stop-color="#ffcf5c"/></linearGradient></defs>${b(38, 30, 1, 0)}${b(112, 30, 1, .35)}${b(75, 126, .75, .7)}`; } },
+  { id:'gent', name:'Fancy Gentleman', rar:'uncommon', price:5, over: u => `<path d="M32 26 h86 v6 h-86z M46 26 v-22 h58 v22z" fill="#111"/><rect x="46" y="16" width="58" height="5" fill="#b4232b"/>
+    <path class="af-wig" d="M75 104 C66 96 50 98 44 108 C52 106 58 112 66 110 C71 109 74 106 75 104 C76 106 79 109 84 110 C92 112 98 106 106 108 C100 98 84 96 75 104Z" fill="#2b1a10"/>
+    <circle cx="98" cy="70" r="12" fill="none" stroke="#e9bb4f" stroke-width="3"/><path d="M108 78 C114 90 112 104 118 120" stroke="#e9bb4f" stroke-width="1.5" fill="none"/><circle class="af-glint" cx="94" cy="66" r="3" fill="#fff"/>` }
+];
+const frameById = id => FRAMES.find(f => f.id === id);
+const AF_BUNDLES = [{ id:'snack', name:'Snack Pack', items:['pizza', 'hotdog', 'duck'], price:10 }];
+// an avatar wrapped in a frame. px = avatar size; the frame spills 25% past it on each side without taking layout space
+function framed(avatar, px, fid, live){
+  const f = fid && frameById(fid); if (!f) return avatar;
+  const u = 'af' + (afUid++), box = Math.round(px * 1.5), m = -Math.round(px * .25);
+  return `<span class="afr${live ? ' af-live' : ''}${f.hex ? ' af-hex' : ''}" style="width:${box}px;height:${box}px;margin:${m}px"><svg class="af-under" viewBox="0 0 150 150" aria-hidden="true">${f.under ? f.under(u) : ''}</svg><span class="afr-av" style="width:${px}px;height:${px}px">${avatar}</span><svg class="af-over" viewBox="0 0 150 150" aria-hidden="true">${f.over(u)}</svg></span>`;
+}
+const afOwned = id => IS_TEST || (store.frames || []).includes(id); // test build: everything unlocked to try
+const myFrame = () => { const f = store.frame; return f && afOwned(f) ? f : null; };
+// shop rotation: changes at local midnight. Featured = 3 (one legendary), Daily = 8, picked from the date
+function afRotation(d){
+  d = d || new Date(); let seed = d.getFullYear() * 400 + d.getMonth() * 32 + d.getDate();
+  const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  const pool = FRAMES.slice().sort(() => rnd() - .5);
+  const leg = pool.find(f => f.rar === 'legendary'), feat = [leg].concat(pool.filter(f => f !== leg && f.rar !== 'uncommon').slice(0, 1), pool.filter(f => f.rar === 'uncommon').slice(0, 1));
+  return { feat, daily: pool.filter(f => !feat.includes(f)).slice(0, 8) };
+}
+function afTile(f, big, locker){
+  const r = AF_RAR[f.rar], own = afOwned(f.id), eq = store.frame === f.id;
+  return `<button class="ish-tile${big ? ' big' : ''}" data-afitem="${f.id}" style="--r1:${r.c[0]};--r2:${r.c[1]}"><i class="ish-streaks"></i>
+    <span class="ish-art">${framed(`<span class="af-demo">${esc(((LB.me && LB.me.username) || 'R').slice(0, 1).toUpperCase())}</span>`, big ? 96 : 70, f.id, true)}</span>
+    <span class="ish-info"><b>${esc(f.name)}</b><small>${r.n}</small><em class="ish-price${eq ? ' eq' : ''}">${locker ? (eq ? 'EQUIPPED' : 'WEAR') : (own ? '✓ ' : '') + '$' + f.price}</em></span></button>`;
+}
+function itemShop(tab){
+  document.querySelectorAll('.ishop').forEach(e => e.remove());
+  tab = tab || 'shop';
+  const rot = afRotation(), el = document.createElement('div'); el.className = 'ishop';
+  const left = () => { const e = new Date(); e.setHours(24, 0, 0, 0); const s = Math.max(0, Math.floor((e - Date.now()) / 1000)); return [s / 3600 | 0, (s % 3600) / 60 | 0, s % 60].map(x => String(x).padStart(2, '0')).join(':'); };
+  const bundle = AF_BUNDLES[0], full = bundle.items.reduce((a, id) => a + frameById(id).price, 0);
+  const avatar = framed(lbAvatar(LB.me && LB.me.avatar_url, (LB.me && LB.me.username) || 'You', 80), 80, myFrame(), true);
+  el.innerHTML = `<div class="ish-in">
+    <div class="ish-top"><h1>${tab === 'shop' ? 'ITEM SHOP' : 'LOCKER'}</h1><button class="ish-x" data-ishclose aria-label="Close">✕</button></div>
+    <div class="ish-tabs"><button data-ishtab="shop" aria-pressed="${tab === 'shop'}">Shop</button><button data-ishtab="locker" aria-pressed="${tab === 'locker'}">Locker</button></div>
+    ${tab === 'shop' ? `<div class="ish-timer">NEW ITEMS IN <b id="ishT">${left()}</b></div>
+      <h2>FEATURED</h2><div class="ish-row feat">${rot.feat.map(f => afTile(f, true)).join('')}</div>
+      <h2>${bundle.name.toUpperCase()} BUNDLE</h2>
+      <button class="ish-bundle" data-afbundle="${bundle.id}">${bundle.items.map(id => framed(`<span class="af-demo">R</span>`, 54, id, true)).join('')}
+        <span class="ish-binfo"><b>${bundle.name.toUpperCase()}</b><small>${bundle.items.length} avatar frames · ${bundle.items.map(id => frameById(id).name).join(', ')}</small></span><em class="ish-price"><s>$${full}</s> $${bundle.price}</em></button>
+      <h2>DAILY</h2><div class="ish-row">${rot.daily.map(f => afTile(f)).join('')}</div>`
+    : `<div class="ish-me">${avatar}<div><b>${store.frame && myFrame() ? esc(frameById(store.frame).name) : 'No frame'}</b><small>Tap a frame to wear it. Tap it again to take it off.</small></div></div>
+      <div class="ish-row">${FRAMES.filter(f => afOwned(f.id)).map(f => afTile(f, false, true)).join('') || '<p class="muted">No frames yet. Grab one in the Shop.</p>'}</div>`}
+    ${IS_TEST ? '<p class="ish-note">Test build: every frame is unlocked so you can try them. Buying isn’t hooked up yet.</p>' : ''}</div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => el.classList.add('on'));
+  const t = setInterval(() => { const x = el.querySelector('#ishT'); if (!el.isConnected){ clearInterval(t); return; } if (x) x.textContent = left(); }, 1000);
+}
+document.addEventListener('click', e => { if (e.target.closest('#ishOpen')) itemShop(); });
+document.addEventListener('click', e => {
+  const sh = e.target.closest('.ishop'); if (!sh) return;
+  if (e.target.closest('[data-ishclose]')){ sh.classList.remove('on'); setTimeout(() => sh.remove(), 250); return; }
+  const tb = e.target.closest('[data-ishtab]'); if (tb){ itemShop(tb.dataset.ishtab); return; }
+  const it = e.target.closest('[data-afitem]');
+  if (it){ const f = frameById(it.dataset.afitem); buzz(12);
+    if (!afOwned(f.id)){ toast(`${f.name}: $${f.price}. Buying is coming soon`); return; }
+    store.frame = store.frame === f.id ? null : f.id; save(); toast(store.frame ? `Wearing ${f.name}` : 'Frame off');
+    itemShop(sh.querySelector('[data-ishtab="locker"][aria-pressed="true"]') ? 'locker' : 'shop'); try { drawSocial(); } catch(_){} return; }
+  if (e.target.closest('[data-afbundle]')) toast('Bundles are coming soon');
+});
+
 function drawBadgeBook(){
   const el = $('#badgeBook'); if (!el) return;
   const st = spbStatus(), first = !store.spbUnlocked; store.spbUnlocked = store.spbUnlocked || {};
@@ -5293,7 +5496,7 @@ function drawSocial(){
     setHTML(meEl, `<span class="label">Your profile</span><p class="muted" style="margin:0">Make a profile with a username, photo and bio. People can find you, follow you and see your badges.</p><button class="btn primary" id="socCreate">Create your profile</button>`);
   } else {
     const c = SOC.myCounts, sc = me.showcase || [];
-    setHTML(meEl, `<div class="soc-head">${lbAvatar(me.avatar_url, me.username, 72)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}</b>
+    setHTML(meEl, `<div class="soc-head">${framed(lbAvatar(me.avatar_url, me.username, 72), 72, myFrame(), true)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}</b>
         <span class="muted"><span style="color:${lbTierColor(myRank().tier.n)};font-weight:700">${myRank().tier.n}</span> · ${myRank().rp} RP</span>
         <div class="soc-counts"><span><b data-cnt="followers">${c ? c.followers : '–'}</b> followers</span><span><b data-cnt="following">${c ? c.following : '–'}</b> following</span></div></div></div>
       ${me.bio ? `<p class="soc-bio">${esc(me.bio)}</p>` : '<p class="muted" style="margin:0;font-size:14px">No bio yet.</p>'}
@@ -7359,7 +7562,7 @@ function drawTestTools(){
     <div class="shop-actions"><button class="btn small" data-tt="1">+1 blinker</button><button class="btn small" data-tt="10">+10</button><button class="btn small" data-tt="99">Set 99</button><button class="btn small" data-tt="reset">Reset</button></div>
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
+    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
@@ -7552,6 +7755,8 @@ $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
   if (k === 'taxnote'){ rankTaxNotice(true); return; }
   if (k === 'hothead'){ hotHeadSheet(); return; }
+  if (k === 'ishop'){ itemShop(); return; }
+  if (k === 'locker'){ itemShop('locker'); return; }
   if (k === 'spotfake'){ store.spot = Object.assign({}, store.spot, { refresh: store.spot && store.spot.refresh || 'fake' }); SPOT.now = { name:'Gods Plan', by:'Drake', art:'', playing:true }; show('home'); drawSpot(); toast('Fake song shown (Rich only). Disconnect Spotify in Settings to clear'); return; }
   if (k === 'squad'){ const me = LB.me || lbStore().meCache; if (me){ me.invites = 2; me.invites_joined = 3; if (!me.referred_by) me.created_at = new Date().toISOString(); } squadSheet(); if (!me) toast('Make a ranked profile first to see your link'); return; }
   if (k === 'squadref'){ toast(`Your link: ${inviteUrl()} · Saved invite from a link: ${store.inviteRef || 'none'}`); return; }
