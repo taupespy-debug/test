@@ -291,7 +291,8 @@ section.view>*{min-width:0}
 .ish-row.feat{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}.ish-row.feat .ish-tile:first-child{grid-column:1/-1}
 .ish-tile{position:relative;border:0;padding:0;border-radius:8px;overflow:hidden;height:210px;display:grid;grid-template-rows:1fr auto;color:#fff;text-align:left;background:radial-gradient(circle at 50% 35%,var(--r1),var(--r2) 72%);box-shadow:0 0 0 3px #0003 inset,0 6px 14px #0006}
 .ish-tile.big{height:250px}
-.ish-price.eq{background:#ffe14d;color:#1b1b1b}
+.ish-price.eq{background:#ffe14d;color:#1b1b1b;font-size:12px}
+.has-bnr .soc-id,.has-bnr .lbp-name{text-shadow:0 1px 8px #000d}
 .ish-bundle .afr{margin:-8px -2px!important}
 .ish-streaks{position:absolute;inset:0;background:repeating-linear-gradient(115deg,#fff0 0 22px,#ffffff14 22px 26px);-webkit-mask:linear-gradient(#000,#0000 70%);mask:linear-gradient(#000,#0000 70%)}
 .ish-art{display:grid;place-items:center;position:relative}
@@ -307,6 +308,40 @@ section.view>*{min-width:0}
 .ish-note{margin:6px 0 0;font-size:12px;opacity:.75}
 .ish-entry{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;border:0;cursor:pointer;color:#fff!important;background:linear-gradient(110deg,#2d7cf0,#6a1bb5)!important;font:900 italic 20px var(--f-round,system-ui)}
 .ish-entry small{font:700 12px var(--f-body,system-ui);opacity:.85}
+
+/* profile banners */
+.bnr{position:absolute;left:0;right:0;top:0;height:112px;z-index:0;pointer-events:none;overflow:hidden;-webkit-mask:linear-gradient(#000 45%,#0000);mask:linear-gradient(#000 45%,#0000)}
+.bnr svg{width:100%;height:100%;display:block}
+.has-bnr{position:relative;overflow:hidden}.has-bnr>*:not(.bnr){position:relative;z-index:1}
+.af-live .bn-drift{animation:bnDrift 7s ease-in-out infinite alternate}
+@keyframes bnDrift{to{transform:translate(40px,-14px)}}
+.af-live .bn-sweep{animation:bnSweep 3.2s ease-in-out infinite}
+@keyframes bnSweep{0%,40%{transform:translateX(0) skewX(-20deg)}100%{transform:translateX(560px) skewX(-20deg)}}
+.af-live .bn-twinkle{animation:bnTw 2.4s ease-in-out infinite}
+@keyframes bnTw{0%,100%{opacity:.2}50%{opacity:1}}
+.af-live .bn-grid{animation:bnGrid 1.2s linear infinite}
+@keyframes bnGrid{to{transform:translateY(6px)}}
+.af-live .bn-wave{animation:bnWave 5s ease-in-out infinite alternate}
+@keyframes bnWave{to{transform:translate(-30px,8px)}}
+.af-live .bn-slide{animation:bnSlide 4s linear infinite}.af-live .bn-slide.r{animation-duration:6s;animation-direction:reverse}
+@keyframes bnSlide{to{transform:translateX(-100px)}}
+.af-live .bn-rise{animation:bnRise 3s ease-in infinite}
+@keyframes bnRise{to{transform:translateY(-100px);opacity:0}}
+.af-live .bn-win{animation:bnWin 3s steps(1) infinite}
+@keyframes bnWin{50%{opacity:.15}}
+.af-live .bn-flag{animation:bnFlag 1.6s ease-in-out infinite alternate;transform-origin:0 50%}
+@keyframes bnFlag{to{transform:skewY(3deg) scaleY(.96)}}
+.af-live .bn-pop{transform-box:fill-box;transform-origin:center;animation:bnPop 4.5s ease-in-out infinite}
+@keyframes bnPop{0%,85%,100%{transform:scale(1);opacity:1}90%{transform:scale(1.3);opacity:0}95%{transform:scale(.2);opacity:0}}
+.af-live .bn-cloud{animation:bnCloud 20s linear infinite}
+@keyframes bnCloud{from{transform:translateX(-60px)}to{transform:translateX(460px)}}
+@media (prefers-reduced-motion:reduce){.bnr *{animation:none!important}}
+/* banner tiles in the shop */
+.ish-tile.wide{grid-column:1/-1;height:170px}
+.ish-tile .ish-bn{position:absolute;inset:0 0 auto 0;height:118px;overflow:hidden}
+.ish-tile .ish-bn .bnr{height:118px;-webkit-mask:none;mask:none}
+.ish-bnart{position:relative;display:flex;align-items:flex-end;gap:10px;padding:0 12px}
+.ish-me.has-bnr{padding-top:70px}
 
 .spot{display:flex;align-items:center;gap:10px;margin:2px 0 10px;padding:8px;border-radius:18px;background:var(--fill)}
 .spot img,.spot .sp-art{width:44px;height:44px;border-radius:10px;object-fit:cover;flex:none;background:rgba(255,255,255,.08)}
@@ -1806,7 +1841,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
   <section class="view" id="v-social" hidden>
     <h1 class="largetitle">Social</h1>
     <div class="card soc-me" id="socMe"></div>
-    <button class="card ish-entry" id="ishOpen">ITEM SHOP<small>Avatar frames · new every day</small></button>
+    <button class="card ish-entry" id="ishOpen">ITEM SHOP<small>Frames &amp; banners · new every day</small></button>
     <div class="card soc-find"><span class="label">Find people</span>
       <div class="soc-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" id="socQ" placeholder="Search usernames" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
       <div class="soc-list" id="socResults"></div></div>
@@ -4744,6 +4779,7 @@ function openPlayer(r){
     ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, r)}">${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}
     ${isMe ? '' : meId ? `<button class="btn soc-follow" data-follow="${r.id}" style="width:100%">Follow</button>`
       : '<p class="muted" style="margin:0;text-align:center;font-size:13px">Make your profile in Social to follow people.</p>'}</div>`;
+  { const wc = el.querySelector('.wl-card'); wc.classList.toggle('has-bnr', isMe && !!myBanner()); if (isMe && myBanner()) wc.insertAdjacentHTML('afterbegin', bannerHtml(myBanner(), true)); }
   edCard(el.querySelector('.wl-card'), isMe ? myGear() : r.gear); socPaintFollow(r.id); el.hidden = false; applyHaptics();
   const fillCounts = () => socCounts(r.id).then(c => { if (el.hidden) return; el.querySelectorAll('[data-cnt]').forEach(b => { b.textContent = c[b.dataset.cnt]; }); });
   fillCounts();
@@ -5323,7 +5359,49 @@ const FRAMES = [
     <circle cx="98" cy="70" r="12" fill="none" stroke="#e9bb4f" stroke-width="3"/><path d="M108 78 C114 90 112 104 118 120" stroke="#e9bb4f" stroke-width="1.5" fill="none"/><circle class="af-glint" cx="94" cy="66" r="3" fill="#fff"/>` }
 ];
 const frameById = id => FRAMES.find(f => f.id === id);
-const AF_BUNDLES = [{ id:'snack', name:'Snack Pack', items:['pizza', 'hotdog', 'duck'], price:10 }];
+/* ===== Profile banners: the strip behind the top of your profile card. 400x110 box, scaled to fill ===== */
+const BANNERS = [
+  { id:'lava', name:'Lava Flow', rar:'legendary', price:8, svg: u => `<defs><filter id="${u}b"><feGaussianBlur stdDeviation="14"/></filter></defs><rect width="400" height="110" fill="#3a0700"/>
+    <g filter="url(#${u}b)"><circle class="bn-drift" cx="80" cy="70" r="55" fill="#ff3b1f"/><circle class="bn-drift" style="animation-delay:-3s;animation-duration:9s" cx="230" cy="40" r="60" fill="#ff8a1f"/><circle class="bn-drift" style="animation-delay:-6s" cx="350" cy="80" r="50" fill="#ffcf3f"/></g>
+    <path d="M0 90 C60 70 120 110 200 88 S330 70 400 92 V110 H0Z" fill="#1a0300" opacity=".7"/>` },
+  { id:'gold', name:'Gold Rush', rar:'legendary', price:8, svg: u => `<defs><linearGradient id="${u}g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5a3a08"/><stop offset=".45" stop-color="#e9bb4f"/><stop offset=".55" stop-color="#fff4c9"/><stop offset="1" stop-color="#8a6115"/></linearGradient></defs>
+    <rect width="400" height="110" fill="url(#${u}g)"/><rect class="bn-sweep" x="-80" y="-20" width="60" height="150" fill="#fff" opacity=".35" transform="skewX(-20)"/>
+    ${[[40,30],[120,80],[200,25],[290,70],[360,35],[80,90],[250,95]].map(([x,y],i) => `<path class="bn-twinkle" style="animation-delay:${i * .4}s" d="M${x} ${y - 6}l1.6 4.4 4.4 1.6-4.4 1.6-1.6 4.4-1.6-4.4-4.4-1.6 4.4-1.6z" fill="#fff"/>`).join('')}` },
+  { id:'galaxy', name:'Galaxy', rar:'epic', price:6, svg: u => `<defs><radialGradient id="${u}n" cx=".6" cy=".5" r=".6"><stop offset="0" stop-color="#b46bff" stop-opacity=".7"/><stop offset="1" stop-color="#b46bff" stop-opacity="0"/></radialGradient></defs>
+    <rect width="400" height="110" fill="#0a0620"/><ellipse cx="250" cy="55" rx="200" ry="60" fill="url(#${u}n)"/><ellipse cx="90" cy="40" rx="120" ry="40" fill="#2d7cf0" opacity=".25"/>
+    ${Array.from({ length:28 }, (_, i) => `<circle class="bn-twinkle" style="animation-delay:${(i * .37) % 3}s" cx="${(i * 97) % 400}" cy="${(i * 53) % 110}" r="${i % 4 ? 1 : 1.8}" fill="#fff"/>`).join('')}` },
+  { id:'synth', name:'Synthwave', rar:'epic', price:6, svg: u => `<defs><linearGradient id="${u}s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a0845"/><stop offset="1" stop-color="#ff3ea5"/></linearGradient><linearGradient id="${u}u" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe14d"/><stop offset="1" stop-color="#ff3ea5"/></linearGradient><clipPath id="${u}c"><rect y="0" width="400" height="62"/></clipPath></defs>
+    <rect width="400" height="62" fill="url(#${u}s)"/><g clip-path="url(#${u}c)"><circle cx="200" cy="62" r="40" fill="url(#${u}u)"/>${[44,50,55,59].map(y => `<rect x="150" y="${y}" width="100" height="2.5" fill="#2a0845"/>`).join('')}</g>
+    <rect y="62" width="400" height="48" fill="#12002a"/><g stroke="#ff3ea5" stroke-width="1.2" opacity=".9">${[-200,-120,-60,-20,20,60,120,200].map(x => `<line x1="200" y1="62" x2="${200 + x * 3}" y2="110"/>`).join('')}</g>
+    <g class="bn-grid" stroke="#ff3ea5" stroke-width="1.2">${[66,72,80,90,104].map(y => `<line x1="0" y1="${y}" x2="400" y2="${y}"/>`).join('')}</g>` },
+  { id:'aurora', name:'Aurora', rar:'rare', price:5, svg: u => `<defs><filter id="${u}a"><feGaussianBlur stdDeviation="8"/></filter></defs><rect width="400" height="110" fill="#06141f"/>
+    <g filter="url(#${u}a)" opacity=".9"><path class="bn-wave" d="M-40 60 C40 20 100 90 180 50 S320 20 440 60" stroke="#3ddc84" stroke-width="18" fill="none"/><path class="bn-wave" style="animation-delay:-2s" d="M-40 75 C60 40 140 100 220 65 S340 40 440 80" stroke="#b46bff" stroke-width="14" fill="none"/></g>
+    ${Array.from({ length:12 }, (_, i) => `<circle cx="${(i * 71) % 400}" cy="${(i * 29) % 40 + 6}" r="1" fill="#fff" opacity=".7"/>`).join('')}` },
+  { id:'ocean', name:'Deep Ocean', rar:'rare', price:5, svg: u => `<rect width="400" height="110" fill="#0b3d7a"/>
+    <g class="bn-slide"><path d="M0 50 q25 -12 50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 V110 H0Z" fill="#1d6dff" opacity=".7"/></g>
+    <g class="bn-slide r"><path d="M0 72 q25 -10 50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 V110 H0Z" fill="#49c6ff" opacity=".6"/></g>
+    <circle class="bn-rise" cx="60" cy="100" r="3" fill="none" stroke="#fff" opacity=".6"/><circle class="bn-rise" style="animation-delay:1.5s" cx="300" cy="104" r="2.5" fill="none" stroke="#fff" opacity=".6"/>` },
+  { id:'skyline', name:'Ember City', rar:'rare', price:5, svg: u => `<defs><linearGradient id="${u}k" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a0b2e"/><stop offset="1" stop-color="#c94d16"/></linearGradient></defs><rect width="400" height="110" fill="url(#${u}k)"/>
+    <g fill="#0d0716">${[[0,60,40],[40,40,30],[70,70,35],[105,30,28],[133,55,40],[173,45,30],[203,20,34],[237,65,30],[267,38,36],[303,58,30],[333,28,34],[367,50,33]].map(([x,y,w]) => `<rect x="${x}" y="${y}" width="${w}" height="${110 - y}"/>`).join('')}</g>
+    ${[[50,52],[112,40],[140,66],[210,32],[215,48],[275,50],[340,40],[345,60],[180,58],[80,80]].map(([x,y],i) => `<rect class="bn-win" style="animation-delay:${i * .7}s" x="${x}" y="${y}" width="4" height="5" fill="#ffd27a"/>`).join('')}` },
+  { id:'checker', name:'Finish Line', rar:'rare', price:5, svg: u => `<rect width="400" height="110" fill="#fff"/><g class="bn-flag">${Array.from({ length:44 }, (_, i) => { const c = i % 22, r = (i / 22) | 0; return ''; }).join('')}
+    ${Array.from({ length:5 }, (_, r) => Array.from({ length:20 }, (_, c) => (r + c) % 2 ? `<rect x="${c * 20}" y="${r * 22}" width="20" height="22" fill="#111"/>` : '').join('')).join('')}</g>` },
+  { id:'cheetah', name:'Cheetah', rar:'uncommon', price:5, svg: u => `<rect width="400" height="110" fill="#e8b25a"/>
+    ${Array.from({ length:30 }, (_, i) => { const x = (i * 83) % 400 + 8, y = (i * 37) % 110 + 4; return `<g transform="translate(${x} ${y}) rotate(${i * 47})"><path d="M-7 -2 C-6 -8 4 -8 7 -3 C9 2 2 7 -3 6 C-7 5 -8 2 -7 -2Z" fill="none" stroke="#3a2210" stroke-width="2.6"/><circle r="2.6" fill="#a0602a"/></g>`; }).join('')}` },
+  { id:'pizzapat', name:'Pizza Time', rar:'uncommon', price:5, svg: u => `<rect width="400" height="110" fill="#ff4d4d"/><g class="bn-slide">${Array.from({ length:24 }, (_, i) => { const x = (i % 12) * 40 + ((i / 12 | 0) ? 20 : 0), y = (i / 12 | 0) * 55 + 10; return `<g transform="translate(${x} ${y})"><path d="M0 0 L30 0 L15 40Z" fill="#ffd45c" stroke="#e0a64a" stroke-width="4" stroke-linejoin="round"/><circle cx="12" cy="9" r="3.5" fill="#d6402b"/><circle cx="19" cy="18" r="3" fill="#d6402b"/></g>`; }).join('')}</g>` },
+  { id:'bubbles', name:'Bubble Wrap', rar:'uncommon', price:5, svg: u => `<rect width="400" height="110" fill="#b9e6ff"/>${Array.from({ length:40 }, (_, i) => { const c = i % 10, r = (i / 10) | 0; return `<circle class="${i % 7 === 3 ? 'bn-pop' : ''}" style="animation-delay:${(i % 5) * .9}s" cx="${c * 40 + (r % 2 ? 40 : 20)}" cy="${r * 28 + 14}" r="12" fill="#ffffff88" stroke="#ffffffcc" stroke-width="1.5"/><circle cx="${c * 40 + (r % 2 ? 40 : 20) - 4}" cy="${r * 28 + 10}" r="3" fill="#fff" opacity=".8"/>`; }).join('')}` },
+  { id:'clouds', name:'Cloud Nine', rar:'uncommon', price:5, svg: u => `<rect width="400" height="110" fill="#6ec6ff"/>
+    ${[[30,30,1],[180,60,1.3],[320,25,.9],[90,85,.8]].map(([x,y,s],i) => `<g class="bn-cloud" style="animation-delay:${-i * 5}s"><g transform="translate(${x} ${y}) scale(${s})"><circle cx="0" cy="0" r="14" fill="#fff"/><circle cx="16" cy="-6" r="18" fill="#fff"/><circle cx="34" cy="0" r="14" fill="#fff"/><rect x="0" y="0" width="34" height="14" fill="#fff"/><circle cx="12" cy="-2" r="1.6" fill="#333"/><circle cx="22" cy="-2" r="1.6" fill="#333"/><path d="M14 4 q3 3 6 0" stroke="#333" stroke-width="1.4" fill="none" stroke-linecap="round"/></g></g>`).join('')}` }
+];
+const bannerById = id => BANNERS.find(b => b.id === id);
+function bannerHtml(id, live){
+  const b = id && bannerById(id); if (!b) return '';
+  return `<span class="bnr${live ? ' af-live' : ''}" aria-hidden="true"><svg viewBox="0 0 400 110" preserveAspectRatio="xMidYMid slice">${b.svg('bn' + (afUid++))}</svg></span>`;
+}
+const bnOwned = id => IS_TEST || (store.banners || []).includes(id);
+const myBanner = () => { const b = store.banner; return b && bnOwned(b) ? b : null; };
+
+const AF_BUNDLES = [{ id:'snack', name:'Snack Pack', items:['pizza', 'hotdog', 'duck'], price:10 }, { id:'cosmic', name:'Cosmic Set', items:['orbit'], banners:['galaxy'], price:9 }];
 // an avatar wrapped in a frame. px = avatar size; the frame spills 25% past it on each side without taking layout space
 function framed(avatar, px, fid, live){
   const f = fid && frameById(fid); if (!f) return avatar;
@@ -5346,6 +5424,13 @@ function afTile(f, big, locker){
     <span class="ish-art">${framed(`<span class="af-demo">${esc(((LB.me && LB.me.username) || 'R').slice(0, 1).toUpperCase())}</span>`, big ? 96 : 70, f.id, true)}</span>
     <span class="ish-info"><b>${esc(f.name)}</b><small>${r.n}</small><em class="ish-price${eq ? ' eq' : ''}">${locker ? (eq ? 'EQUIPPED' : 'WEAR') : (own ? '✓ ' : '') + '$' + f.price}</em></span></button>`;
 }
+function bnTile(b, locker){
+  const r = AF_RAR[b.rar], own = bnOwned(b.id), eq = store.banner === b.id;
+  return `<button class="ish-tile wide" data-bnitem="${b.id}" style="--r1:${r.c[0]};--r2:${r.c[1]}"><span class="ish-bn">${bannerHtml(b.id, true)}</span><span></span>
+    <span class="ish-info"><b>${esc(b.name)}</b><small>${r.n} · Banner</small><em class="ish-price${eq ? ' eq' : ''}">${locker ? (eq ? 'EQUIPPED' : 'WEAR') : (own ? '✓ ' : '') + '$' + b.price}</em></span></button>`;
+}
+// banners in the daily shop: 2 a day
+function bnRotation(d){ d = d || new Date(); let seed = d.getFullYear() * 500 + d.getMonth() * 40 + d.getDate() * 3 + 7; const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280; return BANNERS.slice().sort(() => rnd() - .5).slice(0, 2); }
 function itemShop(tab){
   document.querySelectorAll('.ishop').forEach(e => e.remove());
   tab = tab || 'shop';
@@ -5361,9 +5446,14 @@ function itemShop(tab){
       <h2>${bundle.name.toUpperCase()} BUNDLE</h2>
       <button class="ish-bundle" data-afbundle="${bundle.id}">${bundle.items.map(id => framed(`<span class="af-demo">R</span>`, 54, id, true)).join('')}
         <span class="ish-binfo"><b>${bundle.name.toUpperCase()}</b><small>${bundle.items.length} avatar frames · ${bundle.items.map(id => frameById(id).name).join(', ')}</small></span><em class="ish-price"><s>$${full}</s> $${bundle.price}</em></button>
+      ${(() => { const c = AF_BUNDLES[1], cf = c.items.reduce((a, id) => a + frameById(id).price, 0) + c.banners.reduce((a, id) => a + bannerById(id).price, 0);
+        return `<button class="ish-bundle has-bnr" data-afbundle="${c.id}" style="background:#0a0620;padding-top:60px">${bannerHtml(c.banners[0], true)}${c.items.map(id => framed(`<span class="af-demo">R</span>`, 54, id, true)).join('')}
+        <span class="ish-binfo"><b>${c.name.toUpperCase()}</b><small>${frameById(c.items[0]).name} frame + ${bannerById(c.banners[0]).name} banner</small></span><em class="ish-price"><s>$${cf}</s> $${c.price}</em></button>`; })()}
+      <h2>BANNERS</h2><div class="ish-row">${bnRotation().map(b => bnTile(b)).join('')}</div>
       <h2>DAILY</h2><div class="ish-row">${rot.daily.map(f => afTile(f)).join('')}</div>`
-    : `<div class="ish-me">${avatar}<div><b>${store.frame && myFrame() ? esc(frameById(store.frame).name) : 'No frame'}</b><small>Tap a frame to wear it. Tap it again to take it off.</small></div></div>
-      <div class="ish-row">${FRAMES.filter(f => afOwned(f.id)).map(f => afTile(f, false, true)).join('') || '<p class="muted">No frames yet. Grab one in the Shop.</p>'}</div>`}
+    : `<div class="ish-me${myBanner() ? ' has-bnr' : ''}">${bannerHtml(myBanner(), true)}${avatar}<div><b>${myFrame() ? esc(frameById(store.frame).name) : 'No frame'}${myBanner() ? ' · ' + esc(bannerById(store.banner).name) : ''}</b><small>Tap something to wear it. Tap it again to take it off.</small></div></div>
+      <h2>FRAMES</h2><div class="ish-row">${FRAMES.filter(f => afOwned(f.id)).map(f => afTile(f, false, true)).join('') || '<p class="muted">No frames yet. Grab one in the Shop.</p>'}</div>
+      <h2>BANNERS</h2><div class="ish-row">${BANNERS.filter(b => bnOwned(b.id)).map(b => bnTile(b, true)).join('') || '<p class="muted">No banners yet.</p>'}</div>`}
     ${IS_TEST ? '<p class="ish-note">Test build: every frame is unlocked so you can try them. Buying isn’t hooked up yet.</p>' : ''}</div>`;
   document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => el.classList.add('on'));
   const t = setInterval(() => { const x = el.querySelector('#ishT'); if (!el.isConnected){ clearInterval(t); return; } if (x) x.textContent = left(); }, 1000);
@@ -5377,6 +5467,11 @@ document.addEventListener('click', e => {
   if (it){ const f = frameById(it.dataset.afitem); buzz(12);
     if (!afOwned(f.id)){ toast(`${f.name}: $${f.price}. Buying is coming soon`); return; }
     store.frame = store.frame === f.id ? null : f.id; save(); toast(store.frame ? `Wearing ${f.name}` : 'Frame off');
+    itemShop(sh.querySelector('[data-ishtab="locker"][aria-pressed="true"]') ? 'locker' : 'shop'); try { drawSocial(); } catch(_){} return; }
+  const bi = e.target.closest('[data-bnitem]');
+  if (bi){ const b = bannerById(bi.dataset.bnitem); buzz(12);
+    if (!bnOwned(b.id)){ toast(`${b.name}: $${b.price}. Buying is coming soon`); return; }
+    store.banner = store.banner === b.id ? null : b.id; save(); toast(store.banner ? `${b.name} banner on` : 'Banner off');
     itemShop(sh.querySelector('[data-ishtab="locker"][aria-pressed="true"]') ? 'locker' : 'shop'); try { drawSocial(); } catch(_){} return; }
   if (e.target.closest('[data-afbundle]')) toast('Bundles are coming soon');
 });
@@ -5496,7 +5591,8 @@ function drawSocial(){
     setHTML(meEl, `<span class="label">Your profile</span><p class="muted" style="margin:0">Make a profile with a username, photo and bio. People can find you, follow you and see your badges.</p><button class="btn primary" id="socCreate">Create your profile</button>`);
   } else {
     const c = SOC.myCounts, sc = me.showcase || [];
-    setHTML(meEl, `<div class="soc-head">${framed(lbAvatar(me.avatar_url, me.username, 72), 72, myFrame(), true)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}</b>
+    meEl.classList.toggle('has-bnr', !!myBanner());
+    setHTML(meEl, `${bannerHtml(myBanner(), true)}<div class="soc-head" style="${myBanner() ? 'margin-top:44px' : ''}">${framed(lbAvatar(me.avatar_url, me.username, 72), 72, myFrame(), true)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}</b>
         <span class="muted"><span style="color:${lbTierColor(myRank().tier.n)};font-weight:700">${myRank().tier.n}</span> · ${myRank().rp} RP</span>
         <div class="soc-counts"><span><b data-cnt="followers">${c ? c.followers : '–'}</b> followers</span><span><b data-cnt="following">${c ? c.following : '–'}</b> following</span></div></div></div>
       ${me.bio ? `<p class="soc-bio">${esc(me.bio)}</p>` : '<p class="muted" style="margin:0;font-size:14px">No bio yet.</p>'}
