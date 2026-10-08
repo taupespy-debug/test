@@ -7505,6 +7505,13 @@ ble.onDisconnect = onDropped;
   try { new ResizeObserver(set).observe(h); } catch(e){ window.addEventListener('resize', set); } })();
 bootConnection();
 // pause the background drift while scrolling or dragging so the glass doesn't have to re-blur every frame
+// iPhone: when the page suddenly gets much taller or shorter (badge book, show more) or the keyboard closes, WebKit can leave
+// the header and tab bar drawn too high (they "slide up the screen") until a reload. A 1px scroll nudge makes it place them again
+function fixedResync(){ requestAnimationFrame(() => { const x = window.scrollX, y = window.scrollY; window.scrollTo(x, y + 1); window.scrollTo(x, y); }); }
+const typing = () => { const a = document.activeElement; return !!a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName); };
+document.addEventListener('toggle', () => setTimeout(fixedResync, 60), true); // <details> open/close (toggle doesn't bubble)
+document.addEventListener('focusout', e => { if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) setTimeout(() => { if (!typing()) fixedResync(); }, 350); });
+if (window.visualViewport) visualViewport.addEventListener('resize', () => { if (!typing()) fixedResync(); });
 { let st = 0; const on = () => { document.documentElement.classList.add('scrolling'); clearTimeout(st); st = setTimeout(() => document.documentElement.classList.remove('scrolling'), 180); };
   addEventListener('scroll', on, { passive: true }); addEventListener('touchmove', on, { passive: true }); }
 
