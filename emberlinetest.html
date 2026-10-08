@@ -343,6 +343,16 @@ section.view>*{min-width:0}
 .ish-bnart{position:relative;display:flex;align-items:flex-end;gap:10px;padding:0 12px}
 .ish-me.has-bnr{padding-top:70px}
 
+/* Rich's dev frame + banner */
+.lbp-head .afr{margin-bottom:8px!important}.soc-head .afr{margin-bottom:-4px!important}
+.has-bnr .label{text-shadow:0 1px 6px #000d}
+.dv-live .dv-spin{transform-origin:75px 75px;animation:dvSpin 2.8s linear infinite}
+.dv-live .dv-spinr{transform-origin:75px 75px;animation:dvSpin 12s linear infinite reverse}
+.dv-live .dv-text{transform-origin:75px 75px;animation:dvSpin 26s linear infinite}
+@keyframes dvSpin{to{transform:rotate(360deg)}}
+.dv-live .dv-cur{animation:dvCur 1s steps(1) infinite}
+@keyframes dvCur{50%{opacity:0}}
+.bnr-img img{width:100%;height:100%;display:block;object-fit:cover}
 .spot{display:flex;align-items:center;gap:10px;margin:2px 0 10px;padding:8px;border-radius:18px;background:var(--fill)}
 .spot img,.spot .sp-art{width:44px;height:44px;border-radius:10px;object-fit:cover;flex:none;background:rgba(255,255,255,.08)}
 .spot .sp-txt{flex:1;min-width:0;display:grid;line-height:1.2}
@@ -4771,7 +4781,7 @@ function openPlayer(r){
   let el = $('#lbProfile'); if (!el){ el = document.createElement('div'); el.id = 'lbProfile'; el.className = 'welcome'; document.body.appendChild(el); }
   const sc = r.showcase || [], meId = LB.me && LB.me.id, isMe = r.id === meId;
   el.innerHTML = `<div class="wl-card lbp"><div class="row between"><span class="label">Profile</span><button class="btn small ghost" id="lbpClose">Close</button></div>
-    <div class="lbp-head">${isMe ? framed(lbAvatar(r.avatar_url, r.username, 96), 96, myFrame(), true) : lbAvatar(r.avatar_url, r.username, 96)}<b class="lbp-name" data-pstats role="button" tabindex="0">${esc(r.username)}${r.dev ? devBadge(26) : ''}<svg class="lbp-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
+    <div class="lbp-head">${isRichId(r.id) ? devFramed(lbAvatar(r.avatar_url, r.username, 96), 96, true) : isMe ? framed(lbAvatar(r.avatar_url, r.username, 96), 96, myFrame(), true) : lbAvatar(r.avatar_url, r.username, 96)}<b class="lbp-name" data-pstats role="button" tabindex="0">${esc(r.username)}${r.dev ? devBadge(26) : ''}<svg class="lbp-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
       <div class="soc-counts"><span><b data-cnt="followers">–</b> followers</span><span><b data-cnt="following">–</b> following</span></div></div>
     <div class="lbp-stats" id="lbpStats" hidden></div>
     ${r.bio ? `<p class="soc-bio">${esc(r.bio)}</p>` : ''}
@@ -4779,7 +4789,7 @@ function openPlayer(r){
     ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, r)}">${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}
     ${isMe ? '' : meId ? `<button class="btn soc-follow" data-follow="${r.id}" style="width:100%">Follow</button>`
       : '<p class="muted" style="margin:0;text-align:center;font-size:13px">Make your profile in Social to follow people.</p>'}</div>`;
-  { const wc = el.querySelector('.wl-card'); wc.classList.toggle('has-bnr', isMe && !!myBanner()); if (isMe && myBanner()) wc.insertAdjacentHTML('afterbegin', bannerHtml(myBanner(), true)); }
+  { const wc = el.querySelector('.wl-card'), rb = isRichId(r.id), ob = isMe && !!myBanner(); wc.classList.toggle('has-bnr', rb || ob); if (rb) wc.insertAdjacentHTML('afterbegin', richBannerHtml()); else if (ob) wc.insertAdjacentHTML('afterbegin', bannerHtml(myBanner(), true)); }
   edCard(el.querySelector('.wl-card'), isMe ? myGear() : r.gear); socPaintFollow(r.id); el.hidden = false; applyHaptics();
   const fillCounts = () => socCounts(r.id).then(c => { if (el.hidden) return; el.querySelectorAll('[data-cnt]').forEach(b => { b.textContent = c[b.dataset.cnt]; }); });
   fillCounts();
@@ -5476,6 +5486,31 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-afbundle]')) toast('Bundles are coming soon');
 });
 
+/* ===== Rich's dev frame + banner =====
+   Tied to his account id, so everyone sees them on his profile with no server change. Animates only on profiles */
+const isRichId = id => !!id && (id === RICH_ID || (IS_TEST && store.testRich && LB.me && id === LB.me.id));
+const RICH_BANNER = 'bg/rich-banner.gif';
+let dvUid = 0;
+function devFramed(avatar, px, live){
+  const u = 'dv' + (dvUid++), box = Math.round(px * 1.5), m = -Math.round(px * .25);
+  const brk = (x, y, sx, sy) => `<path d="M${x} ${y + 12 * sy} V${y} H${x + 12 * sx}" fill="none" stroke="#3ddc84" stroke-width="3" stroke-linecap="round"/>`;
+  return `<span class="afr${live ? ' dv-live' : ''}" style="width:${box}px;height:${box}px;margin:${m}px"><svg class="af-under" viewBox="0 0 150 150" aria-hidden="true"><circle cx="75" cy="75" r="60" fill="#00f0ff14"/></svg>
+    <span class="afr-av" style="width:${px}px;height:${px}px">${avatar}</span>
+    <svg class="af-over" viewBox="0 0 150 150" aria-hidden="true"><defs>
+      <linearGradient id="${u}g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#00f0ff"/><stop offset=".5" stop-color="#b46bff"/><stop offset="1" stop-color="#3ddc84"/></linearGradient>
+      <path id="${u}p" d="M75 75 m-66 0 a66 66 0 1 1 132 0 a66 66 0 1 1 -132 0"/>
+      <linearGradient id="${u}s" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#00f0ff" stop-opacity="0"/><stop offset="1" stop-color="#00f0ff"/></linearGradient></defs>
+    <circle cx="75" cy="75" r="53" fill="none" stroke="url(#${u}g)" stroke-width="4"/>
+    <g class="dv-spin"><path d="M75 22 A53 53 0 0 1 128 75" fill="none" stroke="url(#${u}s)" stroke-width="4" stroke-linecap="round"/></g>
+    <g class="dv-spinr"><circle cx="75" cy="75" r="59" fill="none" stroke="#00f0ff66" stroke-width="1.2" stroke-dasharray="2 6"/></g>
+    <g class="dv-text"><text font-family="ui-monospace,Menlo,monospace" font-size="8.4" font-weight="700" letter-spacing="1.4" fill="#9fefff"><textPath href="#${u}p">&lt;/&gt; DEV · EMBERLINE · BUILT BY RICH · 0x45 4D 42 · &lt;/&gt; DEV · EMBERLINE ·</textPath></text></g>
+    ${brk(8, 8, 1, 1)}${brk(142, 8, -1, 1)}${brk(8, 142, 1, -1)}${brk(142, 142, -1, -1)}
+    <rect x="47" y="127" width="56" height="17" rx="4" fill="#07140f" stroke="#3ddc84" stroke-width="1.6"/>
+    <text x="70" y="139.5" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10.5" font-weight="800" fill="#3ddc84">&gt;DEV</text>
+    <rect class="dv-cur" x="88" y="131" width="6" height="10" fill="#3ddc84"/></svg></span>`;
+}
+const richBannerHtml = () => `<span class="bnr bnr-img" aria-hidden="true"><img src="${RICH_BANNER}" alt="" loading="lazy"></span>`;
+
 function drawBadgeBook(){
   const el = $('#badgeBook'); if (!el) return;
   const st = spbStatus(), first = !store.spbUnlocked; store.spbUnlocked = store.spbUnlocked || {};
@@ -5591,8 +5626,8 @@ function drawSocial(){
     setHTML(meEl, `<span class="label">Your profile</span><p class="muted" style="margin:0">Make a profile with a username, photo and bio. People can find you, follow you and see your badges.</p><button class="btn primary" id="socCreate">Create your profile</button>`);
   } else {
     const c = SOC.myCounts, sc = me.showcase || [];
-    meEl.classList.toggle('has-bnr', !!myBanner());
-    setHTML(meEl, `${bannerHtml(myBanner(), true)}<div class="soc-head" style="${myBanner() ? 'margin-top:44px' : ''}">${framed(lbAvatar(me.avatar_url, me.username, 72), 72, myFrame(), true)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}</b>
+    const rich = isRichId(me.id), hasB = rich || !!myBanner(); meEl.classList.toggle('has-bnr', hasB);
+    setHTML(meEl, `${rich ? richBannerHtml() : bannerHtml(myBanner(), true)}<div class="soc-head" style="${hasB ? 'margin-top:44px' : ''}">${rich ? devFramed(lbAvatar(me.avatar_url, me.username, 72), 72, true) : framed(lbAvatar(me.avatar_url, me.username, 72), 72, myFrame(), true)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}</b>
         <span class="muted"><span style="color:${lbTierColor(myRank().tier.n)};font-weight:700">${myRank().tier.n}</span> · ${myRank().rp} RP</span>
         <div class="soc-counts"><span><b data-cnt="followers">${c ? c.followers : '–'}</b> followers</span><span><b data-cnt="following">${c ? c.following : '–'}</b> following</span></div></div></div>
       ${me.bio ? `<p class="soc-bio">${esc(me.bio)}</p>` : '<p class="muted" style="margin:0;font-size:14px">No bio yet.</p>'}
