@@ -2527,13 +2527,42 @@ const SPOT_CID = '06f39ce667fb49b38a61e7f7702c253e'; // rich's Spotify developer
 const spotRedirect = () => location.origin + location.pathname;
 const spotOn = () => isRich() && store.spot && store.spot.refresh;
 function b64url(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
-async function spotLogin(){
-  const cid = ((store.spot && store.spot.cid) || SPOT_CID).trim(); store.spot = Object.assign({}, store.spot, { cid });
+async function spotLink(){
+  const cid = ((store.spot && store.spot.cid) || SPOT_CID).trim();
   const v = b64url(crypto.getRandomValues(new Uint8Array(48)));
-  store.spot = Object.assign({}, store.spot, { verifier: v }); save();
   const ch = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v)));
-  location.href = 'https://accounts.spotify.com/authorize?' + new URLSearchParams({ client_id: cid, response_type:'code', redirect_uri: spotRedirect(),
+  const url = 'https://accounts.spotify.com/authorize?' + new URLSearchParams({ client_id: cid, response_type:'code', redirect_uri: spotRedirect(),
     code_challenge_method:'S256', code_challenge: ch, scope:'user-read-currently-playing user-read-playback-state user-modify-playback-state' });
+  store.spot = Object.assign({}, store.spot, { cid, verifier: v, url }); save(); // verifier stays in this browser: a code from another browser is pasted back here
+  return url;
+}
+async function spotLogin(){ location.href = (store.spot && store.spot.verifier && store.spot.url) || await spotLink(); }
+async function spotCopyLink(){
+  const url = (store.spot && store.spot.verifier && store.spot.url) || await spotLink();
+  try { await navigator.clipboard.writeText(url); toast('Sign-in link copied. Open it in Chrome or Safari'); } catch(e){ prompt('Copy this link and open it in Chrome or Safari', url); }
+  drawRichSpot();
+}
+async function spotPasteCode(code){
+  code = String(code || '').trim().replace(/^.*[?&]code=([^&]+).*$/, '$1'); // the whole link pasted is fine too
+  if (!code){ toast('Paste the code from the other browser'); return; }
+  if (!store.spot || !store.spot.verifier){ toast('Tap Copy sign-in link first, then sign in with that link'); return; }
+  try { await spotToken({ grant_type:'authorization_code', code, redirect_uri: spotRedirect(), client_id: store.spot.cid || SPOT_CID, code_verifier: store.spot.verifier }); toast('Spotify connected'); drawRichSpot(); spotTick(); }
+  catch(e){ toast('That code didn’t work: ' + e.message + '. Codes last about 10 minutes, get a new one.'); }
+}
+// signed in, but this browser didn't start it (Path sent Spotify to Chrome or Safari): show the code to paste back in Path
+function spotCodeSheet(code){
+  const el = document.createElement('div'); el.className = 'egg sq';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Spotify code" style="text-align:left;justify-items:stretch;gap:12px">
+    <h2 style="margin:0">Almost done</h2>
+    <p style="margin:0">Spotify signed you in here, but Emberline runs in Path. Copy this code, go back to Path, and paste it in Settings → Spotify.</p>
+    <p class="mono" style="margin:0;padding:10px;border-radius:12px;background:var(--fill);word-break:break-all;user-select:all;font-size:13px">${esc(code)}</p>
+    <button class="btn primary" id="spCodeCopy" style="width:100%">Copy code</button>
+    <button class="btn" id="spCodeClose" style="width:100%">Close</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  el.addEventListener('click', async e => {
+    if (e.target.id === 'spCodeCopy'){ try { await navigator.clipboard.writeText(code); toast('Code copied. Paste it in Path'); } catch(_){ prompt('Copy this code', code); } }
+    if (e.target === el || e.target.id === 'spCodeClose'){ el.classList.remove('on'); setTimeout(() => el.remove(), 260); }
+  });
 }
 async function spotToken(body){
   const r = await fetch('https://accounts.spotify.com/api/token', { method:'POST', headers:{ 'Content-Type':'application/x-www-form-urlencoded' }, body: new URLSearchParams(body) });
@@ -2543,8 +2572,9 @@ async function spotToken(body){
 // back from Spotify's sign in page with ?code=
 (async () => {
   const q = new URLSearchParams(location.search), code = q.get('code');
-  if (!code || !store.spot || !store.spot.verifier) return;
+  if (!code) return;
   try { const u = new URL(location.href); u.searchParams.delete('code'); u.searchParams.delete('state'); history.replaceState(null, '', u.pathname + u.search + u.hash); } catch(e){}
+  if (!store.spot || !store.spot.verifier){ setTimeout(() => spotCodeSheet(code), 1800); return; } // started in another browser
   try { await spotToken({ grant_type:'authorization_code', code, redirect_uri: spotRedirect(), client_id: store.spot.cid, code_verifier: store.spot.verifier }); toast('Spotify connected'); spotTick(); }
   catch(e){ toast('Spotify sign in failed: ' + e.message); }
   try { drawRichSpot(); } catch(e){}
@@ -2592,11 +2622,16 @@ function drawRichSpot(){
   el.innerHTML = `<span class="label">Spotify on the Session screen · only you have this</span>
     ${sp.refresh ? `<p class="muted" style="margin:0;font-size:14px">Connected. What's playing shows under the gauge, with back, pause and skip (needs Premium).</p><button class="btn small" id="spOut">Disconnect Spotify</button>`
     : `<p class="muted" style="margin:0;font-size:13px">Shows what's playing on your Spotify under the gauge. This page's link has to be a Redirect URI in the Spotify app: <span class="mono" style="word-break:break-all;user-select:all">${esc(spotRedirect())}</span></p>
-      <button class="btn primary" id="spIn">Connect Spotify</button>`}`;
+      <button class="btn primary" id="spIn">Connect Spotify</button>
+      <button class="btn" id="spCopy">Copy sign-in link (for Chrome or Safari)</button>
+      ${sp.verifier ? `<div style="display:grid;gap:6px;padding-top:4px"><span class="label">Signed in in another browser?</span><p class="muted" style="margin:0;font-size:13px">Paste the code it showed you:</p>
+        <div class="row" style="gap:8px"><input type="text" id="spCode" placeholder="Code" autocomplete="off" autocapitalize="off" style="flex:1;min-width:0;background:var(--fill);border:0;border-radius:14px;padding:12px 14px;color:var(--fg);font:inherit;font-size:16px"><button class="btn small" id="spCodeGo">Connect</button></div></div>` : ''}`}`;
 }
 document.addEventListener('click', e => {
   if (!e.target.closest('#richSpot')) return;
-  if (e.target.id === 'spIn'){ store.spot = Object.assign({}, store.spot, { cid: SPOT_CID }); save(); spotLogin(); }
+  if (e.target.id === 'spIn'){ spotLogin(); }
+  if (e.target.id === 'spCopy'){ spotCopyLink(); }
+  if (e.target.id === 'spCodeGo'){ spotPasteCode(($('#spCode') || {}).value); }
   if (e.target.id === 'spOut'){ store.spot = { cid: (store.spot || {}).cid }; SPOT.now = null; save(); drawRichSpot(); drawSpot(); toast('Spotify disconnected'); }
 });
 function wallPick(){ const i = $('#wallFile'); if (i){ i.value = ''; i.click(); } }
