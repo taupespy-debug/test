@@ -4448,7 +4448,7 @@ async function lbPush(force){
 }
 async function lbLoad(){
   try {
-    LB.rows = await sbRows(`/rest/v1/players?select=*&month=eq.${lbMonth()}&banned=not.is.true&order=rp.desc,updated_at.asc&limit=100`); // banned players don't show
+    LB.rows = await sbRows(`/rest/v1/players?select=*&month=eq.${lbMonth()}&banned=not.is.true&order=rp.desc,updated_at.asc&limit=1000`); // banned players don't show
     lbMarkSeen(LB.rows);
     LB.err = '';
   } catch(e){ LB.err = 'Couldn’t load the leaderboard. Check your connection.'; }
@@ -5216,8 +5216,8 @@ function lbMoveHtml(r, i){
   return `<span class="lb-mv ${d > 0 ? 'up' : 'down'}" aria-label="${d > 0 ? 'up' : 'down'} ${Math.abs(d)}"><svg viewBox="0 0 10 8" aria-hidden="true"><path d="${d > 0 ? 'M5 0l5 8H0z' : 'M5 8L0 0h10z'}"/></svg>${Math.abs(d)}</span>`;
 }
 // leaderboard shows the top 5 (plus you) until you open the rest
-const LB_SHOW = 5;
-function lbMoreBtn(n){ if (n <= LB_SHOW) return ''; return `<button class="btn lb-more" data-lbmore aria-expanded="${!!LB.expand}">${LB.expand ? 'Show less' : `Show all ${n}`}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg></button>`; }
+const LB_SHOW = 5, LB_MAX = 500; // Show all lists up to 500 (your own row is always added if you're further down)
+function lbMoreBtn(n){ if (n <= LB_SHOW) return ''; return `<button class="btn lb-more" data-lbmore aria-expanded="${!!LB.expand}">${LB.expand ? 'Show less' : `Show all ${n > LB_MAX ? 'top ' + LB_MAX : n}`}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg></button>`; }
 document.addEventListener('click', e => { if (!e.target.closest('[data-lbmore]')) return; LB.expand = !LB.expand; drawLeaderboard(); if (!LB.expand){ const c = $('#lbCard'); if (c) c.scrollIntoView({ behavior:'smooth', block:'start' }); } });
 function drawLeaderboard(){
   const el = $('#lbCard'); if (!el) return;
@@ -5226,7 +5226,7 @@ function drawLeaderboard(){
     const rows = LB.rows || [];
     el.innerHTML = `<div class="row between"><span class="label">Leaderboard · ${new Date().toLocaleDateString([], { month:'long' })}</span></div>
       <div class="banner" style="padding:12px 14px"><div class="grow"><b>Ranked uses your Puffco login</b>Sign in with your Puffco account to join, pick a username and add a photo.</div><button class="btn small primary" id="lbGoSign">Sign in</button></div>
-      ${rows.length ? `<div class="lb-list">${rows.slice(0, LB.expand ? 100 : LB_SHOW).map((r, i) => lbRowHtml(r, i, null)).join('')}</div>${lbMoreBtn(rows.length)}` : (LB.rows == null ? '<p class="muted" style="margin:0">Loading…</p>' : '<p class="muted" style="margin:0">Nobody is ranked yet this month.</p>')}`;
+      ${rows.length ? `<div class="lb-list">${rows.slice(0, LB.expand ? LB_MAX : LB_SHOW).map((r, i) => lbRowHtml(r, i, null)).join('')}</div>${lbMoreBtn(rows.length)}` : (LB.rows == null ? '<p class="muted" style="margin:0">Loading…</p>' : '<p class="muted" style="margin:0">Nobody is ranked yet this month.</p>')}`;
     return;
   }
   if (!joined){
@@ -5251,8 +5251,8 @@ function drawLeaderboard(){
   const row = (r, i) => lbRowHtml(r, i, meId);
   el.innerHTML = `<div class="row between"><span class="label">Leaderboard · ${new Date().toLocaleDateString([], { month:'long' })}</span><button class="btn small ghost" id="lbEdit">Edit profile</button></div>
     ${LB.err ? `<p class="acct-err">${esc(LB.err)}</p>` : ''}
-    ${LB.rows == null ? '<p class="muted" style="margin:0">Loading…</p>' : rows.length ? `<div class="lb-list">${rows.slice(0, LB.expand ? 100 : LB_SHOW).map(row).join('')}</div>` : '<p class="muted" style="margin:0">Nobody has points yet this month. Take a dab to get on the board.</p>'}
-    ${mine >= (LB.expand ? 100 : LB_SHOW) ? `<div class="lb-list lb-you">${row(rows[mine], mine)}</div>` : ''}
+    ${LB.rows == null ? '<p class="muted" style="margin:0">Loading…</p>' : rows.length ? `<div class="lb-list">${rows.slice(0, LB.expand ? LB_MAX : LB_SHOW).map(row).join('')}</div>` : '<p class="muted" style="margin:0">Nobody has points yet this month. Take a dab to get on the board.</p>'}
+    ${mine >= (LB.expand ? LB_MAX : LB_SHOW) ? `<div class="lb-list lb-you">${row(rows[mine], mine)}</div>` : ''}
     ${lbMoreBtn(rows.length)}
     <p class="muted" style="margin:0;font-size:12px">Updates live. Resets on the 1st.</p>
     ${acct() && acct().email ? `<p class="muted lb-linked">@${esc((LB.me && LB.me.username) || L.username || '')} is linked to ${esc(acct().email)}</p>` : ''}`;
