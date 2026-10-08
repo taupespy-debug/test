@@ -2896,6 +2896,7 @@ function bleError(e, stage){
 }
 
 function setConnUI(state, extra){
+  if ((state === 'idle' || state === 'error') && S.mode === 'live' && ble.connected && !manualDisconnect) state = 'live', extra = null; // a stale message must not cover a working connection
   C = Object.assign({ state, title:'', msg:'', attempt:0 }, extra || {});
   const pill = $('#connBtn');
   const map = { idle:['off','Connect'], unsupported:['off','Connect'], btoff:['off','Connect'], connecting:['busy', 'Connecting…'], reconnecting:['busy','Reconnecting…'], error:['err','Retry'], live:['on','Connected'] };
@@ -2938,6 +2939,7 @@ function drawConnectCard(){
 
 async function startConnect(pickNew, auto){
   if (C.state === 'connecting' || S.mode === 'live') return;
+  if (auto && C.state === 'reconnecting') return; // a reconnect is already running: don't start a second one on top of it
   if (!('bluetooth' in navigator)){ setConnUI('unsupported'); return; }
   manualDisconnect = false; reconnectRun++;
   // Connect / Retry: first try the last device the same way picking it from the device menu does (a fresh ask by id).
@@ -2970,6 +2972,7 @@ async function startConnect(pickNew, auto){
     await afterConnect();
   } catch(e){
     console.warn('connect failed at', stage, e);
+    if (S.mode === 'live' && ble.connected){ setConnUI('live'); return; } // another try connected while this one failed: keep that connection
     try { ble.disconnect(true); } catch(_){}
     const info = bleError(e, stage);
     if (auto && stage === 'request'){
