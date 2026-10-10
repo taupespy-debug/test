@@ -1214,6 +1214,8 @@ img,svg{-webkit-user-drag:none;-webkit-touch-callout:none}
 @keyframes celSpin{to{transform:rotate(360deg)}}
 .cel-flakes{position:absolute;inset:0;pointer-events:none}
 .cel-flakes i{position:absolute;top:-14px;left:var(--x);width:8px;height:13px;border-radius:2px;background:linear-gradient(180deg,#fff2c4,#d6a33a);opacity:0;transform:scale(var(--s)) rotate(var(--r))}
+.cel.legend .cel-title{background-image:linear-gradient(100deg,#6a1bb5,#b46bff 25%,#e8f8ff 40%,#7af0ff 60%,#6a1bb5)}
+.cel.legend .cel-flakes i{background:linear-gradient(180deg,#e8f8ff,#b46bff)}
 .cel.on .cel-flakes i{animation:celFall 3.4s cubic-bezier(.3,.2,.5,1) calc(.4s + var(--dl)) infinite}
 @keyframes celFall{0%{opacity:1;transform:translateY(0) rotate(var(--r)) scale(var(--s))}100%{opacity:0;transform:translateY(105vh) rotate(calc(var(--r) + 540deg)) scale(var(--s))}}
 @media (prefers-reduced-motion:reduce){.cel *{animation:none!important;opacity:1!important;transform:none!important}.cel-ring,.cel-spark,.cel-flakes{display:none}}
@@ -4321,7 +4323,7 @@ document.addEventListener('click', e => {
   const k = b.dataset.cel;
   if (k === 'pop'){ show('home'); setTimeout(() => sessionPop({ hits:[3.2, 8.6, 5.1], run:52 }, 11), 450); return; }
   if (k === 'aurum'){ celebrate({ kind:'aurum', tier:4 }); return; }
-  const t = +k; celebrate({ kind: t === RANK_TIERS.length - 1 ? 'champion' : 'rank', tier: t, from: t - 1 });
+  const t = +k; celebrate({ kind: t >= RANK_TIERS.findIndex(x => x.n === 'Champion') ? 'champion' : 'rank', tier: t, from: t - 1 });
 });
 function drawSettings(){
   try { drawCelDev(); } catch(e){}
@@ -4393,7 +4395,8 @@ const RB_TIERS = [
   { n:'Flame',    c:['#ffd08a','#ff9f0a','#b35f00'] },
   { n:'Blaze',    c:['#fff2a0','#ffd60a','#a88a00'] },
   { n:'Inferno',  c:['#ff9db3','#ff2d55','#9a0f2e'] },
-  { n:'Champion', c:['#fff4c9','#e9bb4f','#8a6115'], champ:true }
+  { n:'Champion', c:['#fff4c9','#e9bb4f','#8a6115'], champ:true },
+  { n:'Legend',   c:['#e8f8ff','#b46bff','#2a0a66'], champ:true, legend:true }
 ];
 const RB_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 let rbUid = 0;
@@ -4429,6 +4432,7 @@ function rankBadge(m, t, size, year){
       <linearGradient id="${id}sh" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".75"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
     </defs>
     ${champ ? `<circle class="rb-glow" cx="70" cy="64" r="66" fill="${C[1]}" opacity=".28"/>` : ''}
+    ${T.legend ? `<circle cx="70" cy="64" r="64" fill="none" stroke="#7af0ff" stroke-width="2" stroke-dasharray="4 6" opacity=".9"/>` : ''}
     <!-- medallion -->
     <circle cx="70" cy="64" r="60" fill="url(#${id}r)"/>
     <circle cx="70" cy="64" r="55" fill="#120e19"/>
@@ -4442,7 +4446,8 @@ function rankBadge(m, t, size, year){
     <!-- ribbon with the year -->
     <path d="M22 122 H118 L110 136 L118 150 H22 L30 136Z" fill="url(#${id}r)"/>
     <path d="M22 122 H118 L110 136 L118 150 H22 L30 136Z" fill="none" stroke="rgba(0,0,0,.25)"/>
-    <text x="70" y="141" text-anchor="middle" font-family="ui-rounded,'SF Pro Rounded',system-ui,sans-serif" font-weight="800" font-size="15" letter-spacing="2" fill="${t === 2 || champ ? '#2a1c05' : '#fff'}">${YEAR}</text>
+    <text x="70" y="141" text-anchor="middle" font-family="ui-rounded,'SF Pro Rounded',system-ui,sans-serif" font-weight="800" font-size="15" letter-spacing="2" fill="${t === 2 || (champ && !T.legend) ? '#2a1c05' : '#fff'}">${YEAR}</text>
+    ${T.legend ? `<path d="M48 4 L55 -6 L62 2 L70 -10 L78 2 L85 -6 L92 4 L88 12 H52Z" fill="url(#${id}r)" stroke="#2a0a66" stroke-width="1.5"/><circle cx="70" cy="-6" r="2.4" fill="#7af0ff"/>` : ''}
     ${champ ? `<g clip-path="url(#${id}c)"></g>` : ''}
   </svg>`;
 }
@@ -4479,7 +4484,7 @@ function celShow({ kind, tier, from }){
     const champ = kind === 'champion', aurum = kind === 'aurum';
     const T = RANK_TIERS[tier] || RANK_TIERS[0], cc = aurum ? '#e9bb4f' : T.c;
     const el = document.createElement('div');
-    el.className = 'cel' + (champ || aurum ? ' champ' : '');
+    el.className = 'cel' + (champ || aurum ? ' champ' : '') + (!aurum && T.n === 'Legend' ? ' legend' : '');
     el.style.setProperty('--cc', cc);
     const sparks = Array.from({ length: champ || aurum ? 26 : 16 }, (_, i) => { const a = (i / (champ || aurum ? 26 : 16)) * 360 + Math.random() * 12, d = 110 + Math.random() * 90;
       return `<i class="cel-spark" style="--a:${a}deg;--d:${d}px;--t:${(0.6 + Math.random() * .5).toFixed(2)}s"></i>`; }).join('');
@@ -4487,7 +4492,7 @@ function celShow({ kind, tier, from }){
     const art = aurum
       ? `<div class="cel-crest"><svg viewBox="0 0 24 24"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/></svg></div>`
       : `<div class="cel-badge">${rankBadge(new Date().getMonth(), tier, undefined)}</div>`;
-    const kicker = aurum ? `${typeof GOLD_GOAL !== 'undefined' ? GOLD_GOAL : 100} blinkers` : champ ? 'Top tier reached' : 'Rank up';
+    const kicker = aurum ? `${typeof GOLD_GOAL !== 'undefined' ? GOLD_GOAL : 100} blinkers` : champ ? (tier === RANK_TIERS.length - 1 ? 'Top tier reached' : 'Elite tier') : 'Rank up';
     const title = aurum ? 'Aurum' : T.n;
     const sub = aurum ? 'Exclusive gold theme unlocked' : from != null ? `${RANK_TIERS[from].n} → ${T.n} · ${RB_MONTHS[new Date().getMonth()]}` : RB_MONTHS[new Date().getMonth()];
     el.innerHTML = `${champ || aurum ? '<div class="cel-rays"></div>' : ''}${flakes}
@@ -4511,7 +4516,7 @@ function celShow({ kind, tier, from }){
 }
 // end of a session: show what it earned inside the gauge ring
 // rank tax: big red "-3 RP" drops onto the gauge when preheat finishes (charged if the session runs 30s+)
-function champBlink(){ try { return !rankLock() && myRank().tier.n === 'Champion' ? CHAMP_BLINK : undefined; } catch(e){ return undefined; } }
+function champBlink(){ try { return !rankLock() && /^(Champion|Legend)$/.test(myRank().tier.n) ? CHAMP_BLINK : undefined; } catch(e){ return undefined; } }
 const bigHitAt = () => Math.max(+store.bigHitSecs || 8, (cur && cur.blk) || 0); // the celebration waits for a blinker that counts
 function taxPop(force){
   let tier = force; if (!tier){ try { if (rankLock()) return 0; tier = myRank().tier.n; } catch(e){ return 0; } }
@@ -4546,7 +4551,7 @@ function afterSessionLogged(s, before){
     const gained = after.rp - before.rp;
     if (view === 'home') sessionPop(s, gained); else toast(`Session done · ${gained > 0 ? '+' : ''}${gained} RP${gained <= 0 && notCounted(s) ? '. ' + notCounted(s) : ''}`);
     const bi = RANK_TIERS.findIndex(t => t.n === before.tier.n), ai = RANK_TIERS.findIndex(t => t.n === after.tier.n);
-    if (ai > bi) setTimeout(() => celebrate({ kind: ai === RANK_TIERS.length - 1 ? 'champion' : 'rank', tier: ai, from: bi }), view === 'home' ? 2600 : 600);
+    if (ai > bi) setTimeout(() => celebrate({ kind: ai >= RANK_TIERS.findIndex(x => x.n === 'Champion') ? 'champion' : 'rank', tier: ai, from: bi }), view === 'home' ? 2600 : 600);
     if (view === 'stats') drawRank();
   } catch(e){}
 }
@@ -4554,10 +4559,10 @@ function afterSessionLogged(s, before){
 /* ===== Rank points (RP): monthly, resets on the 1st =====
    session +1 (first dab of the day +3 instead), blinker (8s+ hit) +5, Extreme vapor +1 on each of those,
    a dab past 120 since your last clean costs -1 instead of earning its session point */
-const RANK_TIERS = [ { n:'Ember', min:0, c:'#ff6a3d' }, { n:'Flame', min:50, c:'#ff9f0a' }, { n:'Blaze', min:150, c:'#ffd60a' }, { n:'Inferno', min:300, c:'#ff2d55' }, { n:'Champion', min:500, c:'#e9bb4f' } ];
+const RANK_TIERS = [ { n:'Ember', min:0, c:'#ff6a3d' }, { n:'Flame', min:50, c:'#ff9f0a' }, { n:'Blaze', min:150, c:'#ffd60a' }, { n:'Inferno', min:300, c:'#ff2d55' }, { n:'Champion', min:500, c:'#e9bb4f' }, { n:'Legend', min:5000, c:'#b46bff' } ];
 const RANK_DIRTY = 120, RANK_DAY_SESS = Infinity; // every session after the first earns its point
-const RANK_TAX = { Blaze:3, Inferno:5, Champion:8 }, RANK_TAX_SECS = 30; // rank tax: high tiers pay RP for every session that runs 30s+
-const CHAMP_BLINK = 11; // Champions need an 11s hit for a blinker to count (everyone else 8s)
+const RANK_TAX = { Blaze:3, Inferno:5, Champion:8, Legend:10 }, RANK_TAX_SECS = 30; // rank tax: high tiers pay RP for every session that runs 30s+
+const CHAMP_BLINK = 11; // Champions and Legends need an 11s hit for a blinker to count (everyone else 8s)
 const blinkOf = s => (s && s.blk) || 8; // the blinker length a session was played under
 const RANK_MIN_F = 450, RANK_TEMP_FROM = Date.parse('2026-10-07T21:00:00Z'); // from this update on, a session only counts if its profile was set to 450°F or hotter
 const lowTemp = s => { const f = typeof s.setF === 'number' ? s.setF : s.target; return s.t >= RANK_TEMP_FROM && typeof f === 'number' && f < RANK_MIN_F; }; // the device's real target wins over the profile we think was picked
@@ -4648,12 +4653,12 @@ function drawRankInner(){
         return `<div class="rb-shelf-wrap"><span class="label">Your badges</span><div class="rb-shelf">${dev ? `<div class="rb-item" data-bv="dev">${devBadge(54)}<span>Developer</span></div>` : ''}${h.map(b => `<div class="rb-item" data-bv="${b.y}-${String(b.m + 1).padStart(2, '0')}:${b.t}">${rankBadge(b.m, b.t, 58, b.y)}<span>${RB_MONTHS[b.m].slice(0, 3)} · ${RB_TIERS[b.t].n}</span></div>`).join('')}</div></div>`; })()}
     <details class="rank-how"><summary>How points work</summary>
       <div class="how-list">
-        <div><span>Blinker <small>a single hit of 8s or longer (11s in Champion)</small></span><b class="pos">+5</b></div>
+        <div><span>Blinker <small>a single hit of 8s or longer (11s in Champion and Legend)</small></span><b class="pos">+5</b></div>
         <div><span>First dab of the day</span><b class="pos">+3</b></div>
         <div><span>Every other session</span><b class="pos">+1</b></div>
         <div><span>On Extreme vapor <small>added to each of the above</small></span><b class="pos">+1</b></div>
         <div><span>Each dab after ${RANK_DIRTY} without cleaning <small>replaces that session's point</small></span><b class="neg">−1</b></div>
-        <div><span>Rank tax <small>each 30s+ session in Blaze / Inferno / Champion</small></span><b class="neg">−3 / −5 / −8</b></div>
+        <div><span>Rank tax <small>each 30s+ session in Blaze / Inferno / Champion / Legend</small></span><b class="neg">−3 / −5 / −8 / −10</b></div>
       </div>
       <div class="how-tiers">${RANK_TIERS.map((t, i) => `<span style="--c:${t.c}">${rankBadge(new Date().getMonth(), i)}${t.n}<small>${t.min}</small></span>`).join('')}</div>
       <p class="how-note">Points reset on the 1st of every month. Sessions only count if your profile is set to 450°F (232°C) or hotter.</p>
@@ -4806,14 +4811,14 @@ const LB_ERRS = { name_cooldown:'You can only change your username once every 3 
 function showBadge(key, size, row){
   if (key === 'dev') return devBadge(size);
   if (key && key.startsWith('sp:')){ const b = spbById(key.slice(3)); return b ? SPB.badge(b, size) : ''; }
-  const m = /^(\d{4})-(\d{2}):(now|[0-4])$/.exec(key || ''); if (!m) return '';
+  const m = /^(\d{4})-(\d{2}):(now|[0-5])$/.exec(key || ''); if (!m) return '';
   const t = m[3] === 'now' ? rbTierIdx(row && row.tier) : +m[3];
   return rankBadge(+m[2] - 1, t, size, +m[1]);
 }
 function showName(key, row){
   if (key === 'dev') return 'Developer';
   if (key && key.startsWith('sp:')){ const b = spbById(key.slice(3)); return b ? b.name : ''; }
-  const m = /^(\d{4})-(\d{2}):(now|[0-4])$/.exec(key || ''); if (!m) return '';
+  const m = /^(\d{4})-(\d{2}):(now|[0-5])$/.exec(key || ''); if (!m) return '';
   const t = m[3] === 'now' ? rbTierIdx(row && row.tier) : +m[3];
   return RB_MONTHS[+m[2] - 1].slice(0, 3) + ' · ' + RB_TIERS[t].n + (m[3] === 'now' ? ' (now)' : '');
 }
@@ -4892,7 +4897,7 @@ function openBadge(key){
     extra = `<p class="bv-how">${esc(how)}</p>${theirs ? '' : `<span class="bv-state ${ok ? 'ok' : ''}">${ok ? 'Unlocked' : 'Locked'}${!ok && st.prog ? ' · ' + esc(st.prog) : ''}</span>`}`;
   }
   else {
-    const m = /^(\d{4})-(\d{2}):([0-4])$/.exec(key || ''); if (!m) return;
+    const m = /^(\d{4})-(\d{2}):([0-5])$/.exec(key || ''); if (!m) return;
     const y = +m[1], mo = +m[2] - 1, t = +m[3], now = new Date(), live = y === now.getFullYear() && mo === now.getMonth();
     art = rankBadge(mo, t, undefined, y); title = RB_TIERS[t].n;
     sub = `${RB_MONTHS[mo]} ${y}${live ? ' · this month' : ''}`;
@@ -5130,7 +5135,7 @@ const CATS = [
   { n:'Ranked', c:'#e9bb4f', badges:[
     { id:'podium', name:'Podium', req:'Finish a month in the top 3 on the leaderboard. Handed out at the start of the next month.', icon:'podium', col:['#fff4c9','#e9bb4f','#8a6115'], rar:'epic' },
     { id:'comeback', name:'Comeback', req:'Finish a month at Ember, then reach Blaze or higher the next month.', icon:'arrowUp', col:['#d6ffd9','#3ddc84','#0e6b34'], rar:'rare' },
-    { id:'b2b', name:'Back to Back', req:'Reach Champion two months in a row.', icon:'crowns', col:['#fff4c9','#f3cf6b','#7a5414'], rar:'legendary' } ]},
+    { id:'b2b', name:'Back to Back', req:'Reach Champion (or Legend) two months in a row.', icon:'crowns', col:['#fff4c9','#f3cf6b','#7a5414'], rar:'legendary' } ]},
   { n:'Social', c:'#3ddc84', badges:[
     { id:'squad', name:'Squad Up', req:'Get 3 friends to join Emberline with your invite link or invite code (your username). A friend counts once they make a ranked profile and do 3 sessions.', icon:'squad', col:['#d6ffe6','#3ddc84','#0e5a2e'], rar:'epic' } ]},
   { n:'Limited', c:'#c06bff', badges:[
@@ -5216,7 +5221,7 @@ function spbStatus(){
   for (let i = 1; i < seq.length; i++){
     if (seq[i].k !== seq[i - 1].k + 1) continue; // only months right after each other count
     if (seq[i - 1].t === 0 && seq[i].t >= 2) cb = true;
-    if (seq[i - 1].t === 4 && seq[i].t === 4) b2b = true;
+    if (seq[i - 1].t >= 4 && seq[i].t >= 4) b2b = true; // Champion or Legend
   }
   const me = LB.me || lbStore().meCache, aw = (me && me.awards) || []; // meCache: awards and Founder show before the leaderboard loads
   out.podium = { got: aw.includes('podium') };
@@ -8257,7 +8262,7 @@ document.fonts && document.fonts.ready.then(() => moveTabPill(view));
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { applyTheme(); draw(); });
 
 /* ---- What's new: shows once per update ---- */
-const WN_VER = '2026-10-preheat';
+const WN_VER = '2026-10-legend';
 /* ---- limited edition lights: owners can share their device's light files so we can add that edition's colorway ---- */
 const ED_LIGHT_PATHS = () => [0,1,2,3].map(i => `/u/app/hc/${i}/colr`).concat(['/p/app/thc/colr', '/p/app/ltrn/colr'],
   S.api === 2 ? [0,1,2,3].flatMap(i => [`/u/app/hc/${i}/phcl`, `/u/app/hc/${i}/accl`]) : [0,1,2,3,4,5].map(i => `/u/app/led/aa/${i}`).concat([0,1,2,3,4,5,6,7].flatMap(i => [`/u/app/led/ca/${i}`, `/u/app/led/oa/${i}`])));
@@ -8297,7 +8302,7 @@ function rankTaxNotice(force, n){
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Ranked changes" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
     <span class="label" style="text-align:center">Ranked</span>
     <h2 style="text-align:center;margin:0">Ranked just changed</h2>
-    <div style="display:grid;gap:2px"><b>Rank tax</b><span class="muted" style="font-size:14px">In the top ranks, every session that runs 30 seconds or longer now costs RP: Blaze −3, Inferno −5, Champion −8. You'll see it drop onto the gauge when preheat finishes.</span></div>
+    <div style="display:grid;gap:2px"><b>Rank tax</b><span class="muted" style="font-size:14px">In the top ranks, every session that runs 30 seconds or longer now costs RP: Blaze −3, Inferno −5, Champion −8, Legend −10. You'll see it drop onto the gauge when preheat finishes.</span></div>
     <div style="display:grid;gap:2px"><b>No more cool-down</b><span class="muted" style="font-size:14px">Back-to-back sessions count now. No waiting for your ${esc(devWord())} to cool off.</span></div>
     <p style="margin:0;font-size:14px">You're in <b>${esc(tier)}</b>, so each session costs <b style="color:#ff3b4a">${amt} RP</b>. Blinkers still earn +5, so make them count.</p>
     <button class="btn primary" id="rtnOk" style="width:100%">Got it</button></div>`;
@@ -8307,11 +8312,10 @@ function rankTaxNotice(force, n){
   el.querySelector('#rtnOk').addEventListener('click', () => { if (Date.now() - opened < 500) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); });
 }
 const WN_ITEMS = [
-  ['Preheat light', 'Pick a color or any mood (yours or Puffco’s) to show while a profile heats up. Find it on each profile in Profiles.'],
-  ['Proxy support', 'Emberline now works with the Puffco Proxy: temps, battery, sessions, hit timer, blinkers, colors, moods, zones, brightness and the lantern.'],
-  ['Randomizer', 'Tap Shuffle at the top of Lights for a random color combo and effect. Keep the ones you like.'],
-  ['Gear on profiles', 'Profiles now show which Puffcos people use.']
-];
+  ['New rank: Legend', 'There’s a new tier above Champion. Hit 5,000 RP in a month to become a Legend and get the purple crowned badge.'],
+  ['Legend rules', 'Like Champion, blinkers need 11 seconds. Each 30s+ session costs 10 RP, so every blinker matters.'],
+  ['Fixes', 'Connecting is more reliable, the clean meter works on the Proxy, and the app runs cooler on your phone.']
+]
 function whatsNew(force){
   if (!force && store.wnSeen === WN_VER) return;
   if (!force && !store.wnSeen && !(store.sessions || []).length && !store.lastDeviceId){ store.wnSeen = WN_VER; save(); return; } // brand-new users don't need a changelog
@@ -8321,6 +8325,7 @@ function whatsNew(force){
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="What's new" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
     <span class="label" style="text-align:center">Update</span>
     <h2 style="text-align:center;margin:0">What’s new</h2>
+    <div style="width:96px;justify-self:center">${rankBadge(new Date().getMonth(), RB_TIERS.length - 1)}</div>
     ${WN_ITEMS.map(([t, d]) => `<div style="display:grid;gap:2px"><b>${t}</b><span class="muted" style="font-size:14px">${d}</span></div>`).join('')}
     <button class="btn primary" id="wnGo" style="width:100%">Nice</button></div>`;
   document.body.appendChild(el); applyHaptics();
