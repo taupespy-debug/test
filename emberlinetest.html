@@ -5947,6 +5947,7 @@ function drawLeaderboard(){
     ${mine >= (LB.expand ? LB_MAX : LB_SHOW) ? `<div class="lb-list lb-you">${row(rows[mine], mine)}</div>` : ''}
     ${lbMoreBtn(rows.length)}
     <p class="muted" style="margin:0;font-size:12px">Updates live. Resets on the 1st.</p>
+    <p class="muted lb-legal" style="margin:0;font-size:11px;line-height:1.4;opacity:.75">Please consume responsibly. 21+ only (or the legal age where you live), and follow your local laws. Rankings are just for fun, not a reason to use more. Take breaks and don’t drive after a session. Emberline isn’t made by or affiliated with Puffco.</p>
     ${acct() && acct().email ? `<p class="muted lb-linked">@${esc((LB.me && LB.me.username) || L.username || '')} is linked to ${esc(acct().email)}</p>` : ''}`;
 }
 // usernames: first change is free, then once every 3 days (the server checks this too)
