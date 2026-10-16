@@ -3091,12 +3091,29 @@ const HIT = { on:false, start:0, last:null, hits:[], supported:null, base:0, pea
 const HIT_DELAY = -250; // the sensor lags the real pull a little, so start the clock a touch early
 const HIT_MERGE = 700; // a dip shorter than this is the same hit
 const HIT_IDLE = .03; // typical sensor value with nobody pulling
-function hitReset(){ HIT.endAt = 0; HIT.lastStart = 0; HIT.pbase = null; HIT.diaAt = 0; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.ends = []; HIT.base = HIT_IDLE; HIT.live = 0; }
+function hitReset(){ HIT.lastSt = -1; HIT.armed = false; HIT.quiet = 0; HIT.endAt = 0; HIT.lastStart = 0; HIT.pbase = null; HIT.diaAt = 0; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.ends = []; HIT.base = HIT_IDLE; HIT.live = 0; }
 function hitSample(v, now){
   // v = inhale strength (0..1). Hysteresis so a shaky draw counts as one hit.
   // learn the resting level only from quiet samples, so a pull that's already going when Ready hits still counts
   if (!HIT.on){ const b = HIT.base || HIT_IDLE; if (v < b + .05) HIT.base = Math.min(.08, b * .9 + v * .1); }
   const up = Math.max(.12, HIT.base + .1), down = Math.max(.06, HIT.base + .04);
+  // Ready just started: a reading left over from preheat must not count as a hit (see live build)
+  if (S.state === 8 && HIT.lastSt !== 8){ HIT.armed = HIT.mode === 'heat'; HIT.quiet = 0; HIT.readyT = now; HIT.rmin = HIT.rmax = HIT.still = null; }
+  HIT.lastSt = S.state;
+  if (S.state === 8 && !HIT.armed){
+    if (v < down){ if (++HIT.quiet >= 2) HIT.armed = true; } // quiet: nobody's pulling, start timing from here
+    else {
+      HIT.quiet = 0; HIT.rmin = Math.min(HIT.rmin ?? v, v); HIT.rmax = Math.max(HIT.rmax ?? v, v);
+      // Peak: never quiet after 2.5s of Ready. A reading that moves is someone who started pulling before Ready (time it
+      // from Ready); one that sits still is left over from preheat (the Ready light), so treat that level as resting
+      if (!isProxy() && now - HIT.readyT > 2500){
+        if (HIT.still == null && HIT.rmax - HIT.rmin > .06 && v >= up){ HIT.armed = true; HIT.on = true; HIT.start = HIT.readyT; HIT.peak = v; HIT.party = false; if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
+        else if (HIT.still == null) HIT.still = HIT.rmax; // left over: wait until it goes quiet, or a real pull lifts it clearly above this level
+        else if (v > HIT.still + .12){ HIT.armed = true; HIT.on = true; HIT.start = now + HIT_DELAY; HIT.peak = v; HIT.party = false; buzz(15); if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
+      }
+    }
+    render(); return;
+  }
   if (S.state !== 8){ if (HIT.on){ HIT.on = false; const secs = (now - HIT.start) / 1000; if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); (HIT.ends = HIT.ends || []).push(Date.now()); if (cur) cur.hits = HIT.hits.slice(); } } render(); return; } // not Ready: close any hit that was still open
   if (!HIT.on && v >= up && HIT.endAt && now - HIT.endAt < HIT_MERGE && HIT.hits.length){ HIT.on = true; HIT.hits.pop(); if (HIT.ends) HIT.ends.pop(); HIT.start = HIT.lastStart; if (cur) cur.hits = HIT.hits.slice(); HIT.last = HIT.hits.length ? HIT.hits[HIT.hits.length - 1] : null; if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); } // short dip: keep counting the same hit
   else if (!HIT.on && v >= up){ HIT.on = true; HIT.start = now + HIT_DELAY; HIT.peak = v; HIT.party = false; buzz(15); if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
@@ -3110,7 +3127,7 @@ function hitSample(v, now){
   }
   render();
 }
-setInterval(() => { if (S.state === 8) checkWarn(); }, 500);
+setInterval(() => { if (S.state === 8) checkWarn(); if (HIT.discoPending && !HIT.on){ const b = HIT.discoPending; HIT.discoPending = null; if (S.state >= 7 && S.state <= 9) try { discoHeatCycle(b); } catch(e){} } }, 500); // the Disco light for a blinker, once the pull is over
 /* long hit: phone buzzes 3 times, Peak goes Disco for 10 seconds, then back to what it was showing */
 const DISCO_MS = 10000;
 function bigHit(){
@@ -3123,6 +3140,7 @@ function bigHit(){
   clearTimeout(previewTimer);
   if (S.state >= 7 && S.state <= 9){
     // Mid-session the Peak ignores the preview channel, so swap the active heat-cycle light and put it back after 10s.
+    if (HIT.on){ HIT.discoPending = blob; return; } // mid-pull: swapping the light now changes the inhale reading and ended hits at ~8s, so wait
     discoHeatCycle(blob);
     return;
   }
