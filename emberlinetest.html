@@ -1977,6 +1977,7 @@ body.lt-open main{padding-bottom:calc(190px + env(safe-area-inset-bottom,0px))!i
       <label class="toggle"><span>Connect automatically<br><span class="muted" style="font-size:13px">Reconnects to your last Peak when you open Emberline</span></span><input type="checkbox" class="switch" id="tAuto"></label>
       <label class="toggle"><span>Show all Bluetooth devices when pairing<br><span class="muted" style="font-size:13px">Use if your Peak has a custom name and won't show up</span></span><input type="checkbox" class="switch" id="tAll"></label>
       <p class="muted" style="margin:0;font-size:13px">Close the official Puffco app first. The Peak only talks to one app at a time. On iPhone, open this page in Puffco&#8217;s Path browser.</p>
+      <button class="btn small" id="connLogCopy" type="button">Copy connection log</button><span class="muted" style="font-size:12px;margin-top:-8px">Having connection trouble? Copy this and paste it in the Discord bug-report channel.</span>
     </div>
     <div class="card" style="display:grid;gap:10px">
       <span class="label">Light data export</span>
@@ -2370,6 +2371,7 @@ class Lorax {
     try { if (this.dev && this.dev.gatt.connected){ this._silent = !!silent; this.dev.gatt.disconnect(); } } catch(e){}
   }
   _dropped(){
+    try { clog('link dropped' + (this._silent ? ' (we closed it)' : ' (phone or Peak closed it)')); } catch(e){}
     this.cmd = null;
     for (const p of this.pending.values()){ clearTimeout(p.timer); p.rej(new Error('Disconnected')); }
     this.pending.clear(); this.queue = Promise.resolve();
@@ -2648,6 +2650,19 @@ const rgbt = hex => { const c = hexBytes(hex); return new Uint8Array([c[0],c[1],
 
 /* ================= device controller ================= */
 const ble = new Lorax();
+// connection log: what happened to the Bluetooth link, so people can paste it in Discord (kept on this phone, last 150 lines)
+const CLOG = (() => { try { return JSON.parse(localStorage.getItem('emberConnLog') || '[]'); } catch(e){ return []; } })();
+function clog(msg){
+  const d = new Date(), t = d.toLocaleTimeString([], { hour12:false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+  CLOG.push(`${d.toLocaleDateString([], { month:'numeric', day:'numeric' })} ${t} ${msg}`); if (CLOG.length > 150) CLOG.splice(0, CLOG.length - 150);
+  try { localStorage.setItem('emberConnLog', JSON.stringify(CLOG)); } catch(e){}
+}
+document.addEventListener('click', async e => {
+  if (!e.target.closest || !e.target.closest('#connLogCopy')) return;
+  const head = `Emberline connection log · ${navigator.userAgent.match(/iPhone OS [\d_]+|Android [\d.]+|Mac OS X [\d_]+/) || ''} · ${typeof IS_PATH !== 'undefined' && IS_PATH ? 'Path' : 'browser'} · device ${store.lastDeviceName || '?'} · now ${S.mode} / ${C && C.state}`;
+  const txt = head + '\n' + (CLOG.length ? CLOG.join('\n') : '(empty)');
+  try { await navigator.clipboard.writeText(txt); toast('Connection log copied. Paste it in Discord'); } catch(_){ prompt('Copy this', txt); }
+});
 let pollTimer = null, slowTick = 0, busy = false;
 
 function connectDevice(){ return startConnect(false); }
@@ -2925,7 +2940,7 @@ function drawConnectCard(){
     btn = 'Copy link'; alt = '';
   } else if (C.state === 'btoff'){ title = 'Bluetooth is off'; msg = 'Turn on Bluetooth in Control Center or Settings, then tap Connect.'; }
   else if (C.state === 'connecting'){ title = C.label || 'Connecting…'; msg = /^Choose/.test(C.label || '') ? 'Pick your Peak in the list that pops up.' : 'Hang tight, this takes a second.'; }
-  else if (C.state === 'reconnecting'){ title = 'Reconnecting to your Peak…'; msg = `Connection dropped. Trying again (${C.attempt} of 5).`; btn = 'Stop'; }
+  else if (C.state === 'reconnecting'){ title = 'Reconnecting to your Peak…'; msg = `Connection dropped. Trying again (${C.attempt} of ${RECONNECT_TRIES}).`; btn = 'Stop'; }
   else if (C.state === 'error'){ title = C.title; msg = C.msg; btn = 'Try again'; }
   else if (C.state === 'idle' && C.note){ msg = C.note; if (store.lastDeviceName) btn = 'Connect to ' + store.lastDeviceName.slice(0, 18); }
   const tips = C.state === 'unsupported' ? '' : `<ul class="cc-tips">
@@ -2973,7 +2988,7 @@ async function startConnect(pickNew, auto){
     stage = 'read'; setConnUI('connecting', { label:'Reading your Peak…' });
     await afterConnect();
   } catch(e){
-    console.warn('connect failed at', stage, e);
+    console.warn('connect failed at', stage, e); clog(`connect failed at ${stage}: ${(e && (e.name || '') + ' ' + (e.message || '')).trim()}`);
     if (S.mode === 'live' && ble.connected){ setConnUI('live'); return; } // another try connected while this one failed: keep that connection
     try { ble.disconnect(true); } catch(_){}
     const info = bleError(e, stage);
@@ -2999,7 +3014,7 @@ async function afterConnect(quick){
     resumeOpenSess();
     try { S.active = clamp(await ble.u8('/p/app/hcs'), 0, 3); } catch(e){}
     startPolling();
-    setConnUI('live');
+    setConnUI('live'); clog('reconnected (quick)');
     toast('Reconnected');
     (async () => {
       try { await slowPoll(); render(); } catch(e){}
@@ -3019,7 +3034,7 @@ async function afterConnect(quick){
   rememberDevice(); save();
   // show the app as connected right away (saved profile names/colors fill in instantly), then fill in the rest
   startPolling();
-  setConnUI('live');
+  setConnUI('live'); clog('connected to ' + (S.devName || S.name));
   toast('Connected to ' + (S.devName || S.name));
   try { const c = store.profPal && store.profPal[ble.dev.id]; if (c) c.forEach((x, i) => { const q = S.profiles[i]; if (x && q){ q.color = x.c || q.color; q.pal = x.pal; ['name','tempC','time','boostF','boostT','vapor'].forEach(k => { if (x[k] != null) q[k] = x[k]; }); } }); } catch(e){}
   render();
@@ -3355,7 +3370,7 @@ async function connectLast(opts){
   opts = opts || {};
   const name = store.lastDeviceName, id = store.lastDeviceId;
   const go = async () => { const q = !!(S.readFor && ble.dev && S.readFor === ble.dev.id); await ble.attach(null, q); await afterConnect(q); return true; };
-  const fail = e => { console.warn('reconnect step failed', e); try { ble.disconnect(true); } catch(_){} };
+  const fail = e => { console.warn('reconnect step failed', e); clog('reconnect step failed: ' + ((e && e.message) || e)); try { ble.disconnect(true); } catch(_){} };
   // 1. the device object we already have
   if (ble.dev && !opts.skipCached){ try { return await go(); } catch(e){ fail(e); } }
   // 2. Chrome: devices this site was allowed before
@@ -3384,16 +3399,18 @@ async function connectLast(opts){
   }
   return false;
 }
+const RECONNECT_TRIES = 6;
 async function autoReconnect(){
   const run = ++reconnectRun;
-  for (let n = 1; n <= 5; n++){
+  for (let n = 1; n <= RECONNECT_TRIES; n++){
     if (run !== reconnectRun || manualDisconnect || S.mode === 'live') return;
-    setConnUI('reconnecting', { attempt:n });
-    await sleep([0, 700, 1800, 3000, 4500][n - 1]);
+    setConnUI('reconnecting', { attempt:n }); clog('reconnect try ' + n);
+    await sleep([600, 1000, 1800, 3000, 4500, 6000][n - 1]); // first wait: let the phone fully drop the old link so the Peak shows up again
     if (run !== reconnectRun || manualDisconnect || S.mode === 'live') return;
     if (document.hidden){ setConnUI('error', { title:'Connection paused', msg:'Emberline was in the background. It reconnects when you come back.' }); return; }
     if (await connectLast({ scan: n >= 3 ? 4000 : 0 })) return;
   }
+  if (run === reconnectRun) clog('gave up reconnecting');
   if (run === reconnectRun) setConnUI('error', { title:'Lost connection to your Peak', msg:'It may have gone to sleep, moved out of range, or connected to the Puffco app. Wake it and tap Try again.' });
 }
 // background scan used for instant reconnects (Path browser supports this)
@@ -3428,7 +3445,8 @@ function armTapReconnect(){
 function userDisconnect(){ manualDisconnect = true; reconnectRun++; ble.disconnect(); if (!ble.connected) onDropped(); }
 
 // pause polling in the background, resume (or reconnect) when back
-function forceReconnect(){
+function forceReconnect(why){
+  try { clog('force reconnect' + (why ? ': ' + why : '')); } catch(e){}
   stopPolling(); releaseWake();
   const was = S.mode === 'live'; S.mode = 'off';
   try { ble.disconnect(true); } catch(_){}
@@ -3439,11 +3457,15 @@ document.addEventListener('visibilitychange', async () => {
   document.documentElement.classList.toggle('bg', document.hidden);
   if (document.hidden){ stopPolling(); return; }
   if (manualDisconnect || store.autoConnect === false && C.state !== 'live' && C.state !== 'reconnecting') return;
-  if (S.mode === 'live' && !ble.connected){ forceReconnect(); return; } // link died while we were away
+  if (S.mode === 'live' && !ble.connected){ forceReconnect('link died while in the background'); return; } // link died while we were away
   if (S.mode === 'live' && ble.connected){
     // iOS often kills the link while the app is in the background without telling the page
-    try { await withTimeout(ble.u8('/p/app/stat/id'), 900, 'gatt'); startPolling(); poll(); }
-    catch(e){ forceReconnect(); }
+    // the first read after the app comes back is often slow on iPhone: 0.9s used to cut working connections
+    let alive = false;
+    for (let i = 0; i < 2 && !alive; i++){ try { await withTimeout(ble.u8('/p/app/stat/id'), 2500, 'gatt'); alive = true; } catch(e){ if (!ble.connected) break; } }
+    if (document.hidden) return;
+    clog(alive ? 'back in app: Peak answered' : 'back in app: no answer twice');
+    if (alive){ startPolling(); poll(); } else forceReconnect('no answer after coming back');
   }
   else if (C.state !== 'connecting' && store.lastDeviceName && S.mode !== 'live') autoReconnect();
 });
@@ -3575,7 +3597,7 @@ async function poll(){
     catch(e){
       ++failStreak;
       const linkDown = !(ble.dev && ble.dev.gatt && ble.dev.gatt.connected);
-      if ((linkDown && failStreak >= 2) || failStreak >= 8){ failStreak = 0; forceReconnect(); return; }
+      if ((linkDown && failStreak >= 2) || failStreak >= 8){ failStreak = 0; forceReconnect(linkDown ? 'reads failing, link down' : '8 reads failed in a row'); return; }
     }
     // sitting idle (not heating, Ready or Boost): keep watching for a start, but read the rest and redraw only every 3rd tick.
     // Reading everything and redrawing the whole app twice a second kept the phone warm for nothing
