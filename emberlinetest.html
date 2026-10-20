@@ -349,6 +349,15 @@ body.vr-on .toast{z-index:300;top:16px}
 .vr-duel{display:grid;gap:8px;padding:12px;border-radius:16px;background:#221a30;border:1px solid #4a2e6a}
 .vr-vs{display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center}.vr-vs b{display:block;font-size:34px}
 .egg.duel{z-index:220}
+.dq-box{display:grid;gap:6px;justify-items:center;text-align:center;padding:14px;border-radius:18px;background:var(--fill-2)}
+.dq-spin{width:28px;height:28px;border-radius:50%;border:3px solid var(--fill);border-top-color:var(--accent,#9900cc);animation:dqSpin 1s linear infinite;justify-self:center}
+@keyframes dqSpin{to{transform:rotate(360deg)}}
+.dfr-list{display:grid;gap:6px;max-height:240px;overflow:auto}
+.dfr-row{display:flex;align-items:center;gap:10px}
+.dfr-name{flex:1;min-width:0;display:grid}.dfr-name b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dfr-name small{color:var(--muted);font-size:12px;display:flex;align-items:center;gap:5px}
+.dfr-dot{width:8px;height:8px;border-radius:50%;background:#777;display:inline-block}.dfr-dot.on{background:#3ddc84}.dfr-dot.busy{background:#ffb020}
+.dq-more summary{cursor:pointer;font-size:14px;color:var(--muted)}
+.egg.dinv{z-index:230}
 .duel-code{font:800 40px/1 ui-monospace,Menlo,monospace;letter-spacing:.15em;text-align:center;padding:12px;border-radius:16px;background:var(--fill-2);-webkit-user-select:all;user-select:all}
 .duel-vs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .duel-side{display:grid;gap:4px;justify-items:center;text-align:center;padding:12px 8px;border-radius:18px;background:var(--fill-2);min-width:0}
@@ -8016,7 +8025,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -8208,6 +8217,11 @@ $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
   if (k === 'taxnote'){ rankTaxNotice(true); return; }
   if (k === 'vr'){ vrOpen(); return; }
+  if (k === 'dinvite'){ lobbyOn(); lobbyInv({ id:'test-friend', to: lobbyId(), n:'TestFriend', code: rtCode(), r: QUEUE_RULES }); return; }
+  if (k === 'dqbot'){ duelSheet(); setTimeout(() => { if (!LOBBY.q) return; queueLeave(); duelStart('host', 'BOT', Object.assign({}, QUEUE_RULES), true); DUEL.auto = true; toast('Match found: Ember Bot'); duelGo(); }, 3000); return; }
+  if (k === 'dfriends'){ const me = LB.me || lbStore().meCache || (LB.me = { id:'me-test', username:'You' }); if (!me.username) me.username = 'You';
+    SOC.loaded = true; SOC.followingRows = [{ id:'f1', username:'Kayne_ken' }, { id:'f2', username:'bmo' }, { id:'f3', username:'NotFollowingBack' }]; SOC.followerSet = new Set(['f1', 'f2']);
+    LOBBY.online.set('f1', { at: Date.now(), busy:false }); LOBBY.online.set('f2', { at: Date.now(), busy:true }); duelSheet({ queue:false }); return; }
   if (k === 'vrdemo'){ vrOpen({ demo:true }); return; }
   if (k === 'duelbot' || k === 'duelfast'){ duelSheet(); duelStart('host', 'BOT', k === 'duelfast' ? { min:1, win:60, cap:300 } : duelRules(), true); return; }
   if (k === 'rtcheck'){ const r = new Relay('ember-check-' + rtCode()), t0 = Date.now(); let done = false; toast('Checking the relay…');
@@ -8493,7 +8507,7 @@ function wakeOff(){ if (VRH.code || DUEL.on) return; try { WAKE.lock && WAKE.loc
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   if (VRH.code || DUEL.on) wakeOn();
-  [VRH.rt, VRP.rt, DUEL.rt].forEach(r => r && r.wake());
+  [VRH.rt, VRP.rt, DUEL.rt, LOBBY.rt].forEach(r => r && r.wake());
 });
 const vrMS = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 const vrDeg = (c, u) => u === 'C' ? Math.round(c) + '°C' : Math.round(c2f(c)) + '°F';
@@ -8758,8 +8772,8 @@ const DUEL = { on:false };
 const duelName = () => ((LB.me || lbStore().meCache || {}).username || store.name || 'Player').slice(0, 20);
 function duelRules(){ const r = store.duelRules || {}; return { min: DUEL_OPTS.min.includes(r.min) ? r.min : 3, win: DUEL_OPTS.win.includes(r.win) ? r.win : 240, cap: DUEL_OPTS.cap.includes(r.cap) ? r.cap : 1200 }; }
 function duelStart(role, code, rules, bot){
-  duelEnd(true);
-  Object.assign(DUEL, { on:true, id: rtCode(8), role, code, rules, bot: !!bot, ph:'lobby', start:0, sentAt:0, seenAt:0, res:null, rt:null,
+  queueLeave(); duelEnd(true);
+  Object.assign(DUEL, { on:true, made: Date.now(), id: rtCode(8), role, code, rules, bot: !!bot, ph:'lobby', start:0, sentAt:0, seenAt:0, res:null, rt:null,
     me:{ h:0, b:0, at:0, out:0, outWall:0, cool:0, seen:new Set() }, op:null, finalAt:0 });
   if (bot){ DUEL.op = { id:'bot', n:'Ember Bot', h:0, b:0, out:0, left:rules.win }; DUEL.seenAt = Date.now(); }
   else {
@@ -8774,6 +8788,7 @@ function duelStart(role, code, rules, bot){
   wakeOn(); duelDraw(); drawPills();
 }
 function duelEnd(quiet){
+  if (DUEL.inviting && !DUEL.op && LOBBY.rt) LOBBY.rt.send('inv:x', { id: lobbyId(), to: DUEL.inviting.to, code: DUEL.code }); // tell the friend the invite is off
   if (DUEL.rt){ const r = DUEL.rt; if (DUEL.ph !== 'done') r.send('d:bye', { id: DUEL.id }); setTimeout(() => r.close(), 400); }
   clearInterval(DUEL.timer); Object.keys(DUEL).forEach(k => delete DUEL[k]); DUEL.on = false;
   wakeOff(); drawPills(); if (!quiet) duelDraw();
@@ -8790,7 +8805,7 @@ function duelOnHi(m){
   const had = !!DUEL.op; if (!duelSeeOp(m)) return;
   if (DUEL.role === 'host') duelSend('d:rules', { n: duelName(), r: DUEL.rules, ph: DUEL.ph });
   else if (!had) duelSend('d:hi', { n: duelName(), role: DUEL.role });
-  if (!had){ buzz(20); toast(`${DUEL.op.n} joined the 1v1`); }
+  if (!had){ buzz(20); toast(`${DUEL.op.n} joined the 1v1`); if (DUEL.auto && DUEL.role === 'host' && DUEL.ph === 'lobby') setTimeout(duelGo, 1500); }
   duelDraw();
 }
 function duelOnRules(m){
@@ -8840,6 +8855,10 @@ function duelTick(){
     duelDecide(now);
   }
   if (!D.bot && D.rt && D.ph !== 'lobby' && now - D.sentAt >= 2000 && (D.ph !== 'done' || now - D.finalAt < 8000)){ D.sentAt = now; duelSend('d:st', Object.assign({ ph:D.ph, r: D.res && D.res.r }, duelStats())); }
+  if (D.ph === 'lobby' && !D.op && !D.bot){
+    if (D.auto && now - D.made > 15000){ duelEnd(true); toast('That match fell through. Back in the queue'); duelSheet(); return; }
+    if (D.inviting && now - D.inviting.at > 45000){ const n = D.inviting.n; duelEnd(true); toast(`No answer from ${n}. They need Emberline open`); duelSheet({ queue:false }); return; }
+  }
   if (D.ph === 'lobby' && D.rt && D.rt.open && !D.op && now - D.sentAt > 5000){ D.sentAt = now; duelSend('d:hi', { n: duelName(), role: D.role }); }
   duelDraw(); drawPills();
 }
@@ -8884,7 +8903,7 @@ function drawPills(){
     el.addEventListener('click', e => { const b = e.target.closest('[data-pill]'); if (!b) return; if (b.dataset.pill === 'duel') duelSheet(); else { show('set'); setTimeout(() => { const c = $('#vrCard'); c && c.scrollIntoView({ block:'center' }); }, 300); } }); }
   const h = items.join(''); if (el.innerHTML !== h) el.innerHTML = h;
 }
-function duelSheet(){
+function duelSheet(opts = {}){
   let el = $('.egg.duel');
   if (!el){
     el = document.createElement('div'); el.className = 'egg duel';
@@ -8893,6 +8912,7 @@ function duelSheet(){
     el.addEventListener('click', duelClick);
   }
   el.dataset.ph = ''; duelDraw(); drawPills();
+  if (!DUEL.on && opts.queue !== false) queueJoin(); // tapping 1v1 puts you straight in the queue
 }
 function duelHide(){ const el = $('.egg.duel'); if (!el) return; el.classList.remove('on'); setTimeout(() => { el.remove(); drawPills(); }, 260); }
 function duelPick(k, label, unit){ const v = duelRules()[k]; return `<label style="display:grid;gap:4px;font-size:13px"><span class="muted">${label}</span><select data-dr="${k}">${DUEL_OPTS[k].map(o => `<option value="${o}"${o === v ? ' selected' : ''}>${unit(o)}</option>`).join('')}</select></label>`; }
@@ -8903,13 +8923,16 @@ function duelDraw(){
     if (el.dataset.ph === 'menu') return; // don't wipe what they're typing
     const rec = store.duelRec || { w:0, l:0, d:0 };
     card.innerHTML = `<span class="label" style="text-align:center">1v1</span><h2 style="margin:0;text-align:center">Last one hitting wins</h2>
-      <p style="margin:0;font-size:14px">Each hit of the set length or longer resets your clock. Run out and you’re out. At the time cap, the most hits wins. Your clock pauses (up to 2 min) if your ${esc(devWord())}’s battery gets hot.</p>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">${duelPick('min', 'Hits count from', v => v + 's')}${duelPick('win', 'Clock', v => v / 60 + ' min')}${duelPick('cap', 'Time cap', v => v / 60 + ' min')}</div>
-      <button class="btn primary" data-d="host" style="width:100%">Make a 1v1</button>
-      <div class="row" style="gap:8px"><input type="text" id="duelCode" maxlength="6" placeholder="Friend’s code" autocomplete="off" autocapitalize="characters" spellcheck="false" style="flex:1;min-width:0;text-transform:uppercase;letter-spacing:.1em" value="${esc(store.duelJoin || '')}"><button class="btn small" data-d="join">Join</button></div>
+      <div id="dqBox" class="dq-box"></div>
+      <div style="display:grid;gap:8px"><span class="label">Challenge a friend</span><div id="dFr" class="dfr-list"></div></div>
+      <details class="dq-more"><summary>Custom 1v1 with a code</summary><div style="display:grid;gap:10px;margin-top:10px">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">${duelPick('min', 'Hits count from', v => v + 's')}${duelPick('win', 'Clock', v => v / 60 + ' min')}${duelPick('cap', 'Time cap', v => v / 60 + ' min')}</div>
+        <button class="btn" data-d="host" style="width:100%">Make a 1v1 code</button>
+        <div class="row" style="gap:8px"><input type="text" id="duelCode" maxlength="6" placeholder="Friend’s code" autocomplete="off" autocapitalize="characters" spellcheck="false" style="flex:1;min-width:0;text-transform:uppercase;letter-spacing:.1em" value="${esc(store.duelJoin || '')}"><button class="btn small" data-d="join">Join</button></div></div></details>
+      <p class="muted" style="margin:0;font-size:12px">Each hit of ${QUEUE_RULES.min}s or longer resets your clock (${QUEUE_RULES.win / 60} min). Run out and you’re out. At ${QUEUE_RULES.cap / 60} min, the most hits wins. Your clock pauses (up to 2 min) if your ${esc(devWord())}’s battery gets hot.</p>
       <p class="muted" style="margin:0;font-size:12px">Record: ${rec.w} W · ${rec.l} L${rec.d ? ' · ' + rec.d + ' D' : ''}${IS_TEST ? ' · Test build: no RP' : ''}. Consume responsibly, take breaks.</p>
       <button class="btn" data-d="close" style="width:100%">Close</button>`;
-    el.dataset.ph = 'menu'; return;
+    el.dataset.ph = 'menu'; duelMenuPaint(); return;
   }
   el.dataset.ph = ph;
   const op = D.op, r = D.rules, me = D.me, side = (name, h, b, left, out, cool, you) => `<div class="duel-side${you ? ' you' : ''}"><b class="duel-n">${esc(name)}</b><span class="duel-h">${h}</span><span class="muted" style="font-size:12px">hits · best ${b ? b + 's' : '—'}</span>
@@ -8918,11 +8941,13 @@ function duelDraw(){
   if (ph === 'lobby'){
     const url = location.origin + location.pathname + '?duel=' + D.code;
     body = D.bot ? `<p style="margin:0;font-size:14px">Practice against Ember Bot. It hits at random and runs out at a random time.</p>`
+      : D.inviting && !op ? `<div class="dq-spin"></div><p style="margin:0;text-align:center">Waiting for <b>${esc(D.inviting.n)}</b> to accept…</p>`
+      : D.auto ? `<p style="margin:0;text-align:center">${op ? 'Match found: <b>' + esc(op.n) + '</b>. Starting…' : 'Match found. Connecting…'}</p>`
       : `<span class="muted" style="font-size:13px;text-align:center">${D.role === 'host' ? 'Send your friend this code' : 'Joined'}</span><div class="duel-code">${esc(D.code)}</div>
         ${D.role === 'host' ? `<button class="btn small" data-d="share">Share link</button>` : ''}
         <p class="muted" style="margin:0;font-size:13px;text-align:center">${!D.rt || !D.rt.open ? 'Connecting…' : op ? '✓ ' + esc(op.n) + ' is here' : D.role === 'host' ? 'Waiting for your friend…' : 'Looking for the host…'}</p>`;
     body += `<p class="muted" style="margin:0;font-size:13px;text-align:center">Hits ${r.min}s+ · ${r.win / 60} min clock · ${r.cap / 60} min cap</p>
-      ${D.role === 'host' ? `<button class="btn primary" data-d="go" style="width:100%"${op ? '' : ' disabled'}>Start</button>` : `<p style="margin:0;text-align:center;font-size:14px">${op ? 'Waiting for ' + esc(op.n) + ' to start' : ''}</p>`}`;
+      ${D.auto ? '' : D.role === 'host' ? `<button class="btn primary" data-d="go" style="width:100%"${op ? '' : ' disabled'}>Start</button>` : `<p style="margin:0;text-align:center;font-size:14px">${op ? 'Waiting for ' + esc(op.n) + ' to start' : ''}</p>`}`;
     void url;
   } else if (ph === 'count'){
     body = `<div class="duel-big">${Math.max(0, Math.ceil((D.start - Date.now()) / 1000))}</div><p style="margin:0;text-align:center">Get your ${esc(devWord())} heating. Hits count from 0.</p>`;
@@ -8945,21 +8970,137 @@ function duelDraw(){
   if (card.innerHTML !== h) card.innerHTML = h;
 }
 function duelClick(e){
-  const el = $('.egg.duel'); if (e.target === el) return duelHide();
+  const el = $('.egg.duel'); if (e.target === el){ queueLeave(); return duelHide(); }
   const b = e.target.closest('[data-d]'); if (!b) return; const k = b.dataset.d;
   const rules = () => { const r = {}; el.querySelectorAll('[data-dr]').forEach(s => r[s.dataset.dr] = +s.value); store.duelRules = r; save(); return duelRules(); };
-  if (k === 'close') return duelHide();
-  if (k === 'host') return duelStart('host', rtCode(), rules());
-  if (k === 'join'){ const c = rtClean(($('#duelCode') || {}).value); if (c.length !== 6) return toast('Type the 6-character code'); store.duelJoin = ''; save(); return duelStart('guest', c, rules()); }
+  if (k === 'close'){ queueLeave(); return duelHide(); }
+  if (k === 'q') return queueJoin();
+  if (k === 'qx') return queueLeave();
+  if (k === 'inv') return duelInvite(b.dataset.id, b.dataset.n);
+  if (k === 'host'){ queueLeave(); return duelStart('host', rtCode(), rules()); }
+  if (k === 'join'){ queueLeave(); const c = rtClean(($('#duelCode') || {}).value); if (c.length !== 6) return toast('Type the 6-character code'); store.duelJoin = ''; save(); return duelStart('guest', c, rules()); }
   if (k === 'share') return shareLink(location.origin + location.pathname + '?duel=' + DUEL.code, `1v1 me on Emberline. Code ${DUEL.code}. Last one hitting wins.`);
   if (k === 'go') return duelGo();
   if (k === 'min') return duelHide();
   if (k === 'leave'){ if (DUEL.ph === 'live' && !confirm('Give up this 1v1? It counts as a loss.')) return;
     if (DUEL.ph === 'live'){ const rec = store.duelRec = store.duelRec || { w:0, l:0, d:0 }; rec.l++; save(); }
     duelEnd(); return; }
-  if (k === 'end'){ duelEnd(); duelHide(); return; }
+  if (k === 'end'){ duelEnd(); duelSheet({ queue:false }); return; }
   if (k === 'fakehit'){ HIT.hits.push(4); (HIT.ends = HIT.ends || []).push(Date.now()); toast('Fake 4s hit'); duelTick(); }
 }
+/* ===== 1v1 lobby: the matchmaking queue, friend invites and who's online =====
+   Everyone with Emberline open sits in one lobby channel. Queued players say "here" every 3s. When two see each
+   other, the one with the lower id offers a match (a fresh duel code), the other says ok, and both join that duel. */
+const LOBBY = { rt:null, q:null, online:new Map(), inv:null, timer:null, pingAt:0 };
+const QUEUE_RULES = { min:3, win:240, cap:1200 };
+function lobbyId(){ const me = LB.me || lbStore().meCache; if (me && me.id) return String(me.id); if (!store.guestId){ store.guestId = 'g' + rtCode(10); save(); } return store.guestId; }
+const lobbyMe = m => m && String(m.to) === lobbyId();
+function lobbyOn(){
+  if (LOBBY.rt){ LOBBY.rt.wake(); return; }
+  LOBBY.rt = new Relay('ember-duel-lobby')
+    .on('q:here', lobbyQHere)
+    .on('q:left', m => { if (LOBBY.q) LOBBY.q.seen.delete(String(m.id)); })
+    .on('q:match', lobbyQMatch).on('q:ok', lobbyQOk)
+    .on('q:no', m => { const q = LOBBY.q; if (lobbyMe(m) && q && q.pend && q.pend.to === String(m.id)){ q.skip.set(q.pend.to, Date.now() + 15000); q.pend = null; } })
+    .on('inv', lobbyInv)
+    .on('inv:no', m => { if (lobbyMe(m) && DUEL.on && DUEL.inviting && m.code === DUEL.code){ const n = DUEL.inviting.n; duelEnd(true); toast(m.busy ? `${n} is busy right now` : `${n} said not now`); duelSheet({ queue:false }); } })
+    .on('inv:x', m => { if (lobbyMe(m) && LOBBY.inv && LOBBY.inv.code === m.code) duelInvClose(); })
+    .on('on:ping', m => { if (!m.id || String(m.id) === lobbyId()) return; setTimeout(() => LOBBY.rt && LOBBY.rt.send('on:pong', { id: lobbyId(), to: m.id, busy: !!DUEL.on }), Math.random() * 1500); })
+    .on('on:pong', m => { if (lobbyMe(m)){ LOBBY.online.set(String(m.id), { at: Date.now(), busy: !!m.busy }); duelMenuPaint(); } })
+    .on('open', () => { if (LOBBY.q) lobbySendQ(); lobbyPing(true); duelMenuPaint(); })
+    .on('down', duelMenuPaint);
+  LOBBY.rt.connect();
+}
+function lobbyTimer(){ if (!LOBBY.timer) LOBBY.timer = setInterval(lobbyTick, 1000); }
+function lobbyPing(force){ if (!LOBBY.rt || !LOBBY.rt.open || !$('.egg.duel')) return; if (!force && Date.now() - LOBBY.pingAt < 20000) return; LOBBY.pingAt = Date.now(); LOBBY.rt.send('on:ping', { id: lobbyId() }); }
+function queueJoin(){
+  if (DUEL.on || LOBBY.q) return;
+  lobbyOn(); LOBBY.q = { at: Date.now(), seen: new Map(), skip: new Map(), pend: null, sentAt: 0 };
+  lobbySendQ(); lobbyTimer(); wakeOn(); duelMenuPaint();
+}
+function queueLeave(){ if (!LOBBY.q) return; if (LOBBY.rt) LOBBY.rt.send('q:left', { id: lobbyId() }); LOBBY.q = null; wakeOff(); duelMenuPaint(); }
+function lobbySendQ(){ if (!LOBBY.q || !LOBBY.rt) return; LOBBY.q.sentAt = Date.now(); LOBBY.rt.send('q:here', { id: lobbyId(), n: duelName() }); }
+function lobbyQHere(m){
+  if (!m.id || String(m.id) === lobbyId()) return;
+  LOBBY.online.set(String(m.id), { at: Date.now(), busy:false });
+  if (LOBBY.q) LOBBY.q.seen.set(String(m.id), { n: String(m.n || 'Player').slice(0, 20), at: Date.now() });
+}
+function lobbyQMatch(m){
+  if (!lobbyMe(m)) return;
+  if (!LOBBY.q || DUEL.on){ LOBBY.rt.send('q:no', { id: lobbyId(), to: m.id }); return; }
+  const code = rtClean(m.code); if (code.length !== 6) return;
+  LOBBY.rt.send('q:ok', { id: lobbyId(), to: m.id, code });
+  queueLeave(); duelStart('guest', code, Object.assign({}, QUEUE_RULES)); DUEL.auto = true;
+  buzz([30, 40, 30]); toast(`Match found: ${String(m.n || 'Player').slice(0, 20)}`); duelSheet();
+}
+function lobbyQOk(m){
+  const q = LOBBY.q; if (!lobbyMe(m) || !q || !q.pend || q.pend.code !== m.code || q.pend.to !== String(m.id)) return;
+  const n = (q.seen.get(q.pend.to) || {}).n || 'Player';
+  queueLeave(); duelStart('host', m.code, Object.assign({}, QUEUE_RULES)); DUEL.auto = true;
+  buzz([30, 40, 30]); toast(`Match found: ${n}`); duelSheet();
+}
+function lobbyTick(){
+  const now = Date.now(), q = LOBBY.q;
+  if (q){
+    if (now - q.sentAt > 3000) lobbySendQ();
+    q.seen.forEach((v, k) => { if (now - v.at > 8000) q.seen.delete(k); });
+    if (q.pend && now - q.pend.at > 6000){ q.skip.set(q.pend.to, now + 15000); q.pend = null; } // no answer: try someone else
+    if (!q.pend && LOBBY.rt && LOBBY.rt.open){
+      const me = lobbyId(), ids = [...q.seen.keys()].filter(k => !(q.skip.get(k) > now)).sort();
+      if (ids.length && me < ids[0]){ q.pend = { to: ids[0], code: rtCode(), at: now }; LOBBY.rt.send('q:match', { id: me, to: ids[0], n: duelName(), code: q.pend.code }); }
+    }
+  }
+  if (LOBBY.inv && now - LOBBY.inv.at > 40000) duelInvClose();
+  lobbyPing(false);
+  duelMenuPaint();
+  if (!q && !LOBBY.inv && !$('.egg.duel')){ clearInterval(LOBBY.timer); LOBBY.timer = null; }
+}
+// the parts of the 1v1 menu that change: the queue box and the friends list
+function duelMenuPaint(){
+  const box = $('#dqBox'), fr = $('#dFr'); if (!box && !fr) return;
+  const now = Date.now(), q = LOBBY.q, up = LOBBY.rt && LOBBY.rt.open;
+  if (box) setHTML(box, q ? `<div class="dq-spin"></div><b>${up ? 'Finding a match…' : 'Connecting…'}</b><span class="muted" style="font-size:13px">${vrMS((now - q.at) / 1000)} · ${q.seen.size ? q.seen.size + ' other' + (q.seen.size === 1 ? '' : 's') + ' in the queue' : 'nobody else in the queue yet'}</span>
+      ${now - q.at > 20000 && !q.seen.size ? '<span class="muted" style="font-size:12px">Quiet right now. Challenge a friend below, or keep waiting.</span>' : ''}<button class="btn small" data-d="qx">Cancel</button>`
+    : `<button class="btn primary" data-d="q" style="width:100%">Find a match</button>`);
+  if (fr){
+    const me = LB.me || lbStore().meCache;
+    if (!me || !me.username){ setHTML(fr, '<p class="muted" style="margin:0;font-size:13px">Make a ranked profile in Social to challenge friends.</p>'); return; }
+    if (!SOC.loaded){ if (!duelMenuPaint.loading){ duelMenuPaint.loading = true; socLoad().catch(() => {}).finally(() => { duelMenuPaint.loading = false; duelMenuPaint(); }); } setHTML(fr, '<p class="muted" style="margin:0;font-size:13px">Loading your friends…</p>'); return; }
+    const fs = SOC.followerSet || new Set(), on = id => { const o = LOBBY.online.get(String(id)); return o && now - o.at < 60000 ? o : null; };
+    const rows = (SOC.followingRows || []).filter(r => !r.banned && r.id !== me.id)
+      .sort((a, b) => (!!on(b.id) - !!on(a.id)) || (fs.has(b.id) - fs.has(a.id)) || String(a.username).localeCompare(String(b.username)));
+    setHTML(fr, rows.length ? rows.slice(0, 30).map(r => { const o = on(r.id);
+      return `<div class="dfr-row">${lbAvatar(r.avatar_url, r.username, 36)}<span class="dfr-name"><b>${esc(r.username)}</b><small><i class="dfr-dot${o ? o.busy ? ' busy' : ' on' : ''}"></i>${o ? o.busy ? 'In a 1v1' : 'Online' : 'Offline'}${fs.has(r.id) ? ' · friend' : ''}</small></span><button class="btn small${o && !o.busy ? ' primary' : ''}" data-d="inv" data-id="${esc(String(r.id))}" data-n="${esc(r.username)}">1v1</button></div>`; }).join('')
+      : '<p class="muted" style="margin:0;font-size:13px">Follow people in Social and they show up here.</p>');
+  }
+}
+function duelInvite(id, name){
+  const me = LB.me || lbStore().meCache; if (!me || !me.id) return toast('Make a ranked profile in Social to challenge friends');
+  queueLeave(); lobbyOn(); lobbyTimer();
+  const code = rtCode(); duelStart('host', code, duelRules());
+  DUEL.inviting = { to: String(id), n: String(name || 'your friend').slice(0, 20), at: Date.now() };
+  LOBBY.rt.send('inv', { id: lobbyId(), to: String(id), n: duelName(), code, r: DUEL.rules });
+  duelDraw();
+}
+function lobbyInv(m){
+  if (!lobbyMe(m) || !m.id) return;
+  const code = rtClean(m.code); if (code.length !== 6) return;
+  if (DUEL.on || LOBBY.inv){ LOBBY.rt.send('inv:no', { id: lobbyId(), to: m.id, code, busy:true }); return; }
+  LOBBY.inv = { from: String(m.id), n: String(m.n || 'Someone').slice(0, 20), code, r: m.r || {}, at: Date.now() }; lobbyTimer();
+  const r = LOBBY.inv.r, el = document.createElement('div'); el.className = 'egg dinv';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="1v1 invite" style="gap:12px"><span class="label">1v1</span><h2 style="margin:0">${esc(LOBBY.inv.n)} wants to 1v1</h2>
+    <p>Last one hitting wins${+r.min ? ` · hits ${+r.min}s+ · ${+r.win / 60} min clock · ${+r.cap / 60} min cap` : ''}</p>
+    <div class="row" style="gap:8px;width:100%"><button class="btn" data-i="no" style="flex:1">Not now</button><button class="btn primary" data-i="ok" style="flex:1">Accept</button></div></div>`;
+  document.body.appendChild(el); applyHaptics(); buzz([40, 60, 40]); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  el.addEventListener('click', e => {
+    const b = e.target.closest('[data-i]'); if (!b) return; const inv = LOBBY.inv; if (!inv) return duelInvClose();
+    if (b.dataset.i === 'no'){ LOBBY.rt.send('inv:no', { id: lobbyId(), to: inv.from, code: inv.code }); duelInvClose(); return; }
+    duelInvClose(); queueLeave();
+    duelStart('guest', inv.code, { min: +inv.r.min || 3, win: +inv.r.win || 240, cap: +inv.r.cap || 1200 }); duelSheet();
+  });
+}
+function duelInvClose(){ LOBBY.inv = null; const el = $('.egg.dinv'); if (!el) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); }
+setTimeout(() => { if (!document.hidden) lobbyOn(); }, 4000); // in the lobby while the app is open, so friends' invites reach you
 // links: ?vr opens the panel, ?duel=CODE fills in a friend's 1v1 code
 { const q = new URLSearchParams(location.search);
   if (q.has('vr')) setTimeout(() => vrOpen(), 300);
