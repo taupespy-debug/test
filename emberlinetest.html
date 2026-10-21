@@ -1838,6 +1838,9 @@ body.vr-on .toast{z-index:300;top:16px}
 .fpill.duel{background:#d8333c}
 body.vr-on #fpills{display:none}
 /* 1v1 menu */
+.dsc{display:grid;gap:6px;padding:12px;border-radius:16px;background:var(--surface-2,rgba(255,255,255,.06));font-size:14px}
+.dsc div{display:flex;justify-content:space-between;gap:8px}.dsc b.win{color:#3ddc84}.dsc b.lose{color:#ff3b4a}
+.dsc-t{border-top:1px solid var(--line,rgba(255,255,255,.12));padding-top:6px;font-size:16px}
 .d-body,.d-foot{display:grid;gap:12px;min-width:0}
 .btn.danger{background:#ff3b4a!important;color:#fff!important;border-color:#ff3b4a!important}
 .egg.duel .egg-card{width:min(100%,400px);grid-template-columns:minmax(0,1fr);justify-items:stretch;text-align:left;padding:20px 16px;gap:14px}
@@ -8894,11 +8897,12 @@ const duelLeft = () => DUEL.rules.win - (Date.now() - DUEL.me.at) / 1000;
 function duelTick(){
   const D = DUEL; if (!D.on) return;
   const now = Date.now(), r = D.rules;
-  if (D.ph === 'count' && now >= D.start){ D.ph = 'live'; buzz([40, 60, 40]); toast('Go! Hit ' + r.min + 's or longer to stay in'); }
+  if (D.ph === 'count' && now >= D.start){ D.ph = 'live'; buzz([40, 60, 40]); toast('Go! Hit ' + r.min + 's or longer to stay in'); duelAutoStart(); }
   if (D.ph === 'live'){
     const capAt = capAtOf(D), ends = HIT.ends || [], hits = HIT.hits || [];
     for (let j = 1; j <= Math.min(ends.length, hits.length); j++){ // hits that ended since the start, each one once (matched from the end: a reload can put back hits without end times)
       const t = ends[ends.length - j], secs = hits[hits.length - j]; if (!t || t < D.start || t > capAt || D.me.seen.has(t)) continue;
+      const stopAt = Math.min(D.me.out || Infinity, (D.op && D.op.out) || Infinity); if (t > D.start + stopAt) continue; // the match ended when the first clock ran out
       D.me.seen.add(t);
       if (secs >= r.min && !D.bot && S.mode === 'live' && !duelProfOk()){ D.me.bad = (D.me.bad || 0) + 1; toast('That hit didn’t count: use the 1v1 profile (P1)'); continue; }
       if (secs >= r.min){ D.me.h++; D.me.b = Math.max(D.me.b, secs); if (!D.me.out) D.me.at = Math.max(D.me.at, t); buzz(15); }
@@ -8920,24 +8924,46 @@ function duelTick(){
   if (D.ph === 'lobby' && D.rt && D.rt.open && !D.op && now - D.sentAt > 5000){ D.sentAt = now; duelSend('d:hi', { n: duelName(), role: D.role }); }
   duelDraw(); drawPills();
 }
+// the countdown hit 0: start the Peak heating on the 1v1 profile
+async function duelAutoStart(){
+  if (S.mode !== 'live'){ toast(`Connect your ${devWord()}. Your clock is running`); return; }
+  if (S.state >= 7 && S.state <= 9) return; // already heating
+  try {
+    if (!DUEL.bot && !duelProfOk()) await duelLoadProf(DUEL.rules.prof, true);
+    const i = DUEL.bot ? S.active : 0; BOOST.temp = 0; BOOST.time = 0;
+    try { await ble.write('/p/app/hcs', new Uint8Array([i])); } catch(e){}
+    await modeCmd(7);
+  } catch(e){ toast('Couldn’t start heating. Press the button on your ' + devWord()); }
+}
 function duelBot(now){
   const o = DUEL.op; if (o.out) return;
   if (now >= o.outAt){ o.out = now - DUEL.start; return; }
   if (now >= o.next){ const s = Math.round((DUEL.rules.min + Math.random() * 6) * 10) / 10; o.h++; o.b = Math.max(o.b, s); o.last = now; o.next = now + DUEL.rules.win * 1000 * (.25 + Math.random() * .6); }
   o.left = Math.round(DUEL.rules.win - (now - (o.last || DUEL.start)) / 1000);
 }
+/* scoring: three things, so endurance and big hits both matter. Ties on a line give nobody the points.
+   Last one going +3 · most hits +2 · longest hit +2. Most points wins; equal points is a draw */
+const DUEL_PTS = { last:3, hits:2, best:2 };
+const DUEL_PTS_TXT = `Last one going +${DUEL_PTS.last} · most hits +${DUEL_PTS.hits} · longest hit +${DUEL_PTS.best}`;
+function duelScore(me, op){
+  const cmp = (a, b) => a === b ? 0 : a > b ? 1 : -1;
+  const surv = me.out && op.out ? (Math.abs(me.out - op.out) <= 1500 ? 0 : cmp(me.out, op.out)) : op.out ? 1 : me.out ? -1 : 0; // both still going at the cap: nobody
+  const rows = [['Last one going', DUEL_PTS.last, surv], ['Most hits', DUEL_PTS.hits, cmp(me.h, op.h)], ['Longest hit', DUEL_PTS.best, cmp(me.b, op.b)]];
+  let a = 0, b = 0; rows.forEach(([, pts, w]) => { if (w > 0) a += pts; else if (w < 0) b += pts; });
+  return { a, b, rows };
+}
 function duelDecide(now){
   const D = DUEL, me = D.me, op = D.op; if (!op || D.res) return;
   const capAt = capAtOf(D);
-  const tie = () => me.h !== op.h ? (me.h > op.h ? 'win' : 'lose') : me.b !== op.b ? (me.b > op.b ? 'win' : 'lose') : 'draw';
-  let res = null, why = '';
-  if (op.gone && !me.out){ res = 'win'; why = `${op.n} left the 1v1`; }
-  else if (me.out && op.out){ res = Math.abs(me.out - op.out) <= 1500 ? tie() : me.out > op.out ? 'win' : 'lose'; why = 'Both clocks ran out'; }
-  else if (op.out){ res = 'win'; why = `${op.n} ran out of time`; }
-  else if (me.out){ if (now - me.outWall > 6000){ res = 'lose'; why = 'Your clock ran out'; } } // give their last update time to land
-  else if (now >= capAt + 4000){ res = tie(); why = 'Time cap: most hits wins'; } // 4s for the last numbers to arrive
-  if (!res) return;
-  D.res = { r: res, why }; D.ph = 'done'; D.finalAt = now;
+  let end = '', forfeit = false;
+  if (op.gone && !me.out){ forfeit = true; end = `${op.n} left the 1v1`; }
+  else if (me.out && op.out) end = 'Both clocks ran out';
+  else if (op.out) end = `${op.n} ran out of time`;
+  else if (me.out){ if (now - me.outWall > 6000) end = 'Your clock ran out'; } // give their last numbers time to land
+  else if (now >= capAt + 4000) end = 'Time cap'; // 4s for the last numbers to arrive
+  if (!end) return;
+  const sc = duelScore(me, op), res = forfeit ? 'win' : sc.a === sc.b ? 'draw' : sc.a > sc.b ? 'win' : 'lose';
+  D.res = { r: res, why: forfeit ? end : `${end} · ${sc.a} to ${sc.b}`, sc: forfeit ? null : sc }; D.ph = 'done'; D.finalAt = now;
   const rec = store.duelRec = store.duelRec || { w:0, l:0, d:0 }; rec[res === 'win' ? 'w' : res === 'lose' ? 'l' : 'd']++;
   if (D.rules.bet && res !== 'draw') rec.rp = (rec.rp || 0) + (res === 'win' ? D.rules.bet : -D.rules.bet); // test build: a tally only, never sent
   save();
@@ -9031,7 +9057,7 @@ function duelDraw(){
     card.innerHTML = `<span class="label" style="text-align:center">1v1</span><h2 style="margin:0;text-align:center">Last one hitting wins</h2>
       <div class="dmode"><button class="dmode-b" data-d="mode" data-m="r"><b>Random match</b><small>Matchmaking with anyone</small></button><button class="dmode-b" data-d="mode" data-m="f"><b>Play a friend</b><small>Custom game, you pick the settings</small></button></div>
       <div id="dSecR" class="dpanel" hidden><span class="label">Random match</span>
-        <div class="dpub muted">Everyone plays the same profile: <b style="color:var(--fg)">${esc(profTxt(DUEL_PUBLIC))}</b>Hits ${QUEUE_RULES.min}s+ reset your ${QUEUE_RULES.win / 60} min clock. No time cap: last one still hitting wins.<br><b style="color:#ffd23f">${QUEUE_BUYIN} RP buy-in</b> · winner takes it from the loser (you have ${myRp} RP)${DUEL_RP_REAL ? '' : '. For now your RP doesn’t change'}</div>
+        <div class="dpub muted">Everyone plays the same profile: <b style="color:var(--fg)">${esc(profTxt(DUEL_PUBLIC))}</b>Hits ${QUEUE_RULES.min}s+ reset your ${QUEUE_RULES.win / 60} min clock. No time cap. Points: ${DUEL_PTS_TXT}.<br><b style="color:#ffd23f">${QUEUE_BUYIN} RP buy-in</b> · winner takes it from the loser (you have ${myRp} RP)${DUEL_RP_REAL ? '' : '. For now your RP doesn’t change'}</div>
         <div id="dqBox" class="dq-box"></div></div>
       <div id="dSecF" style="display:grid;gap:12px" hidden>
         <div class="dpanel"><span class="label">Game settings</span><p class="dnote">You set these for both of you. Your friend sees them before accepting.</p>
@@ -9051,7 +9077,7 @@ function duelDraw(){
         <div class="dcol-row">${DUEL_COLORS.map(c => `<button class="dcol${!duelMoodRef() && c === duelColor() ? ' on' : ''}" data-d="col" data-c="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join('')}<button class="btn small" data-d="moods" style="margin-left:auto">Moods</button></div>
         <div class="dmood-grid" id="dMoods" hidden></div>
         <span class="muted" style="font-size:12px">Your ${esc(devWord())} shows it during a 1v1, and its main color marks your side of the score.</span></div>
-      <p class="dnote">Your clock pauses (up to 2 min) if your ${esc(devWord())}’s battery gets hot. Your Profile 1 is saved and swapped for the 1v1 profile, then put back when you’re done.</p>
+      <p class="dnote">Points: ${DUEL_PTS_TXT}. Most points wins. Your clock pauses (up to 2 min) if your ${esc(devWord())}’s battery gets hot. Your Profile 1 is saved and swapped for the 1v1 profile, then put back when you’re done.</p>
       <p class="dnote">Record: ${rec.w} W · ${rec.l} L${rec.d ? ' · ' + rec.d + ' D' : ''}${rec.rp ? ` · bets ${rec.rp > 0 ? '+' : ''}${rec.rp} RP` : ''}${DUEL_RP_REAL ? '' : ' (not real yet)'}. Consume responsibly, take breaks.</p>
       <button class="btn small" data-d="bot">Practice vs a bot</button>
       ${duelBack() ? '<button class="btn small" data-d="restore">Put my Profile 1 back</button>' : ''}
@@ -9075,11 +9101,11 @@ function duelDraw(){
       ${D.auto ? '' : D.role === 'host' ? `<button class="btn primary" data-d="go" style="width:100%"${op ? '' : ' disabled'}>Start</button>` : `<p style="margin:0;text-align:center;font-size:14px">${op ? 'Waiting for ' + esc(op.n) + ' to start' : ''}</p>`}`;
     void url;
   } else if (ph === 'count'){
-    body = `<div class="duel-big">${Math.max(0, Math.ceil((D.start - Date.now()) / 1000))}</div><p style="margin:0;text-align:center">Get your ${esc(devWord())} heating. Hits count from 0.</p>`;
+    body = `<div class="duel-big">${Math.max(0, Math.ceil((D.start - Date.now()) / 1000))}</div><p style="margin:0;text-align:center">Your ${esc(devWord())} starts heating at 0. Hits count from then.</p>`;
   } else if (ph === 'live'){
     const capLeft = (capAtOf(D) - Date.now()) / 1000;
     body = `<div class="duel-vs">${side('You', me.h, me.b, duelLeft(), me.out, me.cool > 0 && duelHot(), true)}${side(op ? op.n : '…', op ? op.h : 0, op ? op.b : 0, op ? op.left : 0, op ? op.out : 0, op && op.cool, false)}</div>
-      <p class="muted" style="margin:0;font-size:13px;text-align:center">Hits ${r.min}s+ reset your clock · ${r.cap ? 'cap in ' + vrMS(capLeft) : 'no time cap'}${r.bet ? ' · ' + r.bet + ' RP on the line' : ''}</p>
+      <p class="muted" style="margin:0;font-size:13px;text-align:center">Hits ${r.min}s+ reset your clock · ${r.cap ? 'cap in ' + vrMS(capLeft) : 'no time cap'}${r.bet ? ' · ' + r.bet + ' RP on the line' : ''}<br>${DUEL_PTS_TXT}</p>
       ${S.mode === 'live' && !D.bot && !duelProfOk() ? `<p style="margin:0;color:#ff9d4d;font-size:13px;text-align:center">Switch to P1 (the 1v1 profile) or your hits won’t count. <button class="btn small" data-d="reload">Load it again</button></p>` : ''}
       ${me.out ? '<p style="margin:0;text-align:center"><b>You’re out.</b> Waiting for the result…</p>' : ''}
       ${S.mode !== 'live' && !D.bot ? `<p style="margin:0;color:#ff9d4d;font-size:13px;text-align:center">Your ${esc(devWord())} isn’t connected. Your clock is still running.</p>` : ''}
@@ -9089,7 +9115,8 @@ function duelDraw(){
     const res = D.res || { r:'draw', why:'' };
     body = `<div class="duel-big ${res.r}">${res.r === 'win' ? 'You won' : res.r === 'lose' ? 'You lost' : 'Draw'}</div><p style="margin:0;text-align:center">${esc(res.why)}</p>
       ${r.bet && res.r !== 'draw' ? `<p class="duel-bet ${res.r}">${res.r === 'win' ? '+' : '−'}${r.bet} RP${DUEL_RP_REAL ? '' : '<small>For now your RP didn’t change</small>'}</p>` : r.bet ? '<p style="margin:0;text-align:center" class="muted">Draw: nobody pays</p>' : ''}
-      <div class="duel-vs">${side('You', me.h, me.b, 0, me.out, false, true)}${side(op ? op.n : '…', op ? op.h : 0, op ? op.b : 0, 0, op ? op.out : 0, false, false)}</div>`;
+      <div class="duel-vs">${side('You', me.h, me.b, 0, me.out, false, true)}${side(op ? op.n : '…', op ? op.h : 0, op ? op.b : 0, 0, op ? op.out : 0, false, false)}</div>
+      ${res.sc ? `<div class="dsc">${res.sc.rows.map(([t, pts, w]) => `<div><span>${t}</span><b class="${w > 0 ? 'win' : w < 0 ? 'lose' : ''}">${w > 0 ? 'You +' + pts : w < 0 ? esc(op ? op.n : 'Them') + ' +' + pts : 'Tie'}</b></div>`).join('')}<div class="dsc-t"><span>Score</span><b>${res.sc.a} – ${res.sc.b}</b></div></div>` : ''}`;
   }
   const foot = ph === 'done' ? `<button class="btn primary" data-d="end" style="width:100%">Done</button>`
     : `<div class="row" style="gap:8px"><button class="btn" data-d="min" style="flex:1">Minimize</button><button class="btn${D.quitAt && Date.now() - D.quitAt < 4000 ? ' danger' : ''}" data-d="leave" style="flex:1">${ph !== 'live' ? 'Leave' : D.quitAt && Date.now() - D.quitAt < 4000 ? 'Tap again to give up' : 'Give up'}</button></div>`;
