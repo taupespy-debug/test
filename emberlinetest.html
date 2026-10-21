@@ -8101,7 +8101,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -8302,6 +8302,7 @@ $('#testTools').addEventListener('click', e => {
     LOBBY.online.set('f1', { at: Date.now(), busy:false }); LOBBY.online.set('f2', { at: Date.now(), busy:true }); duelSheet({ queue:false }); return; }
   if (k === 'vrdemo'){ vrOpen({ demo:true }); return; }
   if (k === 'vrsim'){ location.href = 'vrsim.html'; return; }
+  if (k === 'ptmode'){ ptStart(); return; }
   if (k === 'duelbot' || k === 'duelfast'){ duelSheet(); duelStart('host', 'BOT', k === 'duelfast' ? { min:1, win:60, cap:300 } : duelRules(), true); return; }
   if (k === 'rtcheck'){ const r = new Relay('ember-check-' + rtCode()), t0 = Date.now(); let done = false; toast('Checking the relay…');
     r.on('open', () => { done = true; toast(`Relay works (${Date.now() - t0} ms)`); r.close(); }).on('error', p => { done = true; toast('Relay refused: ' + JSON.stringify(p || {}).slice(0, 80)); r.close(); }).connect();
@@ -8769,7 +8770,7 @@ function vrBuild(){
   let el = $('#vrp'); if (el) return;
   el = document.createElement('div'); el.id = 'vrp';
   const bt = !!navigator.bluetooth && duelAllowed(), here = location.origin + location.pathname;
-  el.innerHTML = `<div class="vr-top"><span class="vr-dot" id="vrDot"></span><h1>Emberline <i>VR</i></h1><span class="vr-src" id="vrSrc"></span><button class="vr-btn sm" data-vr="duel">1v1</button><button class="vr-btn sm" data-vr="exit">Exit</button></div>
+  el.innerHTML = `<div class="vr-top"><span class="vr-dot" id="vrDot"></span><h1>Emberline <i>VR</i></h1><span class="vr-src" id="vrSrc"></span><button class="vr-btn sm" data-vr="pt" id="vrPtBtn" hidden>Passthrough</button><button class="vr-btn sm" data-vr="duel">1v1</button><button class="vr-btn sm" data-vr="exit">Exit</button></div>
     <div class="vr-card vr-wait" id="vrWait">
       <span class="vr-lbl">Link your phone</span>
       <p>On your phone, open Emberline, go to <b>Settings → VR panel</b> and type this code:</p>
@@ -8802,6 +8803,7 @@ function vrBuild(){
       </div>
     </div>`;
   document.body.appendChild(el);
+  ptSupported().then(ok => { const b = el.querySelector('#vrPtBtn'); if (b) b.hidden = !ok; });
   el.addEventListener('click', e => { const b = e.target.closest('[data-vr]'); if (b) vrPress(b); });
   el.querySelector('#vrBr').addEventListener('input', () => { VRP.brHold = Date.now() + 4000; });
   el.querySelector('#vrBr').addEventListener('change', e => { VRP.brHold = Date.now() + 4000; vrSend('bright', +e.target.value); });
@@ -8810,6 +8812,7 @@ function vrPress(b){
   const k = b.dataset.vr, src = vrSource();
   if (k === 'exit') return vrClose();
   if (k === 'duel') return duelSheet();
+  if (k === 'pt') return ptStart();
   if (k === 'connect'){ if (!duelAllowed()) return; return vrDo('connect'); }
   if (!src) return toast('Link your phone or connect first');
   const s = src.s;
@@ -8870,6 +8873,92 @@ function vrPaint(){
   if (dEl.innerHTML !== dh) dEl.innerHTML = dh;
 }
 
+/* ===== Passthrough (mixed reality, Quest browser) =====
+   You see your real room. Point the controller at your real Puffco and pull the trigger to mark it; a glowing ring sits on it
+   with the temp and state. After that, point at it and pull the trigger to start it (or boost while it heats / is Ready).
+   Grip button: mark it again. three.js only loads when you go in. Uses the same link or connection as the VR panel */
+const PT = { on:false };
+async function ptSupported(){ try { return !!(navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')); } catch(e){ return false; } }
+function loadThree(){
+  return window.THREE ? Promise.resolve() : new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+    s.onload = res; s.onerror = () => rej(new Error('Couldn’t load the 3D part. Check your connection')); document.head.appendChild(s); });
+}
+async function ptStart(){
+  if (PT.on) return;
+  if (!(await ptSupported())) return toast('Passthrough needs a headset browser with mixed reality, like the Quest browser');
+  try { await loadThree(); } catch(e){ return toast(e.message); }
+  let session; try { session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures:['local-floor'], optionalFeatures:['hit-test'] }); }
+  catch(e){ return toast('Passthrough didn’t start: ' + (e.message || e)); }
+  PT.on = true; PT.marking = true; PT.hover = false;
+  const T = THREE, renderer = new T.WebGLRenderer({ antialias:true, alpha:true });
+  renderer.setPixelRatio(1); renderer.xr.enabled = true; renderer.xr.setReferenceSpaceType('local-floor');
+  renderer.domElement.style.cssText = 'position:fixed;inset:0;display:none'; document.body.appendChild(renderer.domElement);
+  try { await renderer.xr.setSession(session); }
+  catch(e){ PT.on = false; renderer.domElement.remove(); try { await session.end(); } catch(_){} return toast('Passthrough didn’t start: ' + (e.message || e)); }
+  const scene = new T.Scene(), camera = new T.PerspectiveCamera(70, 1, .01, 30); scene.add(camera);
+  // the dot on surfaces while you mark it
+  const reticle = new T.Mesh(new T.RingGeometry(.035, .05, 32).rotateX(-Math.PI / 2), new T.MeshBasicMaterial({ color:0xffffff })); reticle.matrixAutoUpdate = false; reticle.visible = false; scene.add(reticle);
+  // the marker on your Puffco: ring on the table, soft glow around it, label above
+  const marker = new T.Group(); marker.visible = false; scene.add(marker);
+  const ringMat = new T.MeshBasicMaterial({ color:0xb04bff }), orbMat = new T.MeshBasicMaterial({ color:0xb04bff, transparent:true, opacity:.16, depthWrite:false });
+  const ring = new T.Mesh(new T.TorusGeometry(.075, .006, 12, 48), ringMat); ring.rotation.x = Math.PI / 2; marker.add(ring);
+  const orb = new T.Mesh(new T.SphereGeometry(.1, 24, 16), orbMat); orb.position.y = .08; marker.add(orb);
+  const mkLabel = (w, h) => { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const tex = new T.CanvasTexture(cv); const sp = new T.Sprite(new T.SpriteMaterial({ map:tex, depthTest:false, transparent:true })); sp.renderOrder = 9; return { cv, tex, sp }; };
+  const label = mkLabel(640, 200); label.sp.scale.set(.34, .106, 1); label.sp.position.y = .28; marker.add(label.sp);
+  const hint = mkLabel(900, 160); hint.sp.scale.set(.5, .089, 1); hint.sp.position.set(0, -.12, -.7); camera.add(hint.sp);
+  const draw = (L, lines, accent) => { const c = L.cv.getContext('2d'), w = L.cv.width, h = L.cv.height; c.clearRect(0, 0, w, h);
+    c.fillStyle = 'rgba(10,8,18,.82)'; c.beginPath(); c.roundRect(4, 4, w - 8, h - 8, h / 3); c.fill(); c.strokeStyle = accent || 'rgba(255,255,255,.35)'; c.lineWidth = 4; c.stroke();
+    c.textAlign = 'center'; c.fillStyle = '#fff'; c.font = `800 ${Math.round(h * .36)}px system-ui,sans-serif`; c.fillText(lines[0], w / 2, lines[1] ? h * .46 : h * .62);
+    if (lines[1]){ c.fillStyle = '#c9c3dc'; c.font = `600 ${Math.round(h * .22)}px system-ui,sans-serif`; c.fillText(lines[1], w / 2, h * .8); } L.tex.needsUpdate = true; };
+  // controllers: a laser from each, trigger = select, grip = mark again
+  const ray = new T.Raycaster(), tmp = new T.Matrix4();
+  const ctrls = [0, 1].map(i => {
+    const c = renderer.xr.getController(i);
+    const line = new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(0, 0, 0), new T.Vector3(0, 0, -1)]), new T.LineBasicMaterial({ color:0xff5ec8 })); line.scale.z = 2.5; c.add(line);
+    c.addEventListener('select', () => ptSelect(c)); c.addEventListener('squeeze', () => { PT.marking = true; marker.visible = false; });
+    scene.add(c); return c;
+  });
+  const aimAt = c => { tmp.identity().extractRotation(c.matrixWorld); ray.ray.origin.setFromMatrixPosition(c.matrixWorld); ray.ray.direction.set(0, 0, -1).applyMatrix4(tmp); return ray.intersectObject(orb, false).length > 0; };
+  function ptSelect(c){
+    if (PT.marking){
+      if (reticle.visible) marker.position.setFromMatrixPosition(reticle.matrix);
+      else { aimAt(c); marker.position.copy(ray.ray.origin).addScaledVector(ray.ray.direction, .6); } // no surface found: half a meter out
+      marker.visible = true; PT.marking = false; return;
+    }
+    if (!aimAt(c)) return;
+    const src = vrSource(); if (!src) return toast('Link your phone in the panel first');
+    const st = src.s.st;
+    if (st === 7 || st === 8) vrSend('boost', null); else if (st < 9) vrSend('start', null);
+    PT.flash = Date.now();
+  }
+  // surface finding from the controller's pointer
+  let hitSrc = null;
+  const wantHit = () => { if (hitSrc || !session.requestHitTestSource) return; const s = [...session.inputSources].find(x => x.targetRayMode === 'tracked-pointer'); if (s) session.requestHitTestSource({ space: s.targetRaySpace }).then(h => { hitSrc = h; }).catch(() => {}); };
+  session.addEventListener('inputsourceschange', wantHit); wantHit();
+  let lastLabel = 0;
+  renderer.setAnimationLoop((t, frame) => {
+    if (frame && PT.marking && hitSrc){ const hits = frame.getHitTestResults(hitSrc), ref = renderer.xr.getReferenceSpace(); const pose = hits.length && hits[0].getPose(ref);
+      reticle.visible = !!pose; if (pose) reticle.matrix.fromArray(pose.transform.matrix); } else reticle.visible = false;
+    PT.hover = marker.visible && ctrls.some(aimAt);
+    const src = vrSource(), s = src && src.s, col = new T.Color(s && s.pr && s.pr[s.act] ? s.pr[s.act].c : '#b04bff');
+    ringMat.color.copy(col); orbMat.color.copy(col);
+    const heat = s && s.st === 7, ready = s && s.st === 8, flash = PT.flash && Date.now() - PT.flash < 600;
+    orbMat.opacity = flash ? .5 : PT.hover ? .34 : ready ? .26 : heat ? .12 + .1 * Math.sin(t / 250) : .14;
+    ring.scale.setScalar(PT.hover ? 1.15 : 1);
+    if (t - lastLabel > 400){ lastLabel = t;
+      hint.sp.visible = PT.marking;
+      if (PT.marking) draw(hint, ['Point at your Puffco and pull the trigger', 'This marks where it sits. Grip button marks it again'], '#ff5ec8');
+      if (marker.visible){
+        if (!s) draw(label, ['Link your phone first', 'In the panel: Settings → VR panel code']);
+        else { const sess = s.st >= 7 && s.st <= 9, el = Math.round(s.el || 0);
+          draw(label, [vrDeg(s.t, s.u) + ' · ' + (s.hit && s.hit.on ? 'Hitting ' + s.hit.s + 's' : STATE_NAMES[s.st] || ''),
+            PT.hover ? (s.st === 7 || s.st === 8 ? 'Pull the trigger to boost' : sess ? '' : 'Pull the trigger to start') : sess && s.tot ? vrMS(el) + ' / ' + vrMS(s.tot) : (s.name || 'Puffco')], PT.hover ? '#fff' : s.pr[s.act] && s.pr[s.act].c); }
+      }
+    }
+    renderer.render(scene, camera);
+  });
+  session.addEventListener('end', () => { renderer.setAnimationLoop(null); try { renderer.dispose(); } catch(e){} renderer.domElement.remove(); PT.on = false; });
+}
 /* ===== 1v1 =====
    Two players, each on their own Peak. A hit of the set length or longer resets your clock. If your clock runs out
    you're out, and the last one still going wins. At the time cap, more counting hits wins.
