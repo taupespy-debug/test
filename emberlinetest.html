@@ -1881,6 +1881,13 @@ body.vr-on #fpills{display:none}
 body.vr-on #dvFrame{display:none}
 .fpill.duel{display:flex;align-items:center;gap:6px;background:linear-gradient(90deg,var(--c1,#d8333c),#1a1622 45%,#1a1622 55%,var(--c2,#d8333c));padding:6px 12px;font-variant-numeric:tabular-nums}
 .fpill.duel i{font-style:normal;font-weight:900;font-size:15px}.fpill.duel em{font-style:italic;font-weight:900;opacity:.8}.fpill.duel.low{animation:dvBeat 1s ease-in-out infinite}
+.beta-tag{display:inline-block;font:900 10px/1 var(--f-body,system-ui);letter-spacing:.12em;padding:3px 6px;border-radius:6px;background:#ffd23f;color:#111;vertical-align:middle;font-style:normal;text-transform:uppercase}
+.vr-top h1 .beta-tag{margin-left:8px;font-size:11px}
+.vr-modal{position:fixed;inset:0;z-index:210;display:grid;place-items:center;padding:16px;background:rgba(5,4,10,.72)}
+.vr-mcard{max-width:560px;width:100%;gap:14px}.vr-mhead{display:flex;align-items:center;gap:8px}
+.vr-mcard h2{margin:0;font:800 26px var(--f-round,system-ui)}
+.vr-steps{margin:0;padding-left:22px;display:grid;gap:10px;font-size:17px;line-height:1.4;color:#d9d6e6}.vr-steps b{color:#fff}
+.vr-warn{margin:0;padding:10px 12px;border-radius:12px;background:rgba(255,176,32,.12);color:#ffcf73;font-size:15px}
 /* 1v1 menu */
 .dsc{display:grid;gap:6px;padding:12px;border-radius:16px;background:var(--surface-2,rgba(255,255,255,.06));font-size:14px}
 .dsc div{display:flex;justify-content:space-between;gap:8px}.dsc b.win{color:#3ddc84}.dsc b.lose{color:#ff3b4a}
@@ -2048,7 +2055,7 @@ body.vr-on #dvFrame{display:none}
     <h1 class="largetitle">Social</h1>
     <div class="card soc-me" id="socMe"></div>
     <button class="card ish-entry" id="ishOpen">ITEM SHOP<small>Shop · Ember Pass · Locker</small></button>
-    <button class="card ish-entry duel-entry" id="duelOpen">1V1<small>Last one hitting wins</small></button>
+    <button class="card ish-entry duel-entry" id="duelOpen">1V1 <span class="beta-tag">BETA</span><small>Last one hitting wins</small></button>
     <div class="card soc-find"><span class="label">Find people</span>
       <div class="soc-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" id="socQ" placeholder="Search usernames" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
       <div class="soc-list" id="socResults"></div></div>
@@ -2122,7 +2129,7 @@ body.vr-on #dvFrame{display:none}
       <button class="btn small" id="connLogCopy" type="button">Copy connection log</button><span class="muted" style="font-size:12px;margin-top:-8px">Having connection trouble? Copy this and paste it in the Discord bug-report channel.</span>
     </div>
     <div class="card" style="display:grid;gap:10px" id="vrCard">
-      <span class="label">VR panel</span>
+      <span class="label">VR panel <span class="beta-tag">BETA</span></span>
       <p class="muted" style="margin:0;font-size:14px">Control your Peak from your headset. In the headset browser or a desktop overlay (XSOverlay, OVR Toolkit, Desktop+), open this page with <b>?vr</b> at the end. Type the code it shows here.</p>
       <div id="vrLinkUI" style="display:grid;gap:8px"></div>
       <label class="toggle"><span>Let the VR panel start heating<br><span class="muted" style="font-size:13px">Off: the panel can still change lights and profiles</span></span><input type="checkbox" class="switch" id="tVrHeat"></label>
@@ -8302,7 +8309,7 @@ $('#testTools').addEventListener('click', e => {
     LOBBY.online.set('f1', { at: Date.now(), busy:false }); LOBBY.online.set('f2', { at: Date.now(), busy:true }); duelSheet({ queue:false }); return; }
   if (k === 'vrdemo'){ vrOpen({ demo:true }); return; }
   if (k === 'vrsim'){ location.href = 'vrsim.html'; return; }
-  if (k === 'ptmode'){ ptStart(); return; }
+  if (k === 'ptmode'){ if (!$('#vrp')) vrOpen(); setTimeout(ptIntro, 300); return; }
   if (k === 'duelbot' || k === 'duelfast'){ duelSheet(); duelStart('host', 'BOT', k === 'duelfast' ? { min:1, win:60, cap:300 } : duelRules(), true); return; }
   if (k === 'rtcheck'){ const r = new Relay('ember-check-' + rtCode()), t0 = Date.now(); let done = false; toast('Checking the relay…');
     r.on('open', () => { done = true; toast(`Relay works (${Date.now() - t0} ms)`); r.close(); }).on('error', p => { done = true; toast('Relay refused: ' + JSON.stringify(p || {}).slice(0, 80)); r.close(); }).connect();
@@ -8770,7 +8777,7 @@ function vrBuild(){
   let el = $('#vrp'); if (el) return;
   el = document.createElement('div'); el.id = 'vrp';
   const bt = !!navigator.bluetooth && duelAllowed(), here = location.origin + location.pathname;
-  el.innerHTML = `<div class="vr-top"><span class="vr-dot" id="vrDot"></span><h1>Emberline <i>VR</i></h1><span class="vr-src" id="vrSrc"></span><button class="vr-btn sm" data-vr="pt" id="vrPtBtn" hidden>Passthrough</button><button class="vr-btn sm" data-vr="duel">1v1</button><button class="vr-btn sm" data-vr="exit">Exit</button></div>
+  el.innerHTML = `<div class="vr-top"><span class="vr-dot" id="vrDot"></span><h1>Emberline <i>VR</i><span class="beta-tag">BETA</span></h1><span class="vr-src" id="vrSrc"></span><button class="vr-btn sm" data-vr="pt" id="vrPtBtn" hidden>Passthrough <span class="beta-tag">BETA</span></button><button class="vr-btn sm" data-vr="duel">1v1</button><button class="vr-btn sm" data-vr="exit">Exit</button></div>
     <div class="vr-card vr-wait" id="vrWait">
       <span class="vr-lbl">Link your phone</span>
       <p>On your phone, open Emberline, go to <b>Settings → VR panel</b> and type this code:</p>
@@ -8803,7 +8810,7 @@ function vrBuild(){
       </div>
     </div>`;
   document.body.appendChild(el);
-  ptSupported().then(ok => { const b = el.querySelector('#vrPtBtn'); if (b) b.hidden = !ok; });
+  ptSupported().then(ok => { PT.sup = ok; vrPaint(); });
   el.addEventListener('click', e => { const b = e.target.closest('[data-vr]'); if (b) vrPress(b); });
   el.querySelector('#vrBr').addEventListener('input', () => { VRP.brHold = Date.now() + 4000; });
   el.querySelector('#vrBr').addEventListener('change', e => { VRP.brHold = Date.now() + 4000; vrSend('bright', +e.target.value); });
@@ -8812,7 +8819,7 @@ function vrPress(b){
   const k = b.dataset.vr, src = vrSource();
   if (k === 'exit') return vrClose();
   if (k === 'duel') return duelSheet();
-  if (k === 'pt') return ptStart();
+  if (k === 'pt') return ptIntro();
   if (k === 'connect'){ if (!duelAllowed()) return; return vrDo('connect'); }
   if (!src) return toast('Link your phone or connect first');
   const s = src.s;
@@ -8839,6 +8846,7 @@ function vrPaint(){
   if (!VRP.on) return; const root = $('#vrp'); if (!root) return;
   const src = vrSource(), dot = $('#vrDot'), set = (id, v) => { const e = root.querySelector('#' + id); if (e && e.textContent !== String(v)) e.textContent = v; };
   $('#vrWait').hidden = !!src; $('#vrMain').hidden = !src;
+  { const b = $('#vrPtBtn'); if (b) b.hidden = !(PT.sup && (duelAllowed() || (src && src.how === 'link'))); } // beta: only once a beta phone links (or a beta account is here)
   set('vrSrc', src ? src.src : 'Not connected');
   dot.className = 'vr-dot' + (src ? ' ok' : VRP.rt && VRP.rt.open ? ' wait' : '');
   if (!src){
@@ -8873,15 +8881,31 @@ function vrPaint(){
   if (dEl.innerHTML !== dh) dEl.innerHTML = dh;
 }
 
-/* ===== Passthrough (mixed reality, Quest browser) =====
-   You see your real room. Point the controller at your real Puffco and pull the trigger to mark it; a glowing ring sits on it
-   with the temp and state. After that, point at it and pull the trigger to start it (or boost while it heats / is Ready).
-   Grip button: mark it again. three.js only loads when you go in. Uses the same link or connection as the VR panel */
+/* ===== Passthrough (beta, mixed reality in the Quest browser) =====
+   You see your real room. Point the controller at your real Puffco and pull the trigger to mark it; a glowing marker sits on it
+   with the temp and state. Then point at it and pull the trigger to start it (or boost while it heats / is Ready).
+   Grip: mark it again. B or Y: leave. three.js only loads when you go in. Uses the same link or connection as the VR panel */
 const PT = { on:false };
 async function ptSupported(){ try { return !!(navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')); } catch(e){ return false; } }
 function loadThree(){
   return window.THREE ? Promise.resolve() : new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
     s.onload = res; s.onerror = () => rej(new Error('Couldn’t load the 3D part. Check your connection')); document.head.appendChild(s); });
+}
+// the intro card on the panel before you go in
+function ptIntro(){
+  const root = $('#vrp'); if (!root) return ptStart();
+  root.querySelectorAll('.vr-modal').forEach(e => e.remove());
+  const linked = !!vrSource(), el = document.createElement('div'); el.className = 'vr-modal';
+  el.innerHTML = `<div class="vr-card vr-mcard"><div class="vr-mhead"><span class="vr-lbl">Passthrough</span><span class="beta-tag">BETA</span></div>
+    <h2>Control your real Puffco</h2>
+    <ol class="vr-steps"><li><b>Mark it.</b> Point the controller at your Puffco and pull the trigger. A glowing marker sits on it.</li>
+      <li><b>Point and pull.</b> Aim at the marker and pull the trigger to start it. While it heats or is Ready, that boosts it.</li>
+      <li><b>Grip</b> marks it again. <b>B or Y</b> takes you back here.</li></ol>
+    ${linked ? '' : `<p class="vr-warn">Link your phone first (or connect here), so the marker can start your ${esc(devWord())}.</p>`}
+    <div class="vr-row"><button class="vr-btn" data-pt="no">Not now</button><button class="vr-btn go" data-pt="go"${linked ? '' : ' disabled'}>Start passthrough</button></div>
+    <p class="vr-muted" style="margin:0">Beta: tell us in the Discord if the marker drifts or a pull doesn’t register.</p></div>`;
+  root.appendChild(el);
+  el.addEventListener('click', e => { const b = e.target.closest('[data-pt]'); if (e.target === el || (b && b.dataset.pt === 'no')) return el.remove(); if (b && b.dataset.pt === 'go'){ el.remove(); ptStart(); } });
 }
 async function ptStart(){
   if (PT.on) return;
@@ -8889,71 +8913,93 @@ async function ptStart(){
   try { await loadThree(); } catch(e){ return toast(e.message); }
   let session; try { session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures:['local-floor'], optionalFeatures:['hit-test'] }); }
   catch(e){ return toast('Passthrough didn’t start: ' + (e.message || e)); }
-  PT.on = true; PT.marking = true; PT.hover = false;
+  PT.on = true; PT.marking = true; PT.hover = false; PT.burst = 0;
   const T = THREE, renderer = new T.WebGLRenderer({ antialias:true, alpha:true });
   renderer.setPixelRatio(1); renderer.xr.enabled = true; renderer.xr.setReferenceSpaceType('local-floor');
   renderer.domElement.style.cssText = 'position:fixed;inset:0;display:none'; document.body.appendChild(renderer.domElement);
   try { await renderer.xr.setSession(session); }
   catch(e){ PT.on = false; renderer.domElement.remove(); try { await session.end(); } catch(_){} return toast('Passthrough didn’t start: ' + (e.message || e)); }
   const scene = new T.Scene(), camera = new T.PerspectiveCamera(70, 1, .01, 30); scene.add(camera);
+  const basic = (color, o) => new T.MeshBasicMaterial(Object.assign({ color, transparent:true, depthWrite:false }, o || {}));
   // the dot on surfaces while you mark it
-  const reticle = new T.Mesh(new T.RingGeometry(.035, .05, 32).rotateX(-Math.PI / 2), new T.MeshBasicMaterial({ color:0xffffff })); reticle.matrixAutoUpdate = false; reticle.visible = false; scene.add(reticle);
-  // the marker on your Puffco: ring on the table, soft glow around it, label above
+  const reticle = new T.Group(); reticle.matrixAutoUpdate = false; reticle.visible = false; scene.add(reticle);
+  reticle.add(new T.Mesh(new T.RingGeometry(.04, .052, 40).rotateX(-Math.PI / 2), basic(0xffffff)));
+  reticle.add(new T.Mesh(new T.CircleGeometry(.008, 16).rotateX(-Math.PI / 2), basic(0xffffff)));
+  // the marker on your Puffco: a ring on the table, a spinning dashed halo, a soft glow and the label above
   const marker = new T.Group(); marker.visible = false; scene.add(marker);
-  const ringMat = new T.MeshBasicMaterial({ color:0xb04bff }), orbMat = new T.MeshBasicMaterial({ color:0xb04bff, transparent:true, opacity:.16, depthWrite:false });
-  const ring = new T.Mesh(new T.TorusGeometry(.075, .006, 12, 48), ringMat); ring.rotation.x = Math.PI / 2; marker.add(ring);
-  const orb = new T.Mesh(new T.SphereGeometry(.1, 24, 16), orbMat); orb.position.y = .08; marker.add(orb);
-  const mkLabel = (w, h) => { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const tex = new T.CanvasTexture(cv); const sp = new T.Sprite(new T.SpriteMaterial({ map:tex, depthTest:false, transparent:true })); sp.renderOrder = 9; return { cv, tex, sp }; };
-  const label = mkLabel(640, 200); label.sp.scale.set(.34, .106, 1); label.sp.position.y = .28; marker.add(label.sp);
-  const hint = mkLabel(900, 160); hint.sp.scale.set(.5, .089, 1); hint.sp.position.set(0, -.12, -.7); camera.add(hint.sp);
-  const draw = (L, lines, accent) => { const c = L.cv.getContext('2d'), w = L.cv.width, h = L.cv.height; c.clearRect(0, 0, w, h);
-    c.fillStyle = 'rgba(10,8,18,.82)'; c.beginPath(); c.roundRect(4, 4, w - 8, h - 8, h / 3); c.fill(); c.strokeStyle = accent || 'rgba(255,255,255,.35)'; c.lineWidth = 4; c.stroke();
-    c.textAlign = 'center'; c.fillStyle = '#fff'; c.font = `800 ${Math.round(h * .36)}px system-ui,sans-serif`; c.fillText(lines[0], w / 2, lines[1] ? h * .46 : h * .62);
-    if (lines[1]){ c.fillStyle = '#c9c3dc'; c.font = `600 ${Math.round(h * .22)}px system-ui,sans-serif`; c.fillText(lines[1], w / 2, h * .8); } L.tex.needsUpdate = true; };
-  // controllers: a laser from each, trigger = select, grip = mark again
+  const ringMat = basic(0xb04bff), orbMat = basic(0xb04bff, { opacity:.16 }), haloMat = basic(0xffffff, { opacity:.55 }), burstMat = basic(0xffffff, { opacity:0 });
+  const ring = new T.Mesh(new T.TorusGeometry(.075, .005, 12, 64), ringMat); ring.rotation.x = Math.PI / 2; marker.add(ring);
+  const halo = new T.Group(); halo.position.y = .004; marker.add(halo);
+  for (let i = 0; i < 8; i++) halo.add(new T.Mesh(new T.RingGeometry(.095, .102, 12, 1, i * Math.PI / 4, Math.PI / 7).rotateX(-Math.PI / 2), haloMat));
+  const orb = new T.Mesh(new T.SphereGeometry(.1, 28, 18), orbMat); orb.position.y = .08; marker.add(orb);
+  const burst = new T.Mesh(new T.TorusGeometry(.09, .004, 8, 64), burstMat); burst.rotation.x = Math.PI / 2; burst.position.y = .01; marker.add(burst);
+  const mkLabel = (w, h) => { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const tex = new T.CanvasTexture(cv); const sp = new T.Sprite(new T.SpriteMaterial({ map:tex, depthTest:false, transparent:true })); sp.renderOrder = 9; return { cv, tex, sp, key:'' }; };
+  const label = mkLabel(720, 220); label.sp.scale.set(.36, .11, 1); label.sp.position.y = .3; marker.add(label.sp);
+  const hint = mkLabel(1000, 200); hint.sp.scale.set(.5, .1, 1); hint.sp.position.set(0, -.14, -.75); camera.add(hint.sp);
+  // a rounded card: a colored dot, a big line, a small line, and a BETA tag when asked
+  const draw = (L, big, small, dot, beta) => {
+    const key = [big, small, dot, beta].join('|'); if (key === L.key) return; L.key = key;
+    const c = L.cv.getContext('2d'), w = L.cv.width, h = L.cv.height; c.clearRect(0, 0, w, h);
+    c.fillStyle = 'rgba(12,10,20,.86)'; c.beginPath(); c.roundRect(6, 6, w - 12, h - 12, h * .32); c.fill();
+    c.strokeStyle = dot || 'rgba(255,255,255,.3)'; c.lineWidth = 5; c.stroke();
+    let x = h * .42; if (dot){ c.fillStyle = dot; c.beginPath(); c.arc(x, h * .4, h * .09, 0, 7); c.fill(); x += h * .22; }
+    c.textAlign = 'left'; c.fillStyle = '#fff'; c.font = `800 ${Math.round(h * .3)}px system-ui,sans-serif`; c.fillText(big, x, h * .5);
+    if (small){ c.fillStyle = '#c9c3dc'; c.font = `600 ${Math.round(h * .19)}px system-ui,sans-serif`; c.fillText(small, x, h * .8); }
+    if (beta){ const bw = h * .62; c.fillStyle = '#ffd23f'; c.beginPath(); c.roundRect(w - bw - h * .3, h * .16, bw, h * .24, h * .07); c.fill(); c.fillStyle = '#111'; c.textAlign = 'center'; c.font = `900 ${Math.round(h * .15)}px system-ui,sans-serif`; c.fillText('BETA', w - bw / 2 - h * .3, h * .33); }
+    L.tex.needsUpdate = true; };
+  // controllers (or hands): a laser from each, trigger / pinch = select, grip = mark again, B or Y = leave
   const ray = new T.Raycaster(), tmp = new T.Matrix4();
   const ctrls = [0, 1].map(i => {
     const c = renderer.xr.getController(i);
-    const line = new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(0, 0, 0), new T.Vector3(0, 0, -1)]), new T.LineBasicMaterial({ color:0xff5ec8 })); line.scale.z = 2.5; c.add(line);
-    c.addEventListener('select', () => ptSelect(c)); c.addEventListener('squeeze', () => { PT.marking = true; marker.visible = false; });
+    const lineMat = new T.LineBasicMaterial({ color:0xff5ec8, transparent:true, opacity:.85 });
+    const line = new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(0, 0, 0), new T.Vector3(0, 0, -1)]), lineMat); line.scale.z = 2.5; c.add(line); c.userData.lineMat = lineMat;
+    c.addEventListener('connected', e => { c.userData.src = e.data; }); c.addEventListener('disconnected', () => { c.userData.src = null; });
+    c.addEventListener('select', () => ptSelect(c)); c.addEventListener('squeeze', () => { PT.marking = true; marker.visible = false; buzzCtrl(c, .3, 40); });
     scene.add(c); return c;
   });
+  const buzzCtrl = (c, v, ms) => { try { const h = c.userData.src && c.userData.src.gamepad && c.userData.src.gamepad.hapticActuators; if (h && h[0]) h[0].pulse(v, ms); } catch(e){} };
   const aimAt = c => { tmp.identity().extractRotation(c.matrixWorld); ray.ray.origin.setFromMatrixPosition(c.matrixWorld); ray.ray.direction.set(0, 0, -1).applyMatrix4(tmp); return ray.intersectObject(orb, false).length > 0; };
   function ptSelect(c){
     if (PT.marking){
       if (reticle.visible) marker.position.setFromMatrixPosition(reticle.matrix);
-      else { aimAt(c); marker.position.copy(ray.ray.origin).addScaledVector(ray.ray.direction, .6); } // no surface found: half a meter out
-      marker.visible = true; PT.marking = false; return;
+      else { aimAt(c); marker.position.copy(ray.ray.origin).addScaledVector(ray.ray.direction, .6); } // no surface found: just over half a meter out
+      marker.visible = true; PT.marking = false; PT.burst = performance.now(); buzzCtrl(c, .6, 60); return;
     }
     if (!aimAt(c)) return;
-    const src = vrSource(); if (!src) return toast('Link your phone in the panel first');
+    const src = vrSource(); if (!src){ PT.note = ['Link your phone first', 'In the panel, or Settings → VR panel on your phone']; PT.noteAt = Date.now(); return; }
     const st = src.s.st;
-    if (st === 7 || st === 8) vrSend('boost', null); else if (st < 9) vrSend('start', null);
-    PT.flash = Date.now();
+    if (st === 7 || st === 8){ vrSend('boost', null); PT.note = ['Boost!', '']; }
+    else if (st < 9){ if (src.how === 'link' && !src.s.heat){ PT.note = ['Start is off on your phone', 'Settings → Let the VR panel start heating']; PT.noteAt = Date.now(); return; } vrSend('start', null); PT.note = ['Starting…', '']; }
+    else return;
+    PT.noteAt = Date.now(); PT.burst = performance.now(); buzzCtrl(c, .8, 80);
   }
   // surface finding from the controller's pointer
   let hitSrc = null;
   const wantHit = () => { if (hitSrc || !session.requestHitTestSource) return; const s = [...session.inputSources].find(x => x.targetRayMode === 'tracked-pointer'); if (s) session.requestHitTestSource({ space: s.targetRaySpace }).then(h => { hitSrc = h; }).catch(() => {}); };
   session.addEventListener('inputsourceschange', wantHit); wantHit();
-  let lastLabel = 0;
+  let wasHover = false;
   renderer.setAnimationLoop((t, frame) => {
     if (frame && PT.marking && hitSrc){ const hits = frame.getHitTestResults(hitSrc), ref = renderer.xr.getReferenceSpace(); const pose = hits.length && hits[0].getPose(ref);
       reticle.visible = !!pose; if (pose) reticle.matrix.fromArray(pose.transform.matrix); } else reticle.visible = false;
+    // B or Y leaves
+    if (ctrls.some(c => { const g = c.userData.src && c.userData.src.gamepad; return g && g.buttons[5] && g.buttons[5].pressed; })){ session.end(); return; }
     PT.hover = marker.visible && ctrls.some(aimAt);
-    const src = vrSource(), s = src && src.s, col = new T.Color(s && s.pr && s.pr[s.act] ? s.pr[s.act].c : '#b04bff');
-    ringMat.color.copy(col); orbMat.color.copy(col);
-    const heat = s && s.st === 7, ready = s && s.st === 8, flash = PT.flash && Date.now() - PT.flash < 600;
-    orbMat.opacity = flash ? .5 : PT.hover ? .34 : ready ? .26 : heat ? .12 + .1 * Math.sin(t / 250) : .14;
-    ring.scale.setScalar(PT.hover ? 1.15 : 1);
-    if (t - lastLabel > 400){ lastLabel = t;
-      hint.sp.visible = PT.marking;
-      if (PT.marking) draw(hint, ['Point at your Puffco and pull the trigger', 'This marks where it sits. Grip button marks it again'], '#ff5ec8');
-      if (marker.visible){
-        if (!s) draw(label, ['Link your phone first', 'In the panel: Settings → VR panel code']);
-        else { const sess = s.st >= 7 && s.st <= 9, el = Math.round(s.el || 0);
-          draw(label, [vrDeg(s.t, s.u) + ' · ' + (s.hit && s.hit.on ? 'Hitting ' + s.hit.s + 's' : STATE_NAMES[s.st] || ''),
-            PT.hover ? (s.st === 7 || s.st === 8 ? 'Pull the trigger to boost' : sess ? '' : 'Pull the trigger to start') : sess && s.tot ? vrMS(el) + ' / ' + vrMS(s.tot) : (s.name || 'Puffco')], PT.hover ? '#fff' : s.pr[s.act] && s.pr[s.act].c); }
-      }
+    if (PT.hover && !wasHover) ctrls.forEach(c => aimAt(c) && buzzCtrl(c, .15, 15)); wasHover = PT.hover;
+    const src = vrSource(), s = src && src.s, hex = s && s.pr && s.pr[s.act] ? s.pr[s.act].c : '#b04bff', col = new T.Color(s && s.stl ? '#666666' : hex);
+    ringMat.color.copy(col); orbMat.color.copy(col); ctrls.forEach(c => c.userData.lineMat.color.set(PT.hover ? 0xffffff : 0xff5ec8));
+    const heat = s && s.st === 7, ready = s && s.st === 8, hit = s && s.hit && s.hit.on;
+    orbMat.opacity = PT.hover ? .34 : hit ? .3 + .08 * Math.sin(t / 120) : ready ? .26 : heat ? .1 + .1 * (Math.sin(t / 260) * .5 + .5) : .13;
+    ring.scale.setScalar(PT.hover ? 1.12 : 1); halo.rotation.y = t / (heat ? 500 : 1600); haloMat.opacity = PT.hover ? .9 : .5;
+    const bt = (performance.now() - PT.burst) / 600; if (PT.burst && bt < 1){ burst.scale.setScalar(1 + bt * 1.6); burstMat.opacity = 1 - bt; } else burstMat.opacity = 0;
+    hint.sp.visible = PT.marking;
+    if (PT.marking) draw(hint, 'Point at your Puffco and pull the trigger', reticle.visible ? 'That spot works. Pull to mark it' : 'Aim at the table or shelf it sits on', '#ff5ec8', true);
+    if (marker.visible){
+      const note = PT.note && Date.now() - PT.noteAt < 1800 ? PT.note : null;
+      if (note) draw(label, note[0], note[1], '#ffffff');
+      else if (!s) draw(label, 'Link your phone first', 'In the panel, or Settings → VR panel', '#ffb020');
+      else { const sess = s.st >= 7 && s.st <= 9, el = Math.round(s.el || 0);
+        draw(label, vrDeg(s.t, s.u) + '  ·  ' + (hit ? 'Hitting ' + s.hit.s + 's' : STATE_NAMES[s.st] || ''),
+          PT.hover ? (s.st === 7 || s.st === 8 ? 'Pull the trigger to boost' : sess ? 'Cooling down' : 'Pull the trigger to start') : sess && s.tot ? vrMS(el) + ' of ' + vrMS(s.tot) : (s.name || 'Puffco') + (s.bat != null ? ' · ' + s.bat + '%' : ''), hex); }
     }
     renderer.render(scene, camera);
   });
@@ -8968,7 +9014,10 @@ const DUEL_OPTS = { min:[2, 3, 5], win:[180, 240, 300], cap:[0, 600, 1200, 1800]
 // the 1v1 profile everyone plays on. Public matches: 505°F, 120s, Bold, Boost +1°F / +15s. Friend games pick their own
 const DUEL_PUBLIC = { tempF:505, time:120, vapor:0.5, boostF:1, boostT:15 };
 const DUEL_RP_REAL = false; // bets move real RP only once the server settles them (both phones must agree). Until then: shown, never sent
-const duelAllowed = () => IS_TEST || isRich(); // live: Rich only for now
+/* beta: the VR panel, Passthrough and 1v1s. Live: only the people on this list (Emberline usernames, any case, or player ids) */
+const BETA_USERS = ['a1ca5a326c89dd177960d792e64d0e82']; // Rich
+function betaUser(){ const me = LB.me || lbStore().meCache; if (!me) return false; const n = String(me.username || '').toLowerCase(); return BETA_USERS.some(u => u === me.id || (n && u.toLowerCase() === n)); }
+const duelAllowed = () => IS_TEST || isRich() || betaUser();
 function duelGate(){ const ok = duelAllowed(); [['#duelOpen', 'flex'], ['#vrCard', 'grid']].forEach(([q, d]) => { const e = $(q); if (e) e.style.display = ok ? d : 'none'; }); }
 const QUEUE_BUYIN = 10; // every matchmaking 1v1 costs 10 RP to enter, winner takes both. Test build: shown, never sent to the leaderboard
 const DUEL_BETS = [0, 10, 25, 50, 100, 500]; // quick picks for friend games; any amount can be typed
@@ -9283,7 +9332,7 @@ function duelDraw(){
     const rec = store.duelRec || { w:0, l:0, d:0 };
     const cu = duelCustom(), cp = cu.prof, deg = f => store.unit === 'C' ? Math.round((f - 32) * 5 / 9) + '°C' : f + '°F';
     const myRp = myRpNow(), betBtns = DUEL_BETS.map(v => `<button class="dchip${v === duelBet() ? ' on' : ''}" data-d="bet" data-v="${v}">${v ? v : 'None'}</button>`).join('');
-    card.innerHTML = `<span class="label" style="text-align:center">1v1</span><h2 style="margin:0;text-align:center">Last one hitting wins</h2>
+    card.innerHTML = `<span class="label" style="text-align:center">1v1 <span class="beta-tag">BETA</span></span><h2 style="margin:0;text-align:center">Last one hitting wins</h2>
       <div class="dmode"><button class="dmode-b" data-d="mode" data-m="r"><b>Random match</b><small>Matchmaking with anyone</small></button><button class="dmode-b" data-d="mode" data-m="f"><b>Play a friend</b><small>Custom game, you pick the settings</small></button></div>
       <div id="dSecR" class="dpanel" hidden><span class="label">Random match</span>
         <div class="dpub muted">Everyone plays the same profile: <b style="color:var(--fg)">${esc(profTxt(DUEL_PUBLIC))}</b>Hits ${QUEUE_RULES.min}s+ reset your ${QUEUE_RULES.win / 60} min clock. No time cap. Points: ${DUEL_PTS_TXT}.<br><b style="color:#ffd23f">${QUEUE_BUYIN} RP buy-in</b> · winner takes it from the loser (you have ${myRp} RP)${DUEL_RP_REAL ? '' : '. For now your RP doesn’t change'}</div>
@@ -9355,7 +9404,7 @@ function duelDraw(){
     : `<div class="row" style="gap:8px"><button class="btn" data-d="min" style="flex:1">Minimize</button><button class="btn${D.quitAt && Date.now() - D.quitAt < 4000 ? ' danger' : ''}" data-d="leave" style="flex:1">${ph !== 'live' && ph !== 'count' ? 'Leave' : D.quitAt && Date.now() - D.quitAt < 4000 ? 'Tap again to give up' : 'Give up'}</button></div>`;
   // the buttons sit in their own box and only redraw when they change, so a tap never lands on a button that just got replaced
   if (!card.querySelector(':scope > .d-body')){ card.innerHTML = '<span class="label" style="text-align:center"></span><div class="d-body"></div><div class="d-foot"></div>'; }
-  setHTML(card.firstElementChild, '1v1' + (D.bot ? ' · practice' : ''));
+  setHTML(card.firstElementChild, '1v1' + (D.bot ? ' · practice' : '') + ' <span class="beta-tag">BETA</span>');
   setHTML(card.querySelector('.d-body'), body); setHTML(card.querySelector('.d-foot'), foot);
 }
 function duelClick(e){
