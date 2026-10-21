@@ -8837,7 +8837,7 @@ function duelStart(role, code, rules, bot){
   if (bot){ DUEL.op = { id:'bot', n:'Ember Bot', h:0, b:0, out:0, left:rules.win }; DUEL.seenAt = Date.now(); }
   else {
     DUEL.rt = new Relay('ember-duel-' + code)
-      .on('d:hi', duelOnHi).on('d:rules', duelOnRules).on('d:go', duelOnGo).on('d:st', duelOnSt)
+      .on('d:hi', duelOnHi).on('d:rules', duelOnRules).on('d:go', duelOnGo).on('d:st', duelOnSt).on('d:live', m => { if (DUEL.role === 'guest' && duelSeeOp(m)) duelLive(); })
       .on('d:bye', m => { if (DUEL.op && m.id === DUEL.op.id){ DUEL.op.gone = true; duelDraw(); } })
       .on('open', () => { duelSend('d:hi', { n: duelName(), role, c: duelColor() }); duelDraw(); })
       .on('down', duelDraw);
@@ -8865,7 +8865,7 @@ function duelOnHi(m){
   const had = !!DUEL.op; if (!duelSeeOp(m)) return;
   if (DUEL.role === 'host') duelSend('d:rules', { n: duelName(), c: duelColor(), r: DUEL.rules, ph: DUEL.ph });
   else if (!had) duelSend('d:hi', { n: duelName(), role: DUEL.role, c: duelColor() });
-  if (!had){ buzz(20); toast(`${DUEL.op.n} joined the 1v1`); if (DUEL.auto && DUEL.role === 'host' && DUEL.ph === 'lobby') setTimeout(duelGo, 1500); }
+  if (!had){ buzz(20); toast(`${DUEL.op.n} joined the 1v1`); if ((DUEL.auto || DUEL.inviting) && DUEL.role === 'host' && DUEL.ph === 'lobby') setTimeout(duelGo, 800); }
   duelDraw();
 }
 function duelOnRules(m){
@@ -8876,28 +8876,45 @@ function duelOnRules(m){
 function duelOnGo(m){
   if (DUEL.role !== 'guest' || !duelSeeOp(m) || DUEL.ph !== 'lobby') return;
   if (m.r) DUEL.rules = duelSan(m.r);
-  duelCount((+m.in || 10) * 1000);
+  duelCount();
 }
 function duelOnSt(m){
   if (!duelSeeOp(m)) return;
   const o = DUEL.op; o.h = Math.max(0, +m.h || 0); o.b = Math.max(0, +m.b || 0); o.left = +m.left || 0; o.cool = !!m.cool;
   if (+m.out > 0 && !o.out) o.out = +m.out;
+  o.rdy = !!m.rdy; o.t = +m.t || 0;
   if (m.ph === 'done' && m.r && !DUEL.res) o.res = m.r;
 }
-function duelCount(ms){ DUEL.start = Date.now() + ms; DUEL.ph = 'count'; DUEL.me.at = DUEL.start; buzz(20); duelDraw(); if (!DUEL.bot) duelLoadProf(DUEL.rules.prof); }
+/* the countdown is the preheat: both Peaks start heating right away, and the match goes live once both are Ready
+   (the host calls it, so both phones start the clock together). 90s at most, so a Peak that won't heat can't hold it up */
+const DUEL_HEAT_MAX = 90000;
+function duelCount(){
+  const D = DUEL; D.ph = 'count'; D.countAt = Date.now(); D.start = 0; buzz(20); duelDraw();
+  duelAutoStart();
+}
+const duelReady = () => S.mode !== 'live' || S.state === 8; // not connected: nothing to wait for
+function duelLive(at){
+  const D = DUEL; if (D.ph !== 'count') return;
+  D.ph = 'live'; D.start = at || Date.now(); D.me.at = D.start; buzz([40, 60, 40]); toast('Go! Hit ' + D.rules.min + 's or longer to stay in');
+  if (D.bot){ D.op.next = D.start + (5 + Math.random() * 20) * 1000; D.op.outAt = D.start + (D.rules.cap ? D.rules.cap * 1000 * (.35 + Math.random() * .9) : D.rules.win * 1000 * (1.5 + Math.random() * 3)); }
+  duelDraw();
+}
 function duelGo(){
   if (DUEL.role !== 'host' || DUEL.ph !== 'lobby' || !DUEL.op) return;
-  if (!DUEL.bot) duelSend('d:go', { n: duelName(), c: duelColor(), r: DUEL.rules, in: 10 });
-  duelCount(10000);
-  if (DUEL.bot){ DUEL.op.next = DUEL.start + (5 + Math.random() * 20) * 1000; DUEL.op.outAt = DUEL.start + (DUEL.rules.cap ? DUEL.rules.cap * 1000 * (.35 + Math.random() * .9) : DUEL.rules.win * 1000 * (1.5 + Math.random() * 3)); }
+  if (!DUEL.bot) duelSend('d:go', { n: duelName(), c: duelColor(), r: DUEL.rules });
+  duelCount();
 }
-function duelStats(){ const m = DUEL.me; return { h: m.h, b: m.b, out: m.out, cool: m.cool > 0 && duelHot(), left: Math.round(duelLeft()) }; }
+function duelStats(){ const m = DUEL.me; return { h: m.h, b: m.b, out: m.out, cool: m.cool > 0 && duelHot(), left: DUEL.ph === 'live' ? Math.round(duelLeft()) : 0, rdy: duelReady(), t: Math.round(c2f(S.tempC || 0)) }; }
 const duelHot = () => S.mode === 'live' && S.batTemp >= DUEL_HOT_C;
 const duelLeft = () => DUEL.rules.win - (Date.now() - DUEL.me.at) / 1000;
 function duelTick(){
   const D = DUEL; if (!D.on) return;
   const now = Date.now(), r = D.rules;
-  if (D.ph === 'count' && now >= D.start){ D.ph = 'live'; buzz([40, 60, 40]); toast('Go! Hit ' + r.min + 's or longer to stay in'); duelAutoStart(); }
+  if (D.ph === 'count'){
+    if (D.role === 'host' && ((duelReady() && (D.bot || (D.op && D.op.rdy))) || now - D.countAt > DUEL_HEAT_MAX)){ if (!D.bot) duelSend('d:live', {}); duelLive(); }
+    else if (D.role === 'guest' && now - D.countAt > DUEL_HEAT_MAX + 15000) duelLive(); // never heard from the host
+    if (D.ph === 'count' && now - (D.sentAt || 0) >= 1000 && !D.bot){ D.sentAt = now; duelSend('d:st', Object.assign({ ph:'count' }, duelStats())); } // ready news goes out fast
+  }
   if (D.ph === 'live'){
     const capAt = capAtOf(D), ends = HIT.ends || [], hits = HIT.hits || [];
     for (let j = 1; j <= Math.min(ends.length, hits.length); j++){ // hits that ended since the start, each one once (matched from the end: a reload can put back hits without end times)
@@ -8924,7 +8941,7 @@ function duelTick(){
   if (D.ph === 'lobby' && D.rt && D.rt.open && !D.op && now - D.sentAt > 5000){ D.sentAt = now; duelSend('d:hi', { n: duelName(), role: D.role }); }
   duelDraw(); drawPills();
 }
-// the countdown hit 0: start the Peak heating on the 1v1 profile
+// the match was accepted: start the Peak heating on the 1v1 profile
 async function duelAutoStart(){
   if (S.mode !== 'live'){ toast(`Connect your ${devWord()}. Your clock is running`); return; }
   if (S.state >= 7 && S.state <= 9) return; // already heating
@@ -8974,7 +8991,7 @@ function duelDecide(now){
 // what the VR panel shows about a 1v1
 function duelSnap(){
   const D = DUEL; if (!D.on) return null;
-  const txt = D.ph === 'lobby' ? (D.op ? 'In the lobby' : 'Waiting for someone to join · code ' + D.code) : D.ph === 'count' ? 'Starting in ' + Math.max(0, Math.ceil((D.start - Date.now()) / 1000)) + 's'
+  const txt = D.ph === 'lobby' ? (D.op ? 'In the lobby' : 'Waiting for someone to join · code ' + D.code) : D.ph === 'count' ? 'Heating up. Starts when both are Ready'
     : D.ph === 'done' && D.res ? (D.res.r === 'win' ? 'You won! ' : D.res.r === 'lose' ? 'You lost. ' : 'Draw. ') + D.res.why : '';
   return { ph: D.ph, op: D.op ? D.op.n : '', mh: D.me.h, oh: D.op ? D.op.h : 0, left: D.ph === 'live' && !D.me.out ? Math.round(duelLeft()) : 0, min: D.rules.min, cool: D.me.cool > 0 && duelHot(), txt };
 }
@@ -9101,7 +9118,11 @@ function duelDraw(){
       ${D.auto ? '' : D.role === 'host' ? `<button class="btn primary" data-d="go" style="width:100%"${op ? '' : ' disabled'}>Start</button>` : `<p style="margin:0;text-align:center;font-size:14px">${op ? 'Waiting for ' + esc(op.n) + ' to start' : ''}</p>`}`;
     void url;
   } else if (ph === 'count'){
-    body = `<div class="duel-big">${Math.max(0, Math.ceil((D.start - Date.now()) / 1000))}</div><p style="margin:0;text-align:center">Your ${esc(devWord())} starts heating at 0. Hits count from then.</p>`;
+    const st = (rdy, t, live) => !live ? 'Not connected' : rdy ? '✓ Ready' : 'Heating' + (t > 100 ? ' · ' + (store.unit === 'C' ? Math.round((t - 32) * 5 / 9) + '°C' : t + '°F') : '…');
+    body = `<div class="duel-big" style="font-size:34px">Heating up</div>
+      <div class="duel-vs"><div class="duel-side you" style="--pc:${duelColor()}"><b class="duel-n">You</b><span>${st(duelReady(), Math.round(c2f(S.tempC || 0)), S.mode === 'live')}</span></div>
+        <div class="duel-side" style="--pc:${okColor(op && op.c)}"><b class="duel-n">${esc(op ? op.n : '…')}</b><span>${D.bot ? '✓ Ready' : op && op.rdy ? '✓ Ready' : st(false, op ? op.t : 0, true)}</span></div></div>
+      <p style="margin:0;text-align:center">The match starts when both ${esc(devWord())}s are Ready. Hits before that don’t count.</p>`;
   } else if (ph === 'live'){
     const capLeft = (capAtOf(D) - Date.now()) / 1000;
     body = `<div class="duel-vs">${side('You', me.h, me.b, duelLeft(), me.out, me.cool > 0 && duelHot(), true)}${side(op ? op.n : '…', op ? op.h : 0, op ? op.b : 0, op ? op.left : 0, op ? op.out : 0, op && op.cool, false)}</div>
@@ -9119,7 +9140,7 @@ function duelDraw(){
       ${res.sc ? `<div class="dsc">${res.sc.rows.map(([t, pts, w]) => `<div><span>${t}</span><b class="${w > 0 ? 'win' : w < 0 ? 'lose' : ''}">${w > 0 ? 'You +' + pts : w < 0 ? esc(op ? op.n : 'Them') + ' +' + pts : 'Tie'}</b></div>`).join('')}<div class="dsc-t"><span>Score</span><b>${res.sc.a} – ${res.sc.b}</b></div></div>` : ''}`;
   }
   const foot = ph === 'done' ? `<button class="btn primary" data-d="end" style="width:100%">Done</button>`
-    : `<div class="row" style="gap:8px"><button class="btn" data-d="min" style="flex:1">Minimize</button><button class="btn${D.quitAt && Date.now() - D.quitAt < 4000 ? ' danger' : ''}" data-d="leave" style="flex:1">${ph !== 'live' ? 'Leave' : D.quitAt && Date.now() - D.quitAt < 4000 ? 'Tap again to give up' : 'Give up'}</button></div>`;
+    : `<div class="row" style="gap:8px"><button class="btn" data-d="min" style="flex:1">Minimize</button><button class="btn${D.quitAt && Date.now() - D.quitAt < 4000 ? ' danger' : ''}" data-d="leave" style="flex:1">${ph !== 'live' && ph !== 'count' ? 'Leave' : D.quitAt && Date.now() - D.quitAt < 4000 ? 'Tap again to give up' : 'Give up'}</button></div>`;
   // the buttons sit in their own box and only redraw when they change, so a tap never lands on a button that just got replaced
   if (!card.querySelector(':scope > .d-body')){ card.innerHTML = '<span class="label" style="text-align:center"></span><div class="d-body"></div><div class="d-foot"></div>'; }
   setHTML(card.firstElementChild, '1v1' + (D.bot ? ' · practice' : ''));
@@ -9152,8 +9173,9 @@ function duelClick(e){
   if (k === 'go') return duelGo();
   if (k === 'min') return duelHide();
   if (k === 'leave'){
-    if (DUEL.ph === 'live' && !(DUEL.quitAt && Date.now() - DUEL.quitAt < 4000)){ // tap twice: Path can block confirm() popups
+    if ((DUEL.ph === 'live' || DUEL.ph === 'count') && !(DUEL.quitAt && Date.now() - DUEL.quitAt < 4000)){ // tap twice: Path can block confirm() popups
       DUEL.quitAt = Date.now(); toast('Tap Give up again to quit. It counts as a loss' + (DUEL.rules.bet ? ' and the ' + DUEL.rules.bet + ' RP bet' : '')); duelDraw(); setTimeout(duelDraw, 4100); return; }
+    if (S.mode === 'live' && S.state >= 7 && S.state <= 9) modeCmd(8); // stop the Peak
     if (DUEL.ph === 'live'){ const rec = store.duelRec = store.duelRec || { w:0, l:0, d:0 }; rec.l++; if (DUEL.rules.bet) rec.rp = (rec.rp || 0) - DUEL.rules.bet; save(); }
     duelEnd(); duelRestoreProf(); return; }
   if (k === 'end'){ duelEnd(); duelRestoreProf(); duelSheet({ queue:false }); return; }
