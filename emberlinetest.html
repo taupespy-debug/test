@@ -1918,6 +1918,10 @@ body.vr-on #dvFrame{display:none}
 @keyframes dvNameBurn{to{text-shadow:0 0 12px #ffd23f,0 0 24px var(--pc)}}
 @media (prefers-reduced-motion:reduce){.dv-embers,.dv-flame i,.dv-vs,.dv-vs::after{animation:none!important}}
 /* 1v1 menu */
+.ddisc{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:18px;background:linear-gradient(110deg,#5865f2,#7b5cff);color:#fff!important;text-decoration:none;min-width:0}
+.ddisc svg{width:28px;height:28px;flex:none}.ddisc span{display:grid;gap:2px;flex:1;min-width:0}.ddisc b{font-size:15px}.ddisc small{font-size:12px;opacity:.9;line-height:1.3}
+.ddisc em{font-style:normal;font-weight:800;font-size:13px;padding:7px 12px;border-radius:99px;background:rgba(255,255,255,.2);flex:none}
+.ddisc:active{transform:scale(.98)}.ddisc-s{background:#5865f2!important;color:#fff!important;border:0!important;text-decoration:none}
 .dsc{display:grid;gap:6px;padding:12px;border-radius:16px;background:var(--surface-2,rgba(255,255,255,.06));font-size:14px}
 .dsc div{display:flex;justify-content:space-between;gap:8px}.dsc b.win{color:#3ddc84}.dsc b.lose{color:#ff3b4a}
 .dsc-t{border-top:1px solid var(--line,rgba(255,255,255,.12));padding-top:6px;font-size:16px}
@@ -9052,6 +9056,7 @@ function onList(list){ const me = LB.me || lbStore().meCache; if (!me) return fa
 const duelAllowed = () => IS_TEST || isRich() || onList(DUEL_BETA);
 const vrAllowed = () => IS_TEST || isRich() || onList(VR_BETA);
 function duelGate(){ [['#duelOpen', 'flex', duelAllowed()], ['#vrCard', 'grid', vrAllowed()]].forEach(([q, d, ok]) => { const e = $(q); if (e) e.style.display = ok ? d : 'none'; }); }
+const DISCORD_URL = 'https://discord.gg/JSHyWbxrUV';
 const QUEUE_BUYIN = 10; // every matchmaking 1v1 costs 10 RP to enter, winner takes both. Test build: shown, never sent to the leaderboard
 const DUEL_BETS = [0, 10, 25, 50, 100, 500]; // quick picks for friend games; any amount can be typed
 const myRpNow = () => { try { return myRank().rp || 0; } catch(e){ return 0; } };
@@ -9394,6 +9399,7 @@ function duelDraw(){
     const myRp = myRpNow(), betBtns = DUEL_BETS.map(v => `<button class="dchip${v === duelBet() ? ' on' : ''}" data-d="bet" data-v="${v}">${v ? v : 'None'}</button>`).join('');
     card.innerHTML = `<span class="label" style="text-align:center">1v1 <span class="beta-tag">BETA</span></span><h2 style="margin:0;text-align:center">Last one hitting wins</h2>
       <div class="dmode"><button class="dmode-b" data-d="mode" data-m="r"><b>Random match</b><small>Matchmaking with anyone</small></button><button class="dmode-b" data-d="mode" data-m="f"><b>Play a friend</b><small>Custom game, you pick the settings</small></button></div>
+      <a class="ddisc" href="${DISCORD_URL}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.3 5.3A17 17 0 0 0 15.1 4l-.5 1a15.7 15.7 0 0 0-5.2 0l-.5-1a17 17 0 0 0-4.2 1.3C2 9.2 1.3 13 1.6 16.7a17 17 0 0 0 5.2 2.6l1.1-1.8c-.6-.2-1.2-.5-1.8-.9l.4-.3a12 12 0 0 0 11 0l.4.3c-.6.4-1.2.7-1.8.9l1.1 1.8a17 17 0 0 0 5.2-2.6c.4-4.3-.7-8-3.1-11.4ZM8.7 14.5c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Zm6.6 0c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Z"/></svg><span><b>Looking for players?</b><small>Join the Emberline Discord and find someone to 1v1</small></span><em>Join</em></a>
       <div id="dSecR" class="dpanel" hidden><span class="label">Random match</span>
         <div class="dpub muted">Everyone plays the same profile: <b style="color:var(--fg)">${esc(profTxt(DUEL_PUBLIC))}</b>Hits ${QUEUE_RULES.min}s+ reset your ${QUEUE_RULES.win / 60} min clock. No time cap. Points: ${DUEL_PTS_TXT}.<br><b style="color:#ffd23f">${QUEUE_BUYIN} RP buy-in</b> · winner takes it from the loser (you have ${myRp} RP)${DUEL_RP_REAL ? '' : '. For now your RP doesn’t change'}</div>
         <div id="dqBox" class="dq-box"></div></div>
@@ -9584,7 +9590,7 @@ function duelMenuPaint(){
   const box = $('#dqBox'), fr = $('#dFr'); if (!box && !fr) return;
   const now = Date.now(), q = LOBBY.q, up = LOBBY.rt && LOBBY.rt.open;
   if (box) setHTML(box, q ? `<div class="dq-spin"></div><b>${up ? 'Finding a match…' : 'Connecting…'}</b><span class="muted" style="font-size:13px">${vrMS((now - q.at) / 1000)} · ${q.seen.size ? q.seen.size + ' other' + (q.seen.size === 1 ? '' : 's') + ' in the queue' : 'nobody else in the queue yet'}</span>
-      ${now - q.at > 20000 && !q.seen.size ? '<span class="muted" style="font-size:12px">Quiet right now. Challenge a friend below, or keep waiting.</span>' : ''}<button class="btn small" data-d="qx">Cancel</button>`
+      ${now - q.at > 20000 && !q.seen.size ? `<span class="muted" style="font-size:12px">Quiet right now. Find players in the Discord, or keep waiting.</span><a class="btn small ddisc-s" href="${DISCORD_URL}" target="_blank" rel="noopener">Find players on Discord</a>` : ''}<button class="btn small" data-d="qx">Cancel</button>`
     : `<button class="btn primary" data-d="q" style="width:100%">Find a match · ${QUEUE_BUYIN} RP buy-in</button>`);
   if (fr){
     const me = LB.me || lbStore().meCache;
