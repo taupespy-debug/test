@@ -43,13 +43,14 @@ code{font-size:13px;color:var(--ink);background:var(--card);padding:1px 6px;bord
   </header>
   <div class="hmd" id="hmd">
     <canvas id="world"></canvas>
-    <div class="stage"><div class="float" id="float"><div class="win" id="win"><iframe id="panel" title="Emberline VR panel" allow="bluetooth; screen-wake-lock; fullscreen" src="emberlinetest.html?vr"></iframe></div></div></div>
+    <div class="stage"><div class="float" id="float"><div class="win" id="win"><iframe id="panel" title="Emberline VR panel" allow="bluetooth; screen-wake-lock; fullscreen 'none'" src="emberlinetest.html?vr"></iframe></div></div></div>
     <div class="lens"></div>
     <div class="hud"><span>Simulated headset · <b style="color:#3ddc84" id="srcName">test build</b></span><span id="clock"></span></div>
     <svg class="laser" id="laser" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#b04bff" stop-opacity=".1"/><stop offset="1" stop-color="#ff5ec8"/></linearGradient></defs><line id="beam" stroke="url(#lg)" stroke-width="3" stroke-linecap="round"/><circle id="tip" r="6" fill="#fff" opacity=".9"/></svg>
   </div>
   <div class="tips">
     <div><b>Link your phone</b><p>The panel shows a 6-character code. On your phone open Emberline (the test link for Test build), go to Settings → VR panel and type it. The live build only links for Rich.</p></div>
+    <div><b>Click the Puffco</b><p>Once the panel is linked (or connected), point at the Puffco on the table and click it to start your real one. Click again while it heats or is Ready to boost.</p></div>
     <div><b>Or connect here</b><p>On a computer with Chrome or Edge, the panel can connect a Peak straight over Bluetooth. Safari and Path can’t do Bluetooth inside this simulator, so use the phone link there.</p></div>
     <div><b>In a real headset</b><p>Open <code>emberlineapp.github.io/emberline/?vr</code> in the Quest browser, or in a desktop overlay like XSOverlay, OVR Toolkit or Desktop+.</p></div>
   </div>
@@ -61,6 +62,14 @@ code{font-size:13px;color:var(--ink);background:var(--card);padding:1px 6px;bord
   const SRC = { test: 'emberlinetest.html?vr', live: 'https://emberlineapp.github.io/emberline/?vr' };
   // the scene only needs a mood and a few flags from the old preview
   const MOODS = [{ c:['#b04bff', '#ff5ec8', '#2bd9ff'] }], S = { mood:0, stl:false, lan:true, st:5, hitOn:false };
+  // the real Peak's state, from the panel inside the window
+  const REAL = { ok:false, st:0, at:0, name:'', heat:true };
+  addEventListener('message', e => {
+    const m = e.data; if (!m || m.ember !== 'vrstate' || e.source !== $('#panel').contentWindow) return;
+    Object.assign(REAL, m, { at: Date.now() });
+    S.st = m.ok ? m.st : 5; S.hitOn = !!m.hit; S.lan = !!m.lan; S.stl = !!m.stl;
+    if (m.c && /^#[0-9a-f]{6}$/i.test(m.c)) MOODS[0].c = [m.c];
+  });
   const cv = $('#world'), cx = cv.getContext('2d'); let scene = 'game', W = 0, H = 0, T = 0;
   const stars = Array.from({ length: 140 }, () => [Math.random(), Math.random() * .55, Math.random() * 1.4 + .3]);
   function size(){ const r = cv.getBoundingClientRect(), d = Math.min(2, devicePixelRatio || 1); W = cv.width = r.width * d; H = cv.height = r.height * d; }
@@ -102,14 +111,44 @@ code{font-size:13px;color:var(--ink);background:var(--card);padding:1px 6px;bord
       for (let i = 0; i < n; i++){ const h = (Math.sin(T * 3 + i * .5) * .5 + .5) * (Math.sin(T * 1.7 + i * .23) * .5 + .5) * H * .45 + H * .03; cx.fillStyle = moodCol(i * .1); cx.globalAlpha = .85; cx.fillRect(W * .02 + i * bw, H * .62 - h, bw * .7, h); cx.globalAlpha = .18; cx.fillRect(W * .02 + i * bw, H * .62, bw * .7, h * .5); }
       cx.globalAlpha = 1; cx.fillStyle = 'rgba(255,255,255,.7)'; cx.font = `700 ${13 * d}px Manrope, sans-serif`; cx.fillText('NOW PLAYING · Gods Plan · Drake', W * .03, H * .1);
     }
-    drawPeak(W * .2, H * .86, Math.min(W, H) * .09);
+    drawPeak(W * .11, H * .86, Math.min(W, H) * .09);
+    peakHint();
   }
 
 
   const hmd = $('#hmd'), beam = $('#beam'), tip = $('#tip'), win = $('#win'), panel = $('#panel');
+  // the Peak on the table: point at it and click to start your real one
+  let overPeak = false, flash = '', flashAt = 0;
+  const live = () => REAL.ok && Date.now() - REAL.at < 4000;
+  function peakBox(){ const r = hmd.getBoundingClientRect(), s = Math.min(r.width, r.height) * .09; return { x: r.width * .11, y: r.height * .86, s }; }
+  function onPeak(px, py){ const b = peakBox(); return px > b.x - b.s * .7 && px < b.x + b.s * .7 && py > b.y - b.s * 1.4 && py < b.y + b.s * .35; }
+  function peakLabel(){
+    if (flash && Date.now() - flashAt < 2500) return flash;
+    if (!live()) return 'Link your phone in the panel first';
+    const sess = REAL.st >= 7 && REAL.st <= 9;
+    return REAL.st === 8 ? (REAL.hit ? 'Hitting…' : 'Ready. Click to boost') : REAL.st === 7 ? 'Heating up · click to boost' : sess ? 'Cooling down' : REAL.heat ? 'Click to start your ' + (REAL.name || 'Peak') : 'Start is off on your phone';
+  }
+  function peakHint(){
+    if (!overPeak && !(flash && Date.now() - flashAt < 2500)) return;
+    const d = Math.min(2, devicePixelRatio || 1), b = peakBox(), x = b.x * d, y = (b.y - b.s * 1.75) * d, t = peakLabel();
+    cx.font = `700 ${13 * d}px Manrope, sans-serif`; const w = cx.measureText(t).width + 22 * d;
+    cx.fillStyle = 'rgba(10,8,18,.85)'; cx.strokeStyle = 'rgba(255,255,255,.35)'; cx.lineWidth = d;
+    cx.beginPath(); cx.roundRect(x - w / 2, y - 16 * d, w, 28 * d, 14 * d); cx.fill(); cx.stroke();
+    cx.fillStyle = '#fff'; cx.textAlign = 'center'; cx.fillText(t, x, y + 3 * d); cx.textAlign = 'start';
+    if (overPeak){ cx.strokeStyle = 'rgba(255,255,255,.7)'; cx.lineWidth = 2 * d; cx.setLineDash([6 * d, 6 * d]); cx.beginPath(); cx.ellipse(b.x * d, (b.y - b.s * .45) * d, b.s * .95 * d, b.s * 1.1 * d, 0, 0, 7); cx.stroke(); cx.setLineDash([]); }
+  }
+  function pressPeak(){
+    if (!live()){ flash = 'Link your phone in the panel first'; flashAt = Date.now(); return; }
+    const idle = !(REAL.st >= 7 && REAL.st <= 9), c = idle ? 'start' : (REAL.st === 7 || REAL.st === 8) ? 'boost' : '';
+    if (!c) return;
+    if (c === 'start' && !REAL.heat){ flash = 'Start is off on your phone'; flashAt = Date.now(); return; }
+    panel.contentWindow.postMessage({ ember:'vrcmd', c }, '*');
+    flash = c === 'start' ? 'Starting your ' + (REAL.name || 'Peak') + '…' : 'Boost!'; flashAt = Date.now();
+  }
+  hmd.addEventListener('pointerdown', e => { const r = hmd.getBoundingClientRect(); if (onPeak(e.clientX - r.left, e.clientY - r.top)) pressPeak(); });
   let ptr = { x:.6, y:.5 }, tilted = true;
   function drawLaser(){ const r = hmd.getBoundingClientRect(), x = ptr.x * r.width, y = ptr.y * r.height; beam.setAttribute('x1', r.width * .92); beam.setAttribute('y1', r.height * 1.02); beam.setAttribute('x2', x); beam.setAttribute('y2', y); tip.setAttribute('cx', x); tip.setAttribute('cy', y); }
-  hmd.addEventListener('pointermove', e => { const r = hmd.getBoundingClientRect(); ptr = { x:(e.clientX - r.left) / r.width, y:(e.clientY - r.top) / r.height }; drawLaser(); });
+  hmd.addEventListener('pointermove', e => { const r = hmd.getBoundingClientRect(); ptr = { x:(e.clientX - r.left) / r.width, y:(e.clientY - r.top) / r.height }; overPeak = onPeak(e.clientX - r.left, e.clientY - r.top); hmd.style.cursor = overPeak ? 'pointer' : ''; drawLaser(); });
   // over the panel the browser hands the mouse to the iframe; follow it there too (same site only) by mapping its point back
   function hookFrame(){ try { const d = panel.contentDocument; if (!d) return; d.addEventListener('pointermove', e => { const wr = win.getBoundingClientRect(), hr = hmd.getBoundingClientRect(); ptr = { x:(wr.left + e.clientX / 1000 * wr.width - hr.left) / hr.width, y:(wr.top + e.clientY / 640 * wr.height - hr.top) / hr.height }; drawLaser(); }); } catch(e){} }
   panel.addEventListener('load', hookFrame);

@@ -1803,6 +1803,14 @@ body.vr-on .toast{z-index:300;top:16px}
 .vr-hit{font:800 34px var(--f-round,system-ui);color:#3ddc84;min-height:40px}
 .vr-code{font:800 46px/1 ui-monospace,Menlo,monospace;letter-spacing:.15em;text-align:center;padding:16px 8px;background:#202030;border-radius:16px;-webkit-user-select:all;user-select:all}
 .vr-range{width:100%;height:40px;accent-color:#9900cc}
+.vr-head{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center}
+.vr-peak{--pk:#b04bff;width:104px;height:134px;padding:4px;border-radius:20px;border:1px solid #34344a;background:#12121c;cursor:pointer}
+.vr-peak:hover{border-color:#fff}.vr-peak:active{transform:scale(.96)}.vr-peak svg{width:100%;height:100%;overflow:visible}
+.vr-peak .pk-glow{opacity:.35}.vr-peak.lan .pk-glow,.vr-peak.ready .pk-glow{opacity:.8}
+.vr-peak.heat .pk-glow{animation:pkPulse 1.4s ease-in-out infinite}.vr-peak .pk-puff{fill:rgba(255,255,255,.5);opacity:0}
+.vr-peak.hit .pk-puff{animation:pkPuff 1.2s ease-out infinite}
+@keyframes pkPulse{50%{opacity:.9}}@keyframes pkPuff{0%{opacity:0;transform:translateY(10px)}30%{opacity:.8}100%{opacity:0;transform:translateY(-12px)}}
+@media (max-width:420px){.vr-peak{width:80px;height:104px}}
 .vr-duel{display:grid;gap:8px;padding:12px;border-radius:16px;background:#221a30;border:1px solid #4a2e6a}
 .vr-vs{display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center}.vr-vs b{display:block;font-size:34px}
 .egg.duel{z-index:220}
@@ -2829,7 +2837,7 @@ const FS = {
     } catch(e){}
   }
 };
-function wantFullscreen(){ return store.fullscreen !== false; }
+function wantFullscreen(){ return store.fullscreen !== false && window.parent === window; } // never inside a frame (the VR simulator)
 // go full screen on open: try now, after the page finishes loading, and as the loading screen clears (Path allows it without a tap).
 // Other browsers need a tap, so keep listening on taps until it actually sticks.
 function armFullscreen(){
@@ -8720,9 +8728,23 @@ function vrClose(){
 }
 function vrTick(){
   if (!VRP.on) return;
+  vrParentSend();
   if (VRP.rt && VRP.rt.open && Date.now() - VRP.hiAt > (VRP.snap ? 10000 : 3000)){ VRP.rt.send('vr:hi', {}); VRP.hiAt = Date.now(); }
   vrPaint();
 }
+// framed by the VR simulator page: tell it what the Peak is doing, and let it press Start / Stop / Boost (only from our own sites)
+const VR_FRAMED = window.parent !== window;
+function vrParentSend(){
+  if (!VR_FRAMED || !VRP.on) return;
+  const src = vrSource(), s = src && src.s;
+  try { window.parent.postMessage({ ember:'vrstate', ok: !!src, st: s ? s.st : 0, hit: !!(s && s.hit && s.hit.on), lan: !!(s && s.lan), stl: !!(s && s.stl),
+    c: s && s.pr && s.pr[s.act] ? s.pr[s.act].c : '', name: s ? s.name || '' : '', heat: !!(s && (src.how !== 'link' || s.heat)) }, '*'); } catch(e){}
+}
+window.addEventListener('message', e => {
+  const m = e.data; if (!VRP.on || !m || m.ember !== 'vrcmd') return;
+  if (e.origin !== location.origin && e.origin !== 'https://taupespy-debug.github.io' && e.origin !== 'https://emberlineapp.github.io') return;
+  if (['start', 'stop', 'boost'].includes(m.c)) vrSend(m.c, null);
+});
 // where the panel's numbers come from right now
 function vrSource(){
   if (VRP.demo) return { s: vrFake(), src:'Demo · made-up numbers', how:'demo' };
@@ -8736,6 +8758,13 @@ function vrFake(){
     pr: S.profiles.map(p => ({ n:p.name, t:Math.round(p.tempC), c:p.color })), lan:false, stl:false, br:80,
     hit:{ on: st === 8 && el % 10 < 4, s: el % 10, last:4.2, n:3, best:7.8 }, today:4, moods:['Hologram', 'Sunset', 'Aurora', 'Lava'], heat:true, duel: duelSnap() };
 }
+// the Puffco on the panel: tap it to start. Glows in the active profile's color, pulses while heating, puffs while you pull
+const VR_PEAK_SVG = `<svg viewBox="0 0 100 130" aria-hidden="true"><defs><radialGradient id="vrpkG"><stop offset="0" stop-color="var(--pk)" stop-opacity=".75"/><stop offset="1" stop-color="var(--pk)" stop-opacity="0"/></radialGradient></defs>
+  <ellipse class="pk-glow" cx="50" cy="96" rx="48" ry="34" fill="url(#vrpkG)"/>
+  <g class="pk-puff"><circle cx="46" cy="22" r="7"/><circle cx="56" cy="12" r="9"/><circle cx="48" cy="2" r="6"/></g>
+  <path d="M38 34 L42 74 L58 74 L62 34 Z" fill="rgba(200,220,255,.16)" stroke="rgba(220,235,255,.55)" stroke-width="2"/>
+  <rect x="24" y="72" width="52" height="46" rx="11" fill="#1b1a22" stroke="#3a3850" stroke-width="1.5"/>
+  <rect class="pk-led" x="28" y="98" width="44" height="5" rx="2.5" fill="var(--pk)"/></svg>`;
 function vrBuild(){
   let el = $('#vrp'); if (el) return;
   el = document.createElement('div'); el.id = 'vrp';
@@ -8752,8 +8781,8 @@ function vrBuild(){
     <div class="vr-grid" id="vrMain" hidden>
       <div class="vr-card">
         <span class="vr-lbl" id="vrDev"></span>
-        <div class="vr-temp" id="vrTemp"></div>
-        <div class="vr-state" id="vrState"></div>
+        <div class="vr-head"><button class="vr-peak" data-vr="tap" id="vrPeak" aria-label="Start your ${esc(devWord())}">${VR_PEAK_SVG}</button>
+          <div style="display:grid;gap:6px;min-width:0"><div class="vr-temp" id="vrTemp"></div><div class="vr-state" id="vrState"></div><span class="vr-muted" id="vrTapHint"></span></div></div>
         <div class="vr-bar"><i id="vrBar"></i></div>
         <div class="vr-row"><button class="vr-btn go" data-vr="start">Start</button><button class="vr-btn" data-vr="boost">Boost</button><button class="vr-btn" data-vr="stop">Stop</button></div>
         <div class="vr-row" id="vrProfs"></div>
@@ -8784,6 +8813,11 @@ function vrPress(b){
   if (k === 'connect'){ if (!duelAllowed()) return; return vrDo('connect'); }
   if (!src) return toast('Link your phone or connect first');
   const s = src.s;
+  if (k === 'tap'){ // the Puffco picture: start it, or boost while it heats or is Ready
+    if (s.st === 7 || s.st === 8) return vrSend('boost', null, b);
+    if (s.st >= 9) return;
+    return vrSend('start', null, b);
+  }
   if (k === 'lan') return vrSend('lan', !s.lan, b);
   if (k === 'stl') return vrSend('stl', !s.stl, b);
   vrSend(k, b.dataset.v != null ? +b.dataset.v : null, b);
@@ -8815,6 +8849,9 @@ function vrPaint(){
   set('vrTemp', vrDeg(s.t, s.u));
   set('vrState', (STATE_NAMES[s.st] || '—') + (sess && s.tot ? ` · ${vrMS(el)} / ${vrMS(s.tot)}` : ''));
   $('#vrBar').style.width = (sess && s.tot ? Math.min(100, el / s.tot * 100) : 0) + '%';
+  { const pk = $('#vrPeak'), c = (s.pr[s.act] || {}).c || '#b04bff';
+    pk.style.setProperty('--pk', s.stl ? '#333' : c); pk.classList.toggle('heat', s.st === 7); pk.classList.toggle('ready', s.st === 8); pk.classList.toggle('hit', !!s.hit.on); pk.classList.toggle('lan', !!s.lan);
+    set('vrTapHint', s.st === 7 || s.st === 8 ? 'Tap the Puffco to boost' : s.st >= 9 ? '' : src.how === 'link' && !s.heat ? '' : 'Tap the Puffco to start'); }
   root.querySelector('[data-vr="stop"]').disabled = !sess; root.querySelector('[data-vr="boost"]').disabled = !sess;
   const sb = root.querySelector('[data-vr="start"]'); sb.disabled = sess || (src.how === 'link' && !s.heat); sb.textContent = sess ? 'Heating' : src.how === 'link' && !s.heat ? 'Start is off' : 'Start';
   const psig = JSON.stringify([s.pr, s.act, sess, s.u]);
