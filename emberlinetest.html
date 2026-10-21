@@ -9015,7 +9015,7 @@ const DUEL_OPTS = { min:[2, 3, 5], win:[180, 240, 300], cap:[0, 600, 1200, 1800]
 const DUEL_PUBLIC = { tempF:505, time:120, vapor:0.5, boostF:1, boostT:15 };
 const DUEL_RP_REAL = false; // bets move real RP only once the server settles them (both phones must agree). Until then: shown, never sent
 /* beta: the VR panel, Passthrough and 1v1s. Live: only the people on this list (Emberline usernames, any case, or player ids) */
-const BETA_USERS = ['a1ca5a326c89dd177960d792e64d0e82']; // Rich
+const BETA_USERS = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco']; // Rich, infused.taco
 function betaUser(){ const me = LB.me || lbStore().meCache; if (!me) return false; const n = String(me.username || '').toLowerCase(); return BETA_USERS.some(u => u === me.id || (n && u.toLowerCase() === n)); }
 const duelAllowed = () => IS_TEST || isRich() || betaUser();
 function duelGate(){ const ok = duelAllowed(); [['#duelOpen', 'flex'], ['#vrCard', 'grid']].forEach(([q, d]) => { const e = $(q); if (e) e.style.display = ok ? d : 'none'; }); }
