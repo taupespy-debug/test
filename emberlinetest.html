@@ -362,7 +362,11 @@ body.vr-on .toast{z-index:300;top:16px}
 .duel-vs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .duel-side{display:grid;gap:4px;justify-items:center;text-align:center;padding:12px 8px;border-radius:18px;background:var(--fill-2);min-width:0}
 .duel-side{border-top:4px solid var(--pc,#888)}.duel-side.you{outline:2px solid var(--pc,#9900cc)}
-.dcol-row{display:flex;flex-wrap:wrap;gap:8px}.dcol{width:30px;height:30px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)}.dcol.on{border-color:var(--fg,#fff);transform:scale(1.12)}
+.dcol-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.dmood-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px;max-height:260px;overflow:auto}
+.dmood{display:grid;gap:4px;justify-items:center;padding:6px 4px;border-radius:14px;border:2px solid transparent;background:var(--fill-2);color:inherit;cursor:pointer;min-width:0}
+.dmood i{width:40px;height:40px;border-radius:50%;display:block}.dmood span{font-size:11px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dmood.on{border-color:var(--fg,#fff)}.dcol{width:30px;height:30px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)}.dcol.on{border-color:var(--fg,#fff);transform:scale(1.12)}
 .dset{display:grid;gap:4px;font-size:13px}.dset .row{justify-content:space-between}.dset input[type=range]{width:100%}
 .dvap{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.dvap .btn.on{background:var(--accent,#9900cc);color:#fff}
 .dpub{display:grid;gap:4px;font-size:13px;text-align:center}
@@ -8777,7 +8781,10 @@ const DUEL_OPTS = { min:[2, 3, 5], win:[180, 240, 300], cap:[0, 600, 1200, 1800]
 const DUEL_PUBLIC = { tempF:505, time:120, vapor:0.5, boostF:1, boostT:15 };
 const DUEL_VAPORS = [0, 0.5, 1]; // Smooth, Bold, Intense (the Proxy has no Extreme, so a 1v1 never uses it)
 const DUEL_COLORS = ['#ff3b4a', '#ff8a2b', '#ffd23f', '#3ddc84', '#2bd9ff', '#2d7cf0', '#9900cc', '#ff5ec8', '#ffffff'];
-const duelColor = () => DUEL_COLORS.includes(store.duelColor) ? store.duelColor : '#9900cc';
+const duelMoodRef = () => store.duelMood && store.duelMood.kind ? store.duelMood : null; // a mood picked for your 1v1 light (or null: a solid color)
+const duelColor = () => { const m = duelMoodRef(); if (m){ try { return moodSolid(m); } catch(e){} } return DUEL_COLORS.includes(store.duelColor) ? store.duelColor : '#9900cc'; };
+let duelMoodList = null;
+function duelMoods(){ if (!duelMoodList){ try { duelMoodList = shufAll(); } catch(e){ duelMoodList = []; } } return duelMoodList; } // everything in your mood picker
 const okColor = c => /^#[0-9a-f]{6}$/i.test(String(c || '')) ? c : '#888888';
 const capAtOf = D => D.rules.cap ? D.start + D.rules.cap * 1000 : Infinity;
 const capTxt = c => c ? c / 60 + ' min cap' : 'no time cap';
@@ -8943,9 +8950,11 @@ async function duelLoadProf(pr, force){
     try { const r = await ble.readAll('/u/app/hc/0/colr'); if (r && r.length) back.colr = toHex(r); } catch(e){}
     store.duelBackups[hhKey()] = back; save();
   }
-  Object.assign(p, { name:'1v1', tempC:f2c(pr.tempF), time:pr.time, vapor:pr.vapor, boostF:pr.boostF, boostT:pr.boostT, mood:null, color: duelColor(), lightDirty:true });
+  const mood = duelMoodRef();
+  Object.assign(p, { name:'1v1', tempC:f2c(pr.tempF), time:pr.time, vapor:pr.vapor, boostF:pr.boostF, boostT:pr.boostT, mood:null, color: duelColor(), lightDirty: !mood });
   S.active = 0; hcsHold = Date.now() + 2500;
   try { await saveProfile(0); } catch(e){}
+  if (mood){ try { await writeMoodTo(0, JSON.parse(JSON.stringify(mood))); } catch(e){ p.lightDirty = true; try { await saveProfile(0); } catch(_){} } } // a mood from your picker, else its main color
   render(); if (view === 'prof') drawProfiles();
 }
 async function duelRestoreProf(n = 0){
@@ -8965,6 +8974,7 @@ function duelSheet(opts = {}){
     el = document.createElement('div'); el.className = 'egg duel';
     el.innerHTML = '<div class="egg-card" role="dialog" aria-label="1v1" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto"></div>';
     document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+    duelMoodList = null; // pick up moods made since last time
     el.addEventListener('click', duelClick); el.addEventListener('input', duelInput); el.addEventListener('change', duelInput);
   }
   el.dataset.ph = ''; duelDraw(); drawPills();
@@ -8983,8 +8993,10 @@ function duelDraw(){
       <div style="display:grid;gap:8px"><span class="label">Public match</span>
         <div class="dpub muted">Everyone plays the same profile: <b style="color:var(--fg)">${esc(profTxt(DUEL_PUBLIC))}</b>Hits ${QUEUE_RULES.min}s+ reset your ${QUEUE_RULES.win / 60} min clock. No time cap: last one still hitting wins.</div>
         <div id="dqBox" class="dq-box"></div></div>
-      <div style="display:grid;gap:8px"><span class="label">Your color</span><div class="dcol-row">${DUEL_COLORS.map(c => `<button class="dcol${c === duelColor() ? ' on' : ''}" data-d="col" data-c="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join('')}</div>
-        <span class="muted" style="font-size:12px">Your ${esc(devWord())} lights up in it during a 1v1, and it marks your side of the score.</span></div>
+      <div style="display:grid;gap:8px"><div class="row between"><span class="label">Your light</span><span class="muted" style="font-size:13px" id="dLightName">${duelMoodRef() ? esc(duelMoodRef().name || 'Mood') : 'Solid color'}</span></div>
+        <div class="dcol-row">${DUEL_COLORS.map(c => `<button class="dcol${!duelMoodRef() && c === duelColor() ? ' on' : ''}" data-d="col" data-c="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join('')}<button class="btn small" data-d="moods" style="margin-left:auto">Moods</button></div>
+        <div class="dmood-grid" id="dMoods" hidden></div>
+        <span class="muted" style="font-size:12px">Your ${esc(devWord())} shows it during a 1v1, and its main color marks your side of the score.</span></div>
       <details class="dq-more"${store.duelCustomOpen ? ' open' : ''}><summary>Friend 1v1 · custom game</summary><div style="display:grid;gap:12px;margin-top:10px">
         <span class="muted" style="font-size:12px">You pick the settings for both of you. Your friend sees them before accepting.</span>
         <div class="dset"><div class="row"><span>Temperature</span><b id="dvT">${deg(cp.tempF)}</b></div><input type="range" data-dp="tempF" min="400" max="620" step="5" value="${cp.tempF}"></div>
@@ -9044,7 +9056,16 @@ function duelClick(e){
   if (k === 'q') return queueJoin();
   if (k === 'qx') return queueLeave();
   if (k === 'inv'){ rules(); return duelInvite(b.dataset.id, b.dataset.n); }
-  if (k === 'col'){ store.duelColor = b.dataset.c; save(); el.querySelectorAll('.dcol').forEach(x => x.classList.toggle('on', x === b)); return; }
+  if (k === 'col'){ store.duelColor = b.dataset.c; store.duelMood = null; save(); el.querySelectorAll('.dcol').forEach(x => x.classList.toggle('on', x === b)); el.querySelectorAll('.dmood').forEach(x => x.classList.remove('on')); const n = $('#dLightName'); if (n) n.textContent = 'Solid color'; return; }
+  if (k === 'moods'){ const g = $('#dMoods'); if (!g) return; g.hidden = !g.hidden; b.textContent = g.hidden ? 'Moods' : 'Hide moods';
+    if (!g.hidden && !g.childElementCount){ const cur = duelMoodRef(), list = duelMoods();
+      g.innerHTML = list.length ? list.map((m, i) => `<button class="dmood${cur && sameMood(cur, m) ? ' on' : ''}" data-d="mood" data-i="${i}"><i style="${swatchStyle(m)};animation:none"></i><span>${esc(m.name || 'Mood')}</span></button>`).join('') : '<p class="muted" style="margin:0;font-size:13px">No moods yet. Make some in Lights.</p>'; }
+    return; }
+  if (k === 'mood'){ const m = duelMoods()[+b.dataset.i]; if (!m) return; store.duelMood = JSON.parse(JSON.stringify(m)); save();
+    el.querySelectorAll('.dmood').forEach(x => x.classList.toggle('on', x === b)); el.querySelectorAll('.dcol').forEach(x => x.classList.remove('on'));
+    const n = $('#dLightName'); if (n) n.textContent = m.name || 'Mood';
+    if (DUEL.on && DUEL.rules && DUEL.rules.prof && S.mode === 'live') duelLoadProf(DUEL.rules.prof, true); else previewMood(m, 3000); // show it on the Peak
+    return; }
   if (k === 'vap'){ const c = duelCustom(); c.prof.vapor = +b.dataset.v; store.duelRules = c; save(); el.querySelectorAll('[data-d="vap"]').forEach(x => x.classList.toggle('on', x === b)); return; }
   if (k === 'reload') return duelLoadProf(DUEL.rules.prof, true);
   if (k === 'restore') return duelRestoreProf().then(() => { el.dataset.ph = ''; duelDraw(); });
