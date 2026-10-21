@@ -1838,6 +1838,8 @@ body.vr-on .toast{z-index:300;top:16px}
 .fpill.duel{background:#d8333c}
 body.vr-on #fpills{display:none}
 /* 1v1 menu */
+.d-body,.d-foot{display:grid;gap:12px;min-width:0}
+.btn.danger{background:#ff3b4a!important;color:#fff!important;border-color:#ff3b4a!important}
 .egg.duel .egg-card{width:min(100%,400px);grid-template-columns:minmax(0,1fr);justify-items:stretch;text-align:left;padding:20px 16px;gap:14px}
 .egg.duel .egg-card > *{min-width:0}
 .dpanel{display:grid;gap:12px;padding:14px;border-radius:20px;background:var(--surface-2,rgba(255,255,255,.06));min-width:0}
@@ -9022,6 +9024,7 @@ function duelDraw(){
   const ph = D.on ? D.ph : 'menu';
   if (ph === 'menu'){
     if (el.dataset.dph === 'menu') return; // don't wipe what they're typing
+    card._h = null;
     const rec = store.duelRec || { w:0, l:0, d:0 };
     const cu = duelCustom(), cp = cu.prof, deg = f => store.unit === 'C' ? Math.round((f - 32) * 5 / 9) + '°C' : f + '°F';
     const myRp = myRpNow(), betBtns = DUEL_BETS.map(v => `<button class="dchip${v === duelBet() ? ' on' : ''}" data-d="bet" data-v="${v}">${v ? v : 'None'}</button>`).join('');
@@ -9089,9 +9092,11 @@ function duelDraw(){
       <div class="duel-vs">${side('You', me.h, me.b, 0, me.out, false, true)}${side(op ? op.n : '…', op ? op.h : 0, op ? op.b : 0, 0, op ? op.out : 0, false, false)}</div>`;
   }
   const foot = ph === 'done' ? `<button class="btn primary" data-d="end" style="width:100%">Done</button>`
-    : `<div class="row" style="gap:8px"><button class="btn" data-d="min" style="flex:1">Minimize</button><button class="btn" data-d="leave" style="flex:1">${ph === 'live' ? 'Give up' : 'Leave'}</button></div>`;
-  const h = `<span class="label" style="text-align:center">1v1${D.bot ? ' · practice' : ''}</span>${body}${foot}`;
-  if (card.innerHTML !== h) card.innerHTML = h;
+    : `<div class="row" style="gap:8px"><button class="btn" data-d="min" style="flex:1">Minimize</button><button class="btn${D.quitAt && Date.now() - D.quitAt < 4000 ? ' danger' : ''}" data-d="leave" style="flex:1">${ph !== 'live' ? 'Leave' : D.quitAt && Date.now() - D.quitAt < 4000 ? 'Tap again to give up' : 'Give up'}</button></div>`;
+  // the buttons sit in their own box and only redraw when they change, so a tap never lands on a button that just got replaced
+  if (!card.querySelector(':scope > .d-body')){ card.innerHTML = '<span class="label" style="text-align:center"></span><div class="d-body"></div><div class="d-foot"></div>'; }
+  setHTML(card.firstElementChild, '1v1' + (D.bot ? ' · practice' : ''));
+  setHTML(card.querySelector('.d-body'), body); setHTML(card.querySelector('.d-foot'), foot);
 }
 function duelClick(e){
   const el = $('.egg.duel'); if (e.target === el){ queueLeave(); return duelHide(); }
@@ -9119,7 +9124,9 @@ function duelClick(e){
   if (k === 'restore') return duelRestoreProf().then(() => { el.dataset.dph = ''; duelDraw(); });
   if (k === 'go') return duelGo();
   if (k === 'min') return duelHide();
-  if (k === 'leave'){ if (DUEL.ph === 'live' && !confirm('Give up this 1v1? It counts as a loss' + (DUEL.rules.bet ? ' and you lose the ' + DUEL.rules.bet + ' RP bet.' : '.'))) return;
+  if (k === 'leave'){
+    if (DUEL.ph === 'live' && !(DUEL.quitAt && Date.now() - DUEL.quitAt < 4000)){ // tap twice: Path can block confirm() popups
+      DUEL.quitAt = Date.now(); toast('Tap Give up again to quit. It counts as a loss' + (DUEL.rules.bet ? ' and the ' + DUEL.rules.bet + ' RP bet' : '')); duelDraw(); setTimeout(duelDraw, 4100); return; }
     if (DUEL.ph === 'live'){ const rec = store.duelRec = store.duelRec || { w:0, l:0, d:0 }; rec.l++; if (DUEL.rules.bet) rec.rp = (rec.rp || 0) - DUEL.rules.bet; save(); }
     duelEnd(); duelRestoreProf(); return; }
   if (k === 'end'){ duelEnd(); duelRestoreProf(); duelSheet({ queue:false }); return; }
