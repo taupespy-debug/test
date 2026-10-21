@@ -1,0 +1,134 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Emberline VR Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;800&family=Manrope:wght@400;600;700;800&display=swap">
+<style>
+/* a fake headset view with the REAL Emberline ?vr panel inside it (an iframe), so you can try it without a headset */
+:root{color-scheme:dark;--void:#07060c;--panel:#15131f;--card:#1d1a2a;--edge:#322d47;--ink:#f3f0fa;--dim:#a39cb8;--ember:#b04bff;--ember2:#ff5ec8;--go:#3ddc84;
+  --f-disp:'Unbounded',system-ui,sans-serif;--f-body:'Manrope',system-ui,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--void);color:var(--ink);font-family:var(--f-body)}
+.wrap{padding:20px max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px));display:grid;gap:16px;max-width:1300px;margin:0 auto}
+header{display:flex;flex-wrap:wrap;align-items:end;justify-content:space-between;gap:12px}
+h1{font:800 clamp(22px,4vw,32px)/1.05 var(--f-disp);margin:0}h1 i{font-style:normal;background:linear-gradient(90deg,var(--ember),var(--ember2));-webkit-background-clip:text;background-clip:text;color:transparent}
+header p{margin:4px 0 0;color:var(--dim);max-width:62ch;font-size:15px}
+.ctl{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.ctl button,.ctl a{font:700 13px var(--f-body);color:var(--ink);background:var(--card);border:1px solid var(--edge);border-radius:99px;padding:8px 14px;cursor:pointer;text-decoration:none}
+.ctl button[aria-pressed="true"]{background:var(--ember);border-color:var(--ember)}
+.ctl .sep{width:1px;height:22px;background:var(--edge);margin:0 4px}
+.hmd{position:relative;border-radius:28px;overflow:hidden;aspect-ratio:16/9;background:#000;isolation:isolate;box-shadow:0 0 0 1px var(--edge),0 30px 80px rgba(0,0,0,.6)}
+.hmd canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.lens{position:absolute;inset:0;pointer-events:none;z-index:5;background:radial-gradient(ellipse 75% 85% at 50% 50%,transparent 62%,rgba(0,0,0,.85) 100%)}
+.hud{position:absolute;z-index:6;top:14px;left:18px;right:18px;display:flex;justify-content:space-between;font:700 11px var(--f-body);letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.7);pointer-events:none}
+.stage{position:absolute;inset:0;z-index:3;perspective:1400px;display:grid;place-items:center}
+.float{transform-style:preserve-3d;transform:var(--tilt)}
+.win{width:1000px;height:640px;border-radius:22px;overflow:hidden;border:1px solid #2c2a3c;background:#0b0b12;transform-origin:center;
+  box-shadow:0 0 0 1px rgba(176,75,255,.25),0 0 60px rgba(176,75,255,.18),0 30px 60px rgba(0,0,0,.5)}
+.win iframe{width:100%;height:100%;border:0;display:block;background:#0b0b12}
+.laser{position:absolute;inset:0;z-index:7;pointer-events:none;width:100%;height:100%}
+.tips{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px}
+.tips div{background:var(--panel);border:1px solid var(--edge);border-radius:18px;padding:14px 16px;display:grid;gap:4px}
+.tips b{font:800 14px var(--f-disp)}.tips p{margin:0;color:var(--dim);font-size:14px;line-height:1.45}
+code{font-size:13px;color:var(--ink);background:var(--card);padding:1px 6px;border-radius:6px;word-break:break-all}
+@media (max-width:700px){.hmd{aspect-ratio:3/4}}
+</style></head><body>
+<div class="wrap">
+  <header>
+    <div><h1>Emberline <i>VR</i> simulator</h1><p>The real VR panel, floating in a fake headset view. Everything in the window works like it would in a headset: link your phone with the code, or connect a Peak straight to this computer.</p></div>
+    <div class="ctl">
+      <button data-src="test" aria-pressed="true">Test build</button><button data-src="live" aria-pressed="false">Live</button><span class="sep"></span>
+      <button data-scene="game" aria-pressed="true">Gaming</button><button data-scene="lounge" aria-pressed="false">Lounge</button><button data-scene="music" aria-pressed="false">Music</button><span class="sep"></span>
+      <button id="tilt" aria-pressed="true">Tilt</button><button id="reload">Reload panel</button><a id="newtab" href="emberlinetest.html?vr" target="_blank" rel="noopener">Open panel alone</a>
+    </div>
+  </header>
+  <div class="hmd" id="hmd">
+    <canvas id="world"></canvas>
+    <div class="stage"><div class="float" id="float"><div class="win" id="win"><iframe id="panel" title="Emberline VR panel" allow="bluetooth; screen-wake-lock; fullscreen" src="emberlinetest.html?vr"></iframe></div></div></div>
+    <div class="lens"></div>
+    <div class="hud"><span>Simulated headset · <b style="color:#3ddc84" id="srcName">test build</b></span><span id="clock"></span></div>
+    <svg class="laser" id="laser" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#b04bff" stop-opacity=".1"/><stop offset="1" stop-color="#ff5ec8"/></linearGradient></defs><line id="beam" stroke="url(#lg)" stroke-width="3" stroke-linecap="round"/><circle id="tip" r="6" fill="#fff" opacity=".9"/></svg>
+  </div>
+  <div class="tips">
+    <div><b>Link your phone</b><p>The panel shows a 6-character code. On your phone open Emberline (the test link for Test build), go to Settings → VR panel and type it. The live build only links for Rich.</p></div>
+    <div><b>Or connect here</b><p>On a computer with Chrome or Edge, the panel can connect a Peak straight over Bluetooth. Safari and Path can’t do Bluetooth inside this simulator, so use the phone link there.</p></div>
+    <div><b>In a real headset</b><p>Open <code>emberlineapp.github.io/emberline/?vr</code> in the Quest browser, or in a desktop overlay like XSOverlay, OVR Toolkit or Desktop+.</p></div>
+  </div>
+</div>
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const SRC = { test: 'emberlinetest.html?vr', live: 'https://emberlineapp.github.io/emberline/?vr' };
+  // the scene only needs a mood and a few flags from the old preview
+  const MOODS = [{ c:['#b04bff', '#ff5ec8', '#2bd9ff'] }], S = { mood:0, stl:false, lan:true, st:5, hitOn:false };
+  const cv = $('#world'), cx = cv.getContext('2d'); let scene = 'game', W = 0, H = 0, T = 0;
+  const stars = Array.from({ length: 140 }, () => [Math.random(), Math.random() * .55, Math.random() * 1.4 + .3]);
+  function size(){ const r = cv.getBoundingClientRect(), d = Math.min(2, devicePixelRatio || 1); W = cv.width = r.width * d; H = cv.height = r.height * d; }
+  function moodCol(i){ const m = MOODS[S.mood].c, k = Math.floor(T * .6 + i) % m.length; return m[(k + m.length) % m.length] || m[0]; }
+  function drawPeak(x, y, s){
+    // the virtual Peak on a table: glass on top, base glowing in the mood (or off in stealth)
+    const glow = S.stl ? 'rgba(0,0,0,0)' : moodCol(0), heat = S.st === 7 || S.st === 8;
+    cx.save(); cx.translate(x, y);
+    const g = cx.createRadialGradient(0, -s * .2, 0, 0, -s * .2, s * 2.2); g.addColorStop(0, S.stl ? 'rgba(0,0,0,0)' : glow + (S.lan || heat ? 'aa' : '55')); g.addColorStop(1, 'rgba(0,0,0,0)');
+    cx.fillStyle = g; cx.beginPath(); cx.arc(0, -s * .2, s * 2.2, 0, Math.PI * 2); cx.fill();
+    cx.fillStyle = '#1b1a22'; cx.beginPath(); cx.roundRect(-s * .45, -s * .55, s * .9, s * .75, s * .18); cx.fill();
+    cx.fillStyle = S.stl ? '#222' : glow; cx.globalAlpha = .9; cx.fillRect(-s * .4, -s * .1, s * .8, s * .07); cx.globalAlpha = 1;
+    cx.fillStyle = 'rgba(200,220,255,.18)'; cx.strokeStyle = 'rgba(220,235,255,.45)'; cx.lineWidth = 2;
+    cx.beginPath(); cx.moveTo(-s * .22, -s * .55); cx.lineTo(-s * .16, -s * 1.25); cx.lineTo(s * .16, -s * 1.25); cx.lineTo(s * .22, -s * .55); cx.closePath(); cx.fill(); cx.stroke();
+    if (S.hitOn){ for (let i = 0; i < 6; i++){ const a = (T * 2 + i) % 3; cx.fillStyle = `rgba(255,255,255,${.25 - a * .08})`; cx.beginPath(); cx.arc(Math.sin(T * 3 + i) * s * .2, -s * 1.3 - a * s * .5, s * (.15 + a * .12), 0, Math.PI * 2); cx.fill(); } }
+    cx.restore();
+  }
+  function world(){
+    const d = Math.min(2, devicePixelRatio || 1);
+    if (scene === 'game'){
+      const sky = cx.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#09031a'); sky.addColorStop(.55, '#3a0b4a'); sky.addColorStop(.56, '#120418'); sky.addColorStop(1, '#05020a');
+      cx.fillStyle = sky; cx.fillRect(0, 0, W, H);
+      stars.forEach(([x, y, r]) => { cx.fillStyle = `rgba(255,255,255,${.4 + .4 * Math.sin(T + x * 20)})`; cx.fillRect(x * W, y * H, r * d, r * d); });
+      const sun = cx.createLinearGradient(0, H * .25, 0, H * .55); sun.addColorStop(0, '#ffd23f'); sun.addColorStop(1, '#ff3b8a');
+      cx.fillStyle = sun; cx.beginPath(); cx.arc(W * .28, H * .55, H * .2, Math.PI, 0); cx.fill();
+      cx.fillStyle = '#09031a'; for (let i = 0; i < 6; i++) cx.fillRect(W * .08, H * (.43 + i * .02), W * .4, H * .006 * (i + 1) * .6);
+      cx.strokeStyle = 'rgba(255,94,200,.55)'; cx.lineWidth = 1.5 * d; const hz = H * .56, off = (T * 60 * d) % (H * .06);
+      for (let i = -20; i <= 20; i++){ cx.beginPath(); cx.moveTo(W / 2 + i * W * .02, hz); cx.lineTo(W / 2 + i * W * .14, H); cx.stroke(); }
+      for (let y = hz + off; y < H; y += (y - hz) * .18 + H * .012){ cx.beginPath(); cx.moveTo(0, y); cx.lineTo(W, y); cx.stroke(); }
+    } else if (scene === 'lounge'){
+      const bg = cx.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#141022'); bg.addColorStop(1, '#2a1a2e'); cx.fillStyle = bg; cx.fillRect(0, 0, W, H);
+      cx.fillStyle = 'rgba(255,255,255,.03)'; for (let i = 0; i < 9; i++) cx.fillRect(i * W / 9, 0, 2 * d, H * .7);
+      for (let i = 0; i < 4; i++){ const x = W * (.12 + i * .1), c = moodCol(i); const g = cx.createRadialGradient(x, H * .18, 0, x, H * .18, H * .22); g.addColorStop(0, c + '66'); g.addColorStop(1, 'rgba(0,0,0,0)'); cx.fillStyle = g; cx.fillRect(0, 0, W, H); cx.fillStyle = c; cx.beginPath(); cx.arc(x, H * .18, 4 * d, 0, 7); cx.fill(); }
+      cx.fillStyle = '#3a2a3e'; cx.beginPath(); cx.roundRect(W * .02, H * .62, W * .46, H * .16, 30 * d); cx.fill(); cx.fillStyle = '#2b1f2f'; cx.fillRect(W * .04, H * .72, W * .42, H * .1);
+      cx.fillStyle = '#120c16'; cx.fillRect(0, H * .86, W, H * .14);
+    } else {
+      cx.fillStyle = '#040308'; cx.fillRect(0, 0, W, H);
+      const n = 40, bw = W * .5 / n;
+      for (let i = 0; i < n; i++){ const h = (Math.sin(T * 3 + i * .5) * .5 + .5) * (Math.sin(T * 1.7 + i * .23) * .5 + .5) * H * .45 + H * .03; cx.fillStyle = moodCol(i * .1); cx.globalAlpha = .85; cx.fillRect(W * .02 + i * bw, H * .62 - h, bw * .7, h); cx.globalAlpha = .18; cx.fillRect(W * .02 + i * bw, H * .62, bw * .7, h * .5); }
+      cx.globalAlpha = 1; cx.fillStyle = 'rgba(255,255,255,.7)'; cx.font = `700 ${13 * d}px Manrope, sans-serif`; cx.fillText('NOW PLAYING · Gods Plan · Drake', W * .03, H * .1);
+    }
+    drawPeak(W * .2, H * .86, Math.min(W, H) * .09);
+  }
+
+
+  const hmd = $('#hmd'), beam = $('#beam'), tip = $('#tip'), win = $('#win'), panel = $('#panel');
+  let ptr = { x:.6, y:.5 }, tilted = true;
+  function drawLaser(){ const r = hmd.getBoundingClientRect(), x = ptr.x * r.width, y = ptr.y * r.height; beam.setAttribute('x1', r.width * .92); beam.setAttribute('y1', r.height * 1.02); beam.setAttribute('x2', x); beam.setAttribute('y2', y); tip.setAttribute('cx', x); tip.setAttribute('cy', y); }
+  hmd.addEventListener('pointermove', e => { const r = hmd.getBoundingClientRect(); ptr = { x:(e.clientX - r.left) / r.width, y:(e.clientY - r.top) / r.height }; drawLaser(); });
+  // over the panel the browser hands the mouse to the iframe; follow it there too (same site only) by mapping its point back
+  function hookFrame(){ try { const d = panel.contentDocument; if (!d) return; d.addEventListener('pointermove', e => { const wr = win.getBoundingClientRect(), hr = hmd.getBoundingClientRect(); ptr = { x:(wr.left + e.clientX / 1000 * wr.width - hr.left) / hr.width, y:(wr.top + e.clientY / 640 * wr.height - hr.top) / hr.height }; drawLaser(); }); } catch(e){} }
+  panel.addEventListener('load', hookFrame);
+  function fit(){
+    const r = hmd.getBoundingClientRect(), narrow = r.width < 700;
+    const w = narrow ? 460 : 1000, h = narrow ? 760 : 640; win.style.width = w + 'px'; win.style.height = h + 'px';
+    const s = Math.min(r.width * (narrow ? .9 : .7) / w, r.height * .86 / h);
+    win.style.transform = `scale(${s})`; win.style.margin = `${-(h * (1 - s)) / 2}px ${-(w * (1 - s)) / 2}px`;
+    $('#float').style.setProperty('--tilt', tilted ? (narrow ? 'rotateY(-6deg) rotateX(2deg)' : 'translateX(8%) rotateY(-12deg) rotateX(3deg)') : 'none');
+    size(); drawLaser();
+  }
+  addEventListener('resize', fit); if (document.fonts) document.fonts.ready.then(fit);
+  document.querySelectorAll('[data-src]').forEach(b => b.addEventListener('click', () => { const k = b.dataset.src; panel.src = SRC[k]; $('#newtab').href = SRC[k]; $('#srcName').textContent = k === 'live' ? 'live build' : 'test build'; document.querySelectorAll('[data-src]').forEach(x => x.setAttribute('aria-pressed', x === b)); }));
+  document.querySelectorAll('[data-scene]').forEach(b => b.addEventListener('click', () => { scene = b.dataset.scene; document.querySelectorAll('[data-scene]').forEach(x => x.setAttribute('aria-pressed', x === b)); }));
+  $('#tilt').addEventListener('click', e => { tilted = !tilted; e.currentTarget.setAttribute('aria-pressed', tilted); fit(); });
+  $('#reload').addEventListener('click', () => { panel.src = panel.src; });
+  let lastT = performance.now();
+  function loop(now){ const dt = Math.max(0, Math.min(.1, (now - lastT) / 1000)); lastT = now; T += reduce ? dt * .2 : dt; world(); requestAnimationFrame(loop); }
+  const tick = () => { $('#clock').textContent = new Date().toLocaleTimeString([], { hour:'numeric', minute:'2-digit' }); }; tick(); setInterval(tick, 10000);
+  fit(); requestAnimationFrame(loop);
+})();
+</script></body></html>
