@@ -1833,10 +1833,45 @@ body.vr-on .toast{z-index:300;top:16px}
 .duel-big{font:900 56px/1.1 var(--f-round,system-ui);text-align:center;font-variant-numeric:tabular-nums}
 .duel-big.win{color:#3ddc84}.duel-big.lose{color:#ff3b4a}
 .duel-entry{background:linear-gradient(110deg,#e0313a,#ff8a2b)!important}
-#fpills{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top,0px) + 6px);z-index:85;display:flex;gap:6px}
+#fpills{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 100px);z-index:85;display:flex;gap:6px}
 .fpill{border:0;border-radius:99px;padding:6px 12px;font:700 13px var(--f-body,system-ui);background:#2d2d3c;color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.3);white-space:nowrap;cursor:pointer}
 .fpill.duel{background:#d8333c}
 body.vr-on #fpills{display:none}
+/* 1v1 arena look */
+.dv-arena{position:relative;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:4px;padding:14px 6px 10px;border-radius:22px;overflow:hidden;
+  background:radial-gradient(120% 90% at 0% 50%,color-mix(in srgb,var(--c1) 30%,transparent),transparent 60%),radial-gradient(120% 90% at 100% 50%,color-mix(in srgb,var(--c2) 30%,transparent),transparent 60%),#0d0b14}
+.dv-arena::after{content:'';position:absolute;left:50%;top:-20%;bottom:-20%;width:3px;transform:translateX(-50%) skewX(-14deg);background:linear-gradient(transparent,rgba(255,255,255,.5),transparent)}
+.dv-p{position:relative;z-index:1;display:grid;justify-items:center;gap:4px;min-width:0;color:#fff}
+.dv-ring{position:relative;width:96px;height:96px}
+.dv-ring svg{position:absolute;inset:0;transform:rotate(-90deg)}
+.dv-ring circle{fill:none;stroke-width:6}.dv-ring .bg{stroke:rgba(255,255,255,.12)}.dv-ring .fg{stroke:var(--pc);stroke-linecap:round;filter:drop-shadow(0 0 4px var(--pc))}
+.dv-av{position:absolute;inset:11px;border-radius:50%;overflow:hidden;display:grid;place-items:center;background:color-mix(in srgb,var(--pc) 35%,#111);font:900 30px var(--f-round,system-ui)}
+.dv-av img,.dv-av .lb-av{width:100%!important;height:100%!important;object-fit:cover;border-radius:50%}
+.dv-n{font-weight:800;font-size:14px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dv-h{font:900 44px/1 var(--f-round,system-ui);font-variant-numeric:tabular-nums;text-shadow:0 0 18px var(--pc)}
+.dv-sub{font-size:12px;opacity:.75;white-space:nowrap}
+.dv-clock{font:800 15px var(--f-round,system-ui);font-variant-numeric:tabular-nums;padding:3px 10px;border-radius:99px;background:rgba(255,255,255,.1)}
+.dv-p.low .dv-ring .fg{stroke:#ff3b4a;filter:drop-shadow(0 0 6px #ff3b4a)}.dv-p.low .dv-clock{background:#ff3b4a;animation:dvBeat 1s ease-in-out infinite}
+.dv-p.out{opacity:.45;filter:grayscale(.8)}
+.dv-p.hitting .dv-ring{animation:dvGlow .9s ease-in-out infinite alternate}
+.dv-vs{position:relative;z-index:1;font:900 italic 26px var(--f-round,system-ui);color:#fff;padding:6px 8px;border-radius:12px;background:linear-gradient(135deg,var(--c1),var(--c2));box-shadow:0 0 20px rgba(255,255,255,.18);transform:skewX(-8deg)}
+.dv-tag{position:absolute;z-index:2;top:8px;left:50%;transform:translateX(-50%);font:800 11px var(--f-body,system-ui);letter-spacing:.12em;color:#3ddc84;white-space:nowrap}
+.dv-pop{position:absolute;z-index:3;top:34%;font:900 30px var(--f-round,system-ui);color:#fff;text-shadow:0 0 12px var(--pc);pointer-events:none;animation:dvPop .9s ease-out forwards}
+@keyframes dvPop{0%{transform:translateY(10px) scale(.6);opacity:0}25%{opacity:1;transform:translateY(0) scale(1.2)}100%{transform:translateY(-34px) scale(1);opacity:0}}
+@keyframes dvBeat{50%{transform:scale(1.12)}}
+@keyframes dvGlow{to{filter:drop-shadow(0 0 14px var(--pc))}}
+.dv-splash{position:fixed;inset:0;z-index:240;display:grid;place-items:center;pointer-events:none;background:radial-gradient(circle,color-mix(in srgb,var(--pc) 35%,transparent),transparent 65%)}
+.dv-splash b{font:900 italic 74px/1 var(--f-round,system-ui);color:#fff;letter-spacing:.02em;text-shadow:0 0 30px var(--pc),0 4px 0 rgba(0,0,0,.4);animation:dvSplash 1.4s cubic-bezier(.2,1.4,.4,1) forwards}
+.dv-splash small{display:block;text-align:center;font:800 16px var(--f-body,system-ui);letter-spacing:.2em;margin-top:8px;opacity:.9}
+.dv-splash{animation:dvFade 1.6s ease forwards}
+@keyframes dvSplash{0%{transform:scale(2.4) skewX(-10deg);opacity:0}25%{transform:scale(1) skewX(-10deg);opacity:1}80%{transform:scale(1.05) skewX(-10deg);opacity:1}100%{transform:scale(.9) skewX(-10deg);opacity:0}}
+@keyframes dvFade{0%,80%{opacity:1}100%{opacity:0}}
+#dvFrame{position:fixed;inset:0;z-index:84;pointer-events:none;box-shadow:inset 0 0 0 3px color-mix(in srgb,var(--pc) 70%,transparent),inset 0 0 40px color-mix(in srgb,var(--pc) 35%,transparent);border-radius:0}
+#dvFrame.low{box-shadow:inset 0 0 0 3px #ff3b4a,inset 0 0 50px rgba(255,59,74,.45);animation:dvBeat2 1s ease-in-out infinite}
+@keyframes dvBeat2{50%{opacity:.45}}
+body.vr-on #dvFrame{display:none}
+.fpill.duel{display:flex;align-items:center;gap:6px;background:linear-gradient(90deg,var(--c1,#d8333c),#1a1622 45%,#1a1622 55%,var(--c2,#d8333c));padding:6px 12px;font-variant-numeric:tabular-nums}
+.fpill.duel i{font-style:normal;font-weight:900;font-size:15px}.fpill.duel em{font-style:italic;font-weight:900;opacity:.8}.fpill.duel.low{animation:dvBeat 1s ease-in-out infinite}
 /* 1v1 menu */
 .dsc{display:grid;gap:6px;padding:12px;border-radius:16px;background:var(--surface-2,rgba(255,255,255,.06));font-size:14px}
 .dsc div{display:flex;justify-content:space-between;gap:8px}.dsc b.win{color:#3ddc84}.dsc b.lose{color:#ff3b4a}
@@ -8839,7 +8874,7 @@ function duelStart(role, code, rules, bot){
     DUEL.rt = new Relay('ember-duel-' + code)
       .on('d:hi', duelOnHi).on('d:rules', duelOnRules).on('d:go', duelOnGo).on('d:st', duelOnSt).on('d:live', m => { if (DUEL.role === 'guest' && duelSeeOp(m)) duelLive(); })
       .on('d:bye', m => { if (DUEL.op && m.id === DUEL.op.id){ DUEL.op.gone = true; duelDraw(); } })
-      .on('open', () => { duelSend('d:hi', { n: duelName(), role, c: duelColor() }); duelDraw(); })
+      .on('open', () => { duelSend('d:hi', { n: duelName(), role, c: duelColor(), a: duelAv() }); duelDraw(); })
       .on('down', duelDraw);
     DUEL.rt.connect();
   }
@@ -8850,7 +8885,7 @@ function duelEnd(quiet){
   if (DUEL.inviting && !DUEL.op && LOBBY.rt) LOBBY.rt.send('inv:x', { id: lobbyId(), to: DUEL.inviting.to, code: DUEL.code }); // tell the friend the invite is off
   if (DUEL.rt){ const r = DUEL.rt; if (DUEL.ph !== 'done') r.send('d:bye', { id: DUEL.id }); setTimeout(() => r.close(), 400); }
   clearInterval(DUEL.timer); Object.keys(DUEL).forEach(k => delete DUEL[k]); DUEL.on = false;
-  wakeOff(); drawPills(); if (!quiet) duelDraw();
+  wakeOff(); drawPills(); duelFrame(); if (!quiet) duelDraw();
 }
 function duelSend(ev, p){ if (DUEL.rt) DUEL.rt.send(ev, Object.assign({ id: DUEL.id }, p)); }
 function duelSeeOp(m){
@@ -8859,12 +8894,13 @@ function duelSeeOp(m){
   if (!DUEL.op) DUEL.op = { id: m.id, n: String(m.n || 'Player').slice(0, 20), h:0, b:0, out:0, left: DUEL.rules ? DUEL.rules.win : 0 };
   if (m.n) DUEL.op.n = String(m.n).slice(0, 20);
   if (m.c) DUEL.op.c = okColor(m.c);
+  if (m.a && typeof m.a === 'string' && m.a.startsWith(SB_URL + '/storage/')) DUEL.op.a = m.a.slice(0, 400);
   DUEL.seenAt = Date.now(); DUEL.op.gone = false; return true;
 }
 function duelOnHi(m){
   const had = !!DUEL.op; if (!duelSeeOp(m)) return;
-  if (DUEL.role === 'host') duelSend('d:rules', { n: duelName(), c: duelColor(), r: DUEL.rules, ph: DUEL.ph });
-  else if (!had) duelSend('d:hi', { n: duelName(), role: DUEL.role, c: duelColor() });
+  if (DUEL.role === 'host') duelSend('d:rules', { n: duelName(), c: duelColor(), a: duelAv(), r: DUEL.rules, ph: DUEL.ph });
+  else if (!had) duelSend('d:hi', { n: duelName(), role: DUEL.role, c: duelColor(), a: duelAv() });
   if (!had){ buzz(20); toast(`${DUEL.op.n} joined the 1v1`); if ((DUEL.auto || DUEL.inviting) && DUEL.role === 'host' && DUEL.ph === 'lobby') setTimeout(duelGo, 800); }
   duelDraw();
 }
@@ -8880,7 +8916,8 @@ function duelOnGo(m){
 }
 function duelOnSt(m){
   if (!duelSeeOp(m)) return;
-  const o = DUEL.op; o.h = Math.max(0, +m.h || 0); o.b = Math.max(0, +m.b || 0); o.left = +m.left || 0; o.cool = !!m.cool;
+  const o = DUEL.op; if ((+m.h || 0) > (o.h || 0) && DUEL.ph === 'live') duelPop(false);
+  o.h = Math.max(0, +m.h || 0); o.b = Math.max(0, +m.b || 0); o.left = +m.left || 0; o.cool = !!m.cool;
   if (+m.out > 0 && !o.out) o.out = +m.out;
   o.rdy = !!m.rdy; o.t = +m.t || 0;
   if (m.ph === 'done' && m.r && !DUEL.res) o.res = m.r;
@@ -8895,7 +8932,7 @@ function duelCount(){
 const duelReady = () => S.mode !== 'live' || S.state === 8; // not connected: nothing to wait for
 function duelLive(at){
   const D = DUEL; if (D.ph !== 'count') return;
-  D.ph = 'live'; D.start = at || Date.now(); D.me.at = D.start; buzz([40, 60, 40]); toast('Go! Hit ' + D.rules.min + 's or longer to stay in');
+  D.ph = 'live'; D.start = at || Date.now(); D.me.at = D.start; buzz([40, 60, 40]); duelSplash('FIGHT!', 'Hit ' + D.rules.min + 's+ to stay in');
   if (D.bot){ D.op.next = D.start + (5 + Math.random() * 20) * 1000; D.op.outAt = D.start + (D.rules.cap ? D.rules.cap * 1000 * (.35 + Math.random() * .9) : D.rules.win * 1000 * (1.5 + Math.random() * 3)); }
   duelDraw();
 }
@@ -8922,7 +8959,7 @@ function duelTick(){
       const stopAt = Math.min(D.me.out || Infinity, (D.op && D.op.out) || Infinity); if (t > D.start + stopAt) continue; // the match ended when the first clock ran out
       D.me.seen.add(t);
       if (secs >= r.min && !D.bot && S.mode === 'live' && !duelProfOk()){ D.me.bad = (D.me.bad || 0) + 1; toast('That hit didn’t count: use the 1v1 profile (P1)'); continue; }
-      if (secs >= r.min){ D.me.h++; D.me.b = Math.max(D.me.b, secs); if (!D.me.out) D.me.at = Math.max(D.me.at, t); buzz(15); }
+      if (secs >= r.min){ D.me.h++; D.me.b = Math.max(D.me.b, secs); if (!D.me.out) D.me.at = Math.max(D.me.at, t); buzz(15); duelPop(true); }
     }
     if (!D.me.out){
       if (HIT.on) D.me.at = Math.max(D.me.at, now - (r.win - 5) * 1000); // mid-pull: you can't run out while pulling
@@ -8939,7 +8976,41 @@ function duelTick(){
     if (D.inviting && now - D.inviting.at > 45000){ const n = D.inviting.n; duelEnd(true); toast(`No answer from ${n}. They need Emberline open`); duelSheet({ queue:false }); return; }
   }
   if (D.ph === 'lobby' && D.rt && D.rt.open && !D.op && now - D.sentAt > 5000){ D.sentAt = now; duelSend('d:hi', { n: duelName(), role: D.role }); }
-  duelDraw(); drawPills();
+  duelDraw(); drawPills(); duelFrame();
+}
+/* the arena: a clock ring around each player, their hits, VS in the middle. Built fresh every second (no running animations
+   except the low-clock beat and the pulse while you're pulling) */
+const duelAv = () => { const me = LB.me || lbStore().meCache; return me && me.avatar_url ? String(me.avatar_url) : ''; };
+function duelArena(){
+  const D = DUEL, r = D.rules, me = D.me, op = D.op || {}, c1 = duelColor(), c2 = okColor(op.c), C = 2 * Math.PI * 42;
+  const player = (name, av, h, b, left, out, cool, you, pc) => {
+    const f = out ? 0 : Math.max(0, Math.min(1, left / r.win)), low = !out && left < 30, hitting = you && HIT.on && !out;
+    return `<div class="dv-p${low ? ' low' : ''}${out ? ' out' : ''}${hitting ? ' hitting' : ''}" style="--pc:${pc}">
+      <div class="dv-ring"><svg viewBox="0 0 96 96"><circle class="bg" cx="48" cy="48" r="42"/><circle class="fg" cx="48" cy="48" r="42" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - f)).toFixed(1)}"/></svg>
+        <div class="dv-av">${av && av.startsWith(SB_URL + '/storage/') ? lbAvatar(av, name, 74) : esc((name || '?').slice(0, 1).toUpperCase())}</div></div>
+      <span class="dv-n">${esc(name)}</span><span class="dv-h">${h}</span><span class="dv-sub">best ${b ? b + 's' : '—'}</span>
+      <span class="dv-clock">${out ? 'OUT' : hitting ? (Math.round((performance.now() - HIT.start) / 100) / 10).toFixed(1) + 's' : vrMS(left) + (cool ? ' ❄' : '')}</span></div>`;
+  };
+  return `<div class="dv-arena" style="--c1:${c1};--c2:${c2}">${me.out || op.out ? '' : `<span class="dv-tag">● LIVE</span>`}
+    ${player('You', duelAv(), me.h, me.b, duelLeft(), me.out, me.cool > 0 && duelHot(), true, c1)}<span class="dv-vs">VS</span>${player(op.n || '…', op.a, op.h || 0, op.b || 0, op.left || 0, op.out, op.cool, false, c2)}</div>`;
+}
+// big FIGHT / VICTORY splash and the "+1" when a hit counts
+function duelSplash(txt, sub, pc){
+  document.querySelectorAll('.dv-splash').forEach(e => e.remove());
+  const el = document.createElement('div'); el.className = 'dv-splash'; el.style.setProperty('--pc', pc || duelColor());
+  el.innerHTML = `<div><b>${esc(txt)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`; document.body.appendChild(el); setTimeout(() => el.remove(), 1700);
+}
+function duelPop(you){
+  const ar = $('.egg.duel .dv-arena'); if (!ar) return;
+  const el = document.createElement('span'); el.className = 'dv-pop'; el.textContent = '+1'; el.style.setProperty('--pc', you ? duelColor() : okColor(DUEL.op && DUEL.op.c));
+  el.style[you ? 'left' : 'right'] = '18%'; ar.parentElement.style.position = 'relative'; ar.parentElement.appendChild(el); setTimeout(() => el.remove(), 950);
+}
+// a thin glow around the screen in your color while a match is on (red and beating when your clock is low)
+function duelFrame(){
+  let f = $('#dvFrame'); const on = DUEL.on && (DUEL.ph === 'live' || DUEL.ph === 'count');
+  if (!on){ if (f) f.remove(); return; }
+  if (!f){ f = document.createElement('div'); f.id = 'dvFrame'; document.body.appendChild(f); }
+  f.style.setProperty('--pc', duelColor()); f.classList.toggle('low', DUEL.ph === 'live' && !DUEL.me.out && duelLeft() < 30);
 }
 // the match was accepted: start the Peak heating on the 1v1 profile
 async function duelAutoStart(){
@@ -8985,6 +9056,7 @@ function duelDecide(now){
   if (D.rules.bet && res !== 'draw') rec.rp = (rec.rp || 0) + (res === 'win' ? D.rules.bet : -D.rules.bet); // test build: a tally only, never sent
   save();
   buzz(res === 'win' ? [60, 40, 60, 40, 120] : [150]);
+  duelSplash(res === 'win' ? 'VICTORY' : res === 'lose' ? 'DEFEAT' : 'DRAW', D.res.sc ? D.res.sc.a + ' – ' + D.res.sc.b : '', res === 'win' ? '#3ddc84' : res === 'lose' ? '#ff3b4a' : '#ffd23f');
   duelSend('d:st', Object.assign({ ph:'done', r: res }, duelStats())); D.sentAt = now;
   if (!$('.egg.duel')) duelSheet();
 }
@@ -8999,7 +9071,8 @@ function duelSnap(){
 function drawPills(){
   let el = $('#fpills');
   const items = [];
-  if (DUEL.on && !$('.egg.duel')) items.push(`<button class="fpill duel" data-pill="duel">1v1 · ${DUEL.ph === 'live' ? `${DUEL.me.h} vs ${DUEL.op ? DUEL.op.h : 0} · ${DUEL.me.out ? 'out' : vrMS(duelLeft())}` : DUEL.ph === 'done' ? 'Done' : DUEL.ph === 'count' ? 'Starting' : 'Lobby'}</button>`);
+  if (DUEL.on && !$('.egg.duel')){ const D = DUEL, lv = D.ph === 'live', low = lv && !D.me.out && duelLeft() < 30;
+    items.push(`<button class="fpill duel${low ? ' low' : ''}" data-pill="duel" style="--c1:${duelColor()};--c2:${okColor(D.op && D.op.c)}">${lv ? `<i>${D.me.h}</i><em>VS</em><i>${D.op ? D.op.h : 0}</i><span>${D.me.out ? 'out' : vrMS(duelLeft())}</span>` : D.ph === 'done' ? '1v1 · Done' : D.ph === 'count' ? '1v1 · Heating up' : '1v1 · Lobby'}</button>`); }
   if (VRH.code) items.push(`<button class="fpill" data-pill="vr">VR ${VRH.panelAt && Date.now() - VRH.panelAt < 30000 ? 'linked' : 'waiting'}</button>`);
   if (!items.length){ if (el) el.remove(); return; }
   if (!el){ el = document.createElement('div'); el.id = 'fpills'; document.body.appendChild(el);
@@ -9125,8 +9198,8 @@ function duelDraw(){
       <p style="margin:0;text-align:center">The match starts when both ${esc(devWord())}s are Ready. Hits before that don’t count.</p>`;
   } else if (ph === 'live'){
     const capLeft = (capAtOf(D) - Date.now()) / 1000;
-    body = `<div class="duel-vs">${side('You', me.h, me.b, duelLeft(), me.out, me.cool > 0 && duelHot(), true)}${side(op ? op.n : '…', op ? op.h : 0, op ? op.b : 0, op ? op.left : 0, op ? op.out : 0, op && op.cool, false)}</div>
-      <p class="muted" style="margin:0;font-size:13px;text-align:center">Hits ${r.min}s+ reset your clock · ${r.cap ? 'cap in ' + vrMS(capLeft) : 'no time cap'}${r.bet ? ' · ' + r.bet + ' RP on the line' : ''}<br>${DUEL_PTS_TXT}</p>
+    body = duelArena() + `
+      <p class="muted" style="margin:0;font-size:13px;text-align:center">Hits ${r.min}s+ reset your clock<br>${DUEL_PTS_TXT}</p>
       ${S.mode === 'live' && !D.bot && !duelProfOk() ? `<p style="margin:0;color:#ff9d4d;font-size:13px;text-align:center">Switch to P1 (the 1v1 profile) or your hits won’t count. <button class="btn small" data-d="reload">Load it again</button></p>` : ''}
       ${me.out ? '<p style="margin:0;text-align:center"><b>You’re out.</b> Waiting for the result…</p>' : ''}
       ${S.mode !== 'live' && !D.bot ? `<p style="margin:0;color:#ff9d4d;font-size:13px;text-align:center">Your ${esc(devWord())} isn’t connected. Your clock is still running.</p>` : ''}
