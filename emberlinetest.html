@@ -6481,7 +6481,7 @@ function moveTabPill(v){
 function show(v){
   if (view === 'lights' && v !== 'lights') ltLeave();
   const from = ORDER.indexOf(view), to = ORDER.indexOf(v);
-  view = v;
+  view = v; try { duelGate(); } catch(e){}
   ORDER.forEach(k => $('#v-'+k).hidden = k !== v);
   moveTabPill(v === 'lights' ? 'prof' : v); // Lights has no tab; it lives under Profiles
   const sec = $('#v-'+v);
@@ -8579,6 +8579,7 @@ async function vrDo(c, v, remote){
 /* phone side: the bridge for a linked panel */
 const VRH = { rt:null, code:null, last:'', lastAt:0, timer:null, panelAt:0 };
 function vrLink(code, quiet){
+  if (!duelAllowed()) return false;
   code = rtClean(code);
   if (code.length !== 6){ toast('Type the 6-character code from the VR panel'); return false; }
   vrUnlink(true);
@@ -8682,7 +8683,7 @@ function vrFake(){
 function vrBuild(){
   let el = $('#vrp'); if (el) return;
   el = document.createElement('div'); el.id = 'vrp';
-  const bt = !!navigator.bluetooth, here = location.origin + location.pathname;
+  const bt = !!navigator.bluetooth && duelAllowed(), here = location.origin + location.pathname;
   el.innerHTML = `<div class="vr-top"><span class="vr-dot" id="vrDot"></span><h1>Emberline <i>VR</i></h1><span class="vr-src" id="vrSrc"></span><button class="vr-btn sm" data-vr="duel">1v1</button><button class="vr-btn sm" data-vr="exit">Exit</button></div>
     <div class="vr-card vr-wait" id="vrWait">
       <span class="vr-lbl">Link your phone</span>
@@ -8724,7 +8725,7 @@ function vrPress(b){
   const k = b.dataset.vr, src = vrSource();
   if (k === 'exit') return vrClose();
   if (k === 'duel') return duelSheet();
-  if (k === 'connect') return vrDo('connect');
+  if (k === 'connect'){ if (!duelAllowed()) return; return vrDo('connect'); }
   if (!src) return toast('Link your phone or connect first');
   const s = src.s;
   if (k === 'lan') return vrSend('lan', !s.lan, b);
@@ -8784,6 +8785,9 @@ function vrPaint(){
 const DUEL_OPTS = { min:[2, 3, 5], win:[180, 240, 300], cap:[0, 600, 1200, 1800] }; // cap 0: no time cap
 // the 1v1 profile everyone plays on. Public matches: 505°F, 120s, Bold, Boost +1°F / +15s. Friend games pick their own
 const DUEL_PUBLIC = { tempF:505, time:120, vapor:0.5, boostF:1, boostT:15 };
+const DUEL_RP_REAL = false; // bets move real RP only once the server settles them (both phones must agree). Until then: shown, never sent
+const duelAllowed = () => IS_TEST || isRich(); // live: Rich only for now
+function duelGate(){ const ok = duelAllowed(); [['#duelOpen', 'flex'], ['#vrCard', 'grid']].forEach(([q, d]) => { const e = $(q); if (e) e.style.display = ok ? d : 'none'; }); }
 const QUEUE_BUYIN = 10; // every matchmaking 1v1 costs 10 RP to enter, winner takes both. Test build: shown, never sent to the leaderboard
 const DUEL_BETS = [0, 10, 25, 50, 100, 500]; // quick picks for friend games; any amount can be typed
 const myRpNow = () => { try { return myRank().rp || 0; } catch(e){ return 0; } };
@@ -8984,6 +8988,7 @@ async function duelRestoreProf(n = 0){
   delete store.duelBackups[hhKey()]; save(); render(); if (view === 'prof') drawProfiles(); toast('Your Profile 1 is back');
 }
 function duelSheet(opts = {}){
+  if (!duelAllowed()) return;
   let el = $('.egg.duel');
   if (!el){
     el = document.createElement('div'); el.className = 'egg duel';
@@ -9008,7 +9013,7 @@ function duelDraw(){
     card.innerHTML = `<span class="label" style="text-align:center">1v1</span><h2 style="margin:0;text-align:center">Last one hitting wins</h2>
       <div class="dmode"><button class="dmode-b" data-d="mode" data-m="r"><b>Random match</b><small>Matchmaking with anyone</small></button><button class="dmode-b" data-d="mode" data-m="f"><b>Play a friend</b><small>Custom game, you pick the settings</small></button></div>
       <div id="dSecR" style="display:grid;gap:8px" hidden><span class="label">Random match</span>
-        <div class="dpub muted">Everyone plays the same profile: <b style="color:var(--fg)">${esc(profTxt(DUEL_PUBLIC))}</b>Hits ${QUEUE_RULES.min}s+ reset your ${QUEUE_RULES.win / 60} min clock. No time cap: last one still hitting wins.<br><b style="color:#ffd23f">${QUEUE_BUYIN} RP buy-in</b> · winner takes it from the loser (you have ${myRp} RP)${IS_TEST ? '. Test build: your RP never changes' : ''}</div>
+        <div class="dpub muted">Everyone plays the same profile: <b style="color:var(--fg)">${esc(profTxt(DUEL_PUBLIC))}</b>Hits ${QUEUE_RULES.min}s+ reset your ${QUEUE_RULES.win / 60} min clock. No time cap: last one still hitting wins.<br><b style="color:#ffd23f">${QUEUE_BUYIN} RP buy-in</b> · winner takes it from the loser (you have ${myRp} RP)${DUEL_RP_REAL ? '' : '. For now your RP doesn’t change'}</div>
         <div id="dqBox" class="dq-box"></div></div>
       <div id="dSecF" style="display:grid;gap:12px" hidden><span class="label">Play a friend</span>
         <span class="muted" style="font-size:12px">You pick the settings for both of you. Your friend sees them and the bet before accepting.</span>
@@ -9020,14 +9025,15 @@ function duelDraw(){
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">${duelPick('min', 'Hits count from', v => v + 's')}${duelPick('win', 'Clock', v => v / 60 + ' min')}${duelPick('cap', 'Time cap', v => v ? v / 60 + ' min' : 'No limit')}</div>
         <div class="dset"><div class="row"><span>Bet RP</span><span class="muted">You have ${myRp} RP</span></div><div class="dbet">${betBtns}</div>
           <div class="row" style="gap:8px"><input type="number" id="dBetIn" min="0" step="1" inputmode="numeric" placeholder="Any amount" value="${duelBet() || ''}" style="flex:1;min-width:0"><span class="muted">RP</span></div>
-          <span class="muted" style="font-size:12px">Any amount you both agree on. Winner takes it from the loser. ${IS_TEST ? 'Test build: shown only, your RP never changes.' : 'You can’t bet more RP than you have.'}</span></div>
+          <span class="muted" style="font-size:12px">Any amount you both agree on. Winner takes it from the loser. ${DUEL_RP_REAL ? 'You can’t bet more RP than you have.' : 'For now it’s shown only, your RP doesn’t change.'}</span></div>
         <div style="display:grid;gap:8px"><span class="label">Invite a friend</span><div id="dFr" class="dfr-list"></div></div></div>
       <div style="display:grid;gap:8px"><div class="row between"><span class="label">Your light</span><span class="muted" style="font-size:13px" id="dLightName">${duelMoodRef() ? esc(duelMoodRef().name || 'Mood') : 'Solid color'}</span></div>
         <div class="dcol-row">${DUEL_COLORS.map(c => `<button class="dcol${!duelMoodRef() && c === duelColor() ? ' on' : ''}" data-d="col" data-c="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join('')}<button class="btn small" data-d="moods" style="margin-left:auto">Moods</button></div>
         <div class="dmood-grid" id="dMoods" hidden></div>
         <span class="muted" style="font-size:12px">Your ${esc(devWord())} shows it during a 1v1, and its main color marks your side of the score.</span></div>
       <p class="muted" style="margin:0;font-size:12px">Your clock pauses (up to 2 min) if your ${esc(devWord())}’s battery gets hot. Your Profile 1 is saved and swapped for the 1v1 profile, then put back when you’re done.</p>
-      <p class="muted" style="margin:0;font-size:12px">Record: ${rec.w} W · ${rec.l} L${rec.d ? ' · ' + rec.d + ' D' : ''}${rec.rp ? ` · bets ${rec.rp > 0 ? '+' : ''}${rec.rp} RP` : ''}${IS_TEST ? ' (test, not real)' : ''}. Consume responsibly, take breaks.</p>
+      <p class="muted" style="margin:0;font-size:12px">Record: ${rec.w} W · ${rec.l} L${rec.d ? ' · ' + rec.d + ' D' : ''}${rec.rp ? ` · bets ${rec.rp > 0 ? '+' : ''}${rec.rp} RP` : ''}${DUEL_RP_REAL ? '' : ' (not real yet)'}. Consume responsibly, take breaks.</p>
+      <button class="btn small" data-d="bot">Practice vs a bot</button>
       ${duelBack() ? '<button class="btn small" data-d="restore">Put my Profile 1 back</button>' : ''}
       <button class="btn" data-d="close" style="width:100%">Close</button>`;
     if (LOBBY.q){ $('#dSecR').hidden = false; const mb = card.querySelector('[data-m="r"]'); if (mb) mb.classList.add('on'); } // already queued: show it
@@ -9061,7 +9067,7 @@ function duelDraw(){
   } else if (ph === 'done'){
     const res = D.res || { r:'draw', why:'' };
     body = `<div class="duel-big ${res.r}">${res.r === 'win' ? 'You won' : res.r === 'lose' ? 'You lost' : 'Draw'}</div><p style="margin:0;text-align:center">${esc(res.why)}</p>
-      ${r.bet && res.r !== 'draw' ? `<p class="duel-bet ${res.r}">${res.r === 'win' ? '+' : '−'}${r.bet} RP${IS_TEST ? '<small>Test build: your RP didn’t change</small>' : ''}</p>` : r.bet ? '<p style="margin:0;text-align:center" class="muted">Draw: nobody pays</p>' : ''}
+      ${r.bet && res.r !== 'draw' ? `<p class="duel-bet ${res.r}">${res.r === 'win' ? '+' : '−'}${r.bet} RP${DUEL_RP_REAL ? '' : '<small>For now your RP didn’t change</small>'}</p>` : r.bet ? '<p style="margin:0;text-align:center" class="muted">Draw: nobody pays</p>' : ''}
       <div class="duel-vs">${side('You', me.h, me.b, 0, me.out, false, true)}${side(op ? op.n : '…', op ? op.h : 0, op ? op.b : 0, 0, op ? op.out : 0, false, false)}</div>`;
   }
   const foot = ph === 'done' ? `<button class="btn primary" data-d="end" style="width:100%">Done</button>`
@@ -9075,6 +9081,7 @@ function duelClick(e){
   const rules = () => { const r = duelCustom(); el.querySelectorAll('[data-dr]').forEach(s => r[s.dataset.dr] = +s.value); store.duelRules = r; save(); return duelRules(); };
   if (k === 'close'){ queueLeave(); return duelHide(); }
   if (k === 'q') return queueJoin();
+  if (k === 'bot'){ duelStart('host', 'BOT', Object.assign({}, QUEUE_RULES, { bet:0 }), true); return; }
   if (k === 'mode'){ const m = b.dataset.m; queueLeave(); el.querySelectorAll('.dmode-b').forEach(x => x.classList.toggle('on', x === b)); $('#dSecR').hidden = m !== 'r'; $('#dSecF').hidden = m !== 'f'; if (m === 'f') lobbyPing(true); duelMenuPaint(); return; }
   if (k === 'bet'){ store.duelBet = +b.dataset.v; save(); el.querySelectorAll('[data-d="bet"]').forEach(x => x.classList.toggle('on', x === b)); const i = $('#dBetIn'); if (i) i.value = store.duelBet || ''; return; }
   if (k === 'qx') return queueLeave();
@@ -9107,13 +9114,15 @@ const LOBBY = { rt:null, q:null, online:new Map(), inv:null, timer:null, pingAt:
 const QUEUE_RULES = { min:3, win:240, cap:0, prof: DUEL_PUBLIC }; // public matches: no time cap, last one hitting wins
 function lobbyId(){ const me = LB.me || lbStore().meCache; if (me && me.id) return String(me.id); if (!store.guestId){ store.guestId = 'g' + rtCode(10); save(); } return store.guestId; }
 const lobbyMe = m => m && String(m.to) === lobbyId();
+const qId = () => lobbyId() + '~' + (store.qTag || (store.qTag = rtCode(4), save(), store.qTag)); // queue id: account + this device
+const qMe = m => m && String(m.to) === qId();
 function lobbyOn(){
   if (LOBBY.rt){ LOBBY.rt.wake(); return; }
   LOBBY.rt = new Relay('ember-duel-lobby')
     .on('q:here', lobbyQHere)
     .on('q:left', m => { if (LOBBY.q) LOBBY.q.seen.delete(String(m.id)); })
     .on('q:match', lobbyQMatch).on('q:ok', lobbyQOk)
-    .on('q:no', m => { const q = LOBBY.q; if (lobbyMe(m) && q && q.pend && q.pend.to === String(m.id)){ q.skip.set(q.pend.to, Date.now() + 15000); q.pend = null; } })
+    .on('q:no', m => { const q = LOBBY.q; if (qMe(m) && q && q.pend && q.pend.to === String(m.id)){ q.skip.set(q.pend.to, Date.now() + 15000); q.pend = null; } })
     .on('inv', lobbyInv)
     .on('inv:no', m => { if (lobbyMe(m) && DUEL.on && DUEL.inviting && m.code === DUEL.code){ const n = DUEL.inviting.n; duelEnd(true); toast(m.busy ? `${n} is busy right now` : `${n} said not now`); duelSheet({ queue:false }); } })
     .on('inv:x', m => { if (lobbyMe(m) && LOBBY.inv && LOBBY.inv.code === m.code) duelInvClose(); })
@@ -9127,27 +9136,27 @@ function lobbyTimer(){ if (!LOBBY.timer) LOBBY.timer = setInterval(lobbyTick, 10
 function lobbyPing(force){ if (!LOBBY.rt || !LOBBY.rt.open || !$('.egg.duel')) return; if (!force && Date.now() - LOBBY.pingAt < 20000) return; LOBBY.pingAt = Date.now(); LOBBY.rt.send('on:ping', { id: lobbyId() }); }
 function queueJoin(){
   if (DUEL.on || LOBBY.q) return;
-  if (!IS_TEST && myRpNow() < QUEUE_BUYIN){ toast(`Matchmaking costs ${QUEUE_BUYIN} RP to enter. You have ${myRpNow()}`); return; }
+  if (DUEL_RP_REAL && myRpNow() < QUEUE_BUYIN){ toast(`Matchmaking costs ${QUEUE_BUYIN} RP to enter. You have ${myRpNow()}`); return; }
   lobbyOn(); LOBBY.q = { at: Date.now(), seen: new Map(), skip: new Map(), pend: null, sentAt: 0, bet: QUEUE_BUYIN };
   lobbySendQ(); lobbyTimer(); wakeOn(); duelMenuPaint();
 }
-function queueLeave(){ if (!LOBBY.q) return; if (LOBBY.rt) LOBBY.rt.send('q:left', { id: lobbyId() }); LOBBY.q = null; wakeOff(); duelMenuPaint(); }
-function lobbySendQ(){ if (!LOBBY.q || !LOBBY.rt) return; LOBBY.q.sentAt = Date.now(); LOBBY.rt.send('q:here', { id: lobbyId(), n: duelName(), bet: LOBBY.q.bet }); }
+function queueLeave(){ if (!LOBBY.q) return; if (LOBBY.rt) LOBBY.rt.send('q:left', { id: qId() }); LOBBY.q = null; wakeOff(); duelMenuPaint(); }
+function lobbySendQ(){ if (!LOBBY.q || !LOBBY.rt) return; LOBBY.q.sentAt = Date.now(); LOBBY.rt.send('q:here', { id: qId(), n: duelName(), bet: LOBBY.q.bet }); }
 function lobbyQHere(m){
-  if (!m.id || String(m.id) === lobbyId()) return;
-  LOBBY.online.set(String(m.id), { at: Date.now(), busy:false });
+  if (!m.id || String(m.id) === qId()) return;
+  LOBBY.online.set(String(m.id).split('~')[0], { at: Date.now(), busy:false });
   if (LOBBY.q && (+m.bet || 0) === LOBBY.q.bet) LOBBY.q.seen.set(String(m.id), { n: String(m.n || 'Player').slice(0, 20), at: Date.now() }); // only people betting the same
 }
 function lobbyQMatch(m){
-  if (!lobbyMe(m)) return;
-  if (!LOBBY.q || DUEL.on || (+m.bet || 0) !== LOBBY.q.bet){ LOBBY.rt.send('q:no', { id: lobbyId(), to: m.id }); return; }
+  if (!qMe(m)) return;
+  if (!LOBBY.q || DUEL.on || (+m.bet || 0) !== LOBBY.q.bet){ LOBBY.rt.send('q:no', { id: qId(), to: m.id }); return; }
   const code = rtClean(m.code); if (code.length !== 6) return;
-  LOBBY.rt.send('q:ok', { id: lobbyId(), to: m.id, code });
+  LOBBY.rt.send('q:ok', { id: qId(), to: m.id, code });
   const bet = LOBBY.q.bet; queueLeave(); duelStart('guest', code, Object.assign({}, QUEUE_RULES, { bet })); DUEL.auto = true;
   buzz([30, 40, 30]); toast(`Match found: ${String(m.n || 'Player').slice(0, 20)}`); duelSheet();
 }
 function lobbyQOk(m){
-  const q = LOBBY.q; if (!lobbyMe(m) || !q || !q.pend || q.pend.code !== m.code || q.pend.to !== String(m.id)) return;
+  const q = LOBBY.q; if (!qMe(m) || !q || !q.pend || q.pend.code !== m.code || q.pend.to !== String(m.id)) return;
   const n = (q.seen.get(q.pend.to) || {}).n || 'Player';
   const bet = q.bet; queueLeave(); duelStart('host', m.code, Object.assign({}, QUEUE_RULES, { bet })); DUEL.auto = true;
   buzz([30, 40, 30]); toast(`Match found: ${n}`); duelSheet();
@@ -9159,7 +9168,7 @@ function lobbyTick(){
     q.seen.forEach((v, k) => { if (now - v.at > 8000) q.seen.delete(k); });
     if (q.pend && now - q.pend.at > 6000){ q.skip.set(q.pend.to, now + 15000); q.pend = null; } // no answer: try someone else
     if (!q.pend && LOBBY.rt && LOBBY.rt.open){
-      const me = lobbyId(), ids = [...q.seen.keys()].filter(k => !(q.skip.get(k) > now)).sort();
+      const me = qId(), ids = [...q.seen.keys()].filter(k => !(q.skip.get(k) > now)).sort();
       if (ids.length && me < ids[0]){ q.pend = { to: ids[0], code: rtCode(), at: now }; LOBBY.rt.send('q:match', { id: me, to: ids[0], n: duelName(), code: q.pend.code, bet: q.bet }); }
     }
   }
@@ -9189,7 +9198,7 @@ function duelMenuPaint(){
 }
 function duelInvite(id, name){
   const me = LB.me || lbStore().meCache; if (!me || !me.id) return toast('Make a ranked profile in Social to challenge friends');
-  if (!IS_TEST && duelBet() > myRpNow()) return toast(`You only have ${myRpNow()} RP to bet`);
+  if (DUEL_RP_REAL && duelBet() > myRpNow()) return toast(`You only have ${myRpNow()} RP to bet`);
   queueLeave(); lobbyOn(); lobbyTimer();
   const code = rtCode(); duelStart('host', code, duelRules());
   DUEL.inviting = { to: String(id), n: String(name || 'your friend').slice(0, 20), at: Date.now() };
@@ -9197,13 +9206,13 @@ function duelInvite(id, name){
   duelDraw();
 }
 function lobbyInv(m){
-  if (!lobbyMe(m) || !m.id) return;
+  if (!lobbyMe(m) || !m.id || !duelAllowed()) return;
   const code = rtClean(m.code); if (code.length !== 6) return;
   if (DUEL.on || LOBBY.inv){ LOBBY.rt.send('inv:no', { id: lobbyId(), to: m.id, code, busy:true }); return; }
   LOBBY.inv = { from: String(m.id), n: String(m.n || 'Someone').slice(0, 20), code, r: m.r || {}, at: Date.now() }; lobbyTimer();
   const r = LOBBY.inv.r, el = document.createElement('div'); el.className = 'egg dinv';
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="1v1 invite" style="gap:12px"><span class="label">1v1</span><h2 style="margin:0">${esc(LOBBY.inv.n)} wants to 1v1</h2>
-    <p>Last one hitting wins · hits ${duelSan(r).min}s+ · ${duelSan(r).win / 60} min clock · ${capTxt(duelSan(r).cap)}</p><p><b>${esc(profTxt(duelSan(r).prof))}</b></p>${duelSan(r).bet ? `<p style="color:#ffd23f;font-weight:700">Bet: ${duelSan(r).bet} RP. Winner takes it${IS_TEST ? ' (test build: not real)' : ''}</p>` : ''}
+    <p>Last one hitting wins · hits ${duelSan(r).min}s+ · ${duelSan(r).win / 60} min clock · ${capTxt(duelSan(r).cap)}</p><p><b>${esc(profTxt(duelSan(r).prof))}</b></p>${duelSan(r).bet ? `<p style="color:#ffd23f;font-weight:700">Bet: ${duelSan(r).bet} RP. Winner takes it${DUEL_RP_REAL ? '' : ' (not real RP yet)'}</p>` : ''}
     <p style="font-size:13px">Your Profile 1 is saved and swapped for this, then comes back when you’re done.</p>
     <div class="row" style="gap:8px;width:100%"><button class="btn" data-i="no" style="flex:1">Not now</button><button class="btn primary" data-i="ok" style="flex:1">Accept</button></div></div>`;
   document.body.appendChild(el); applyHaptics(); buzz([40, 60, 40]); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
@@ -9215,11 +9224,12 @@ function lobbyInv(m){
   });
 }
 function duelInvClose(){ LOBBY.inv = null; const el = $('.egg.dinv'); if (!el) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); }
-setTimeout(() => { if (!document.hidden) lobbyOn(); }, 4000); // in the lobby while the app is open, so friends' invites reach you
+(function lobbyBoot(n){ if (duelAllowed()){ duelGate(); if (!document.hidden) lobbyOn(); return; } if (n < 20) setTimeout(() => lobbyBoot(n + 1), 15000); })(0); // in the lobby while the app is open, so friends' invites reach you (waits for the profile to load)
 // links: ?vr opens the panel
 { const q = new URLSearchParams(location.search);
   if (q.has('vr')) setTimeout(() => vrOpen(), 300);
-  if (store.vrLink && store.vrLink.code && Date.now() - (store.vrLink.at || 0) < 12 * 36e5 && !q.has('vr')) setTimeout(() => vrLink(store.vrLink.code, true), 1200); // phone reloaded: keep the panel linked
+  duelGate(); setTimeout(duelGate, 5000);
+  if (store.vrLink && store.vrLink.code && Date.now() - (store.vrLink.at || 0) < 12 * 36e5 && !q.has('vr')) setTimeout(() => vrLink(store.vrLink.code, true), 5000); // phone reloaded: keep the panel linked
 }
 </script>
 
