@@ -1818,7 +1818,7 @@ body.vr-on .toast{z-index:300;top:16px}
 .duel-code{font:800 40px/1 ui-monospace,Menlo,monospace;letter-spacing:.15em;text-align:center;padding:12px;border-radius:16px;background:var(--fill-2);-webkit-user-select:all;user-select:all}
 .duel-vs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .duel-side{display:grid;gap:4px;justify-items:center;text-align:center;padding:12px 8px;border-radius:18px;background:var(--fill-2);min-width:0}
-.duel-side{border-top:4px solid var(--pc,#888)}.duel-side.you{outline:2px solid var(--pc,#9900cc)}
+.duel-side{border-top:4px solid var(--pc,#888);border-image:none}.duel-side.you{outline:2px solid var(--pc,#9900cc)}
 .dcol-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .duel-bet{margin:0;text-align:center;font:900 30px var(--f-round,system-ui);display:grid}.duel-bet.win{color:#3ddc84}.duel-bet.lose{color:#ff3b4a}.duel-bet small{font:500 12px var(--f-body,system-ui);color:var(--muted)}
 .dmood-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px;max-height:260px;overflow:auto}
@@ -1839,13 +1839,14 @@ body.vr-on .toast{z-index:300;top:16px}
 body.vr-on #fpills{display:none}
 /* 1v1 arena look */
 .dv-arena{position:relative;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:4px;padding:14px 6px 10px;border-radius:22px;overflow:hidden;
-  background:radial-gradient(120% 90% at 0% 50%,color-mix(in srgb,var(--c1) 30%,transparent),transparent 60%),radial-gradient(120% 90% at 100% 50%,color-mix(in srgb,var(--c2) 30%,transparent),transparent 60%),#0d0b14}
+  background:radial-gradient(90% 70% at 0% 15%,color-mix(in srgb,var(--c1b) 28%,transparent),transparent 60%),radial-gradient(120% 90% at 0% 70%,color-mix(in srgb,var(--c1) 32%,transparent),transparent 60%),
+    radial-gradient(90% 70% at 100% 15%,color-mix(in srgb,var(--c2b) 28%,transparent),transparent 60%),radial-gradient(120% 90% at 100% 70%,color-mix(in srgb,var(--c2) 32%,transparent),transparent 60%),#0d0b14}
 .dv-arena::after{content:'';position:absolute;left:50%;top:-20%;bottom:-20%;width:3px;transform:translateX(-50%) skewX(-14deg);background:linear-gradient(transparent,rgba(255,255,255,.5),transparent)}
 .dv-p{position:relative;z-index:1;display:grid;justify-items:center;gap:4px;min-width:0;color:#fff}
 .dv-ring{position:relative;width:96px;height:96px}
 .dv-ring svg{position:absolute;inset:0;transform:rotate(-90deg)}
 .dv-ring circle{fill:none;stroke-width:6}.dv-ring .bg{stroke:rgba(255,255,255,.12)}.dv-ring .fg{stroke:var(--pc);stroke-linecap:round;filter:drop-shadow(0 0 4px var(--pc))}
-.dv-av{position:absolute;inset:11px;border-radius:50%;overflow:hidden;display:grid;place-items:center;background:color-mix(in srgb,var(--pc) 35%,#111);font:900 30px var(--f-round,system-ui)}
+.dv-av{position:absolute;inset:11px;border-radius:50%;overflow:hidden;display:grid;place-items:center;background:color-mix(in srgb,var(--pc) 35%,#111);font:900 30px var(--f-round,system-ui);text-shadow:0 1px 6px rgba(0,0,0,.6)}
 .dv-av img,.dv-av .lb-av{width:100%!important;height:100%!important;object-fit:cover;border-radius:50%}
 .dv-n{font-weight:800;font-size:14px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dv-h{font:900 44px/1 var(--f-round,system-ui);font-variant-numeric:tabular-nums;text-shadow:0 0 18px var(--pc)}
@@ -1866,8 +1867,8 @@ body.vr-on #fpills{display:none}
 .dv-splash{animation:dvFade 1.6s ease forwards}
 @keyframes dvSplash{0%{transform:scale(2.4) skewX(-10deg);opacity:0}25%{transform:scale(1) skewX(-10deg);opacity:1}80%{transform:scale(1.05) skewX(-10deg);opacity:1}100%{transform:scale(.9) skewX(-10deg);opacity:0}}
 @keyframes dvFade{0%,80%{opacity:1}100%{opacity:0}}
-#dvFrame{position:fixed;inset:0;z-index:84;pointer-events:none;box-shadow:inset 0 0 0 3px color-mix(in srgb,var(--pc) 70%,transparent),inset 0 0 40px color-mix(in srgb,var(--pc) 35%,transparent);border-radius:0}
-#dvFrame.low{box-shadow:inset 0 0 0 3px #ff3b4a,inset 0 0 50px rgba(255,59,74,.45);animation:dvBeat2 1s ease-in-out infinite}
+#dvFrame{position:fixed;inset:0;z-index:84;pointer-events:none;border:3px solid transparent;border-image:var(--pg,var(--pc)) 1;box-shadow:inset 0 0 40px color-mix(in srgb,var(--pc) 35%,transparent);opacity:.85}
+#dvFrame.low{border-image:none;border-color:#ff3b4a;box-shadow:inset 0 0 50px rgba(255,59,74,.45);animation:dvBeat2 1s ease-in-out infinite}
 @keyframes dvBeat2{50%{opacity:.45}}
 body.vr-on #dvFrame{display:none}
 .fpill.duel{display:flex;align-items:center;gap:6px;background:linear-gradient(90deg,var(--c1,#d8333c),#1a1622 45%,#1a1622 55%,var(--c2,#d8333c));padding:6px 12px;font-variant-numeric:tabular-nums}
@@ -8852,6 +8853,14 @@ const DUEL_VAPORS = [0, 0.5, 1]; // Smooth, Bold, Intense (the Proxy has no Extr
 const DUEL_COLORS = ['#ff3b4a', '#ff8a2b', '#ffd23f', '#3ddc84', '#2bd9ff', '#2d7cf0', '#9900cc', '#ff5ec8', '#ffffff'];
 const duelMoodRef = () => store.duelMood && store.duelMood.kind ? store.duelMood : null; // a mood picked for your 1v1 light (or null: a solid color)
 const duelColor = () => { const m = duelMoodRef(); if (m){ try { return moodSolid(m); } catch(e){} } return DUEL_COLORS.includes(store.duelColor) ? store.duelColor : '#9900cc'; };
+// your 1v1 colors: the picked mood's colors (bright ones, up to 4), or just the solid color
+function duelPal(){
+  const m = duelMoodRef(); let cs = [];
+  if (m){ try { cs = moodColors(m).filter((c, k, a) => a.indexOf(c) === k && Math.max(...hexBytes(c)) > 40).slice(0, 4); } catch(e){} }
+  return cs.length ? cs : [duelColor()];
+}
+const okPal = a => Array.isArray(a) && a.length ? a.slice(0, 4).map(okColor) : null;
+const palGrad = (cs, dir) => cs.length > 1 ? `linear-gradient(${dir || '135deg'},${cs.join(',')})` : cs[0];
 let duelMoodList = null;
 function duelMoods(){ if (!duelMoodList){ try { duelMoodList = shufAll(); } catch(e){ duelMoodList = []; } } return duelMoodList; } // everything in your mood picker
 const okColor = c => /^#[0-9a-f]{6}$/i.test(String(c || '')) ? c : '#888888';
@@ -8874,7 +8883,7 @@ function duelStart(role, code, rules, bot){
     DUEL.rt = new Relay('ember-duel-' + code)
       .on('d:hi', duelOnHi).on('d:rules', duelOnRules).on('d:go', duelOnGo).on('d:st', duelOnSt).on('d:live', m => { if (DUEL.role === 'guest' && duelSeeOp(m)) duelLive(); })
       .on('d:bye', m => { if (DUEL.op && m.id === DUEL.op.id){ DUEL.op.gone = true; duelDraw(); } })
-      .on('open', () => { duelSend('d:hi', { n: duelName(), role, c: duelColor(), a: duelAv() }); duelDraw(); })
+      .on('open', () => { duelSend('d:hi', { n: duelName(), role, c: duelColor(), p: duelPal(), a: duelAv() }); duelDraw(); })
       .on('down', duelDraw);
     DUEL.rt.connect();
   }
@@ -8894,13 +8903,14 @@ function duelSeeOp(m){
   if (!DUEL.op) DUEL.op = { id: m.id, n: String(m.n || 'Player').slice(0, 20), h:0, b:0, out:0, left: DUEL.rules ? DUEL.rules.win : 0 };
   if (m.n) DUEL.op.n = String(m.n).slice(0, 20);
   if (m.c) DUEL.op.c = okColor(m.c);
+  if (okPal(m.p)) DUEL.op.p = okPal(m.p);
   if (m.a && typeof m.a === 'string' && m.a.startsWith(SB_URL + '/storage/')) DUEL.op.a = m.a.slice(0, 400);
   DUEL.seenAt = Date.now(); DUEL.op.gone = false; return true;
 }
 function duelOnHi(m){
   const had = !!DUEL.op; if (!duelSeeOp(m)) return;
-  if (DUEL.role === 'host') duelSend('d:rules', { n: duelName(), c: duelColor(), a: duelAv(), r: DUEL.rules, ph: DUEL.ph });
-  else if (!had) duelSend('d:hi', { n: duelName(), role: DUEL.role, c: duelColor(), a: duelAv() });
+  if (DUEL.role === 'host') duelSend('d:rules', { n: duelName(), c: duelColor(), p: duelPal(), a: duelAv(), r: DUEL.rules, ph: DUEL.ph });
+  else if (!had) duelSend('d:hi', { n: duelName(), role: DUEL.role, c: duelColor(), p: duelPal(), a: duelAv() });
   if (!had){ buzz(20); toast(`${DUEL.op.n} joined the 1v1`); if ((DUEL.auto || DUEL.inviting) && DUEL.role === 'host' && DUEL.ph === 'lobby') setTimeout(duelGo, 800); }
   duelDraw();
 }
@@ -8938,7 +8948,7 @@ function duelLive(at){
 }
 function duelGo(){
   if (DUEL.role !== 'host' || DUEL.ph !== 'lobby' || !DUEL.op) return;
-  if (!DUEL.bot) duelSend('d:go', { n: duelName(), c: duelColor(), r: DUEL.rules });
+  if (!DUEL.bot) duelSend('d:go', { n: duelName(), c: duelColor(), p: duelPal(), r: DUEL.rules });
   duelCount();
 }
 function duelStats(){ const m = DUEL.me; return { h: m.h, b: m.b, out: m.out, cool: m.cool > 0 && duelHot(), left: DUEL.ph === 'live' ? Math.round(duelLeft()) : 0, rdy: duelReady(), t: Math.round(c2f(S.tempC || 0)) }; }
@@ -8983,16 +8993,18 @@ function duelTick(){
 const duelAv = () => { const me = LB.me || lbStore().meCache; return me && me.avatar_url ? String(me.avatar_url) : ''; };
 function duelArena(){
   const D = DUEL, r = D.rules, me = D.me, op = D.op || {}, c1 = duelColor(), c2 = okColor(op.c), C = 2 * Math.PI * 42;
-  const player = (name, av, h, b, left, out, cool, you, pc) => {
+  const p1 = duelPal(), p2 = op.p || [c2];
+  const grad = (id, cs) => `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">${(cs.length > 1 ? cs : [cs[0], cs[0]]).map((c, i, a) => `<stop offset="${(i / (a.length - 1) * 100).toFixed(0)}%" stop-color="${c}"/>`).join('')}</linearGradient></defs>`;
+  const player = (name, av, h, b, left, out, cool, you, pc) => { const pal = you ? p1 : p2, gid = you ? 'dvgA' : 'dvgB';
     const f = out ? 0 : Math.max(0, Math.min(1, left / r.win)), low = !out && left < 30, hitting = you && HIT.on && !out;
     return `<div class="dv-p${low ? ' low' : ''}${out ? ' out' : ''}${hitting ? ' hitting' : ''}" style="--pc:${pc}">
-      <div class="dv-ring"><svg viewBox="0 0 96 96"><circle class="bg" cx="48" cy="48" r="42"/><circle class="fg" cx="48" cy="48" r="42" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - f)).toFixed(1)}"/></svg>
-        <div class="dv-av">${av && av.startsWith(SB_URL + '/storage/') ? lbAvatar(av, name, 74) : esc((name || '?').slice(0, 1).toUpperCase())}</div></div>
+      <div class="dv-ring"><svg viewBox="0 0 96 96">${grad(gid, pal)}<circle class="bg" cx="48" cy="48" r="42"/><circle class="fg" cx="48" cy="48" r="42"${low ? '' : ` style="stroke:url(#${gid})"`} stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - f)).toFixed(1)}"/></svg>
+        <div class="dv-av" style="background:${palGrad(pal)}">${av && av.startsWith(SB_URL + '/storage/') ? lbAvatar(av, name, 74) : esc((name || '?').slice(0, 1).toUpperCase())}</div></div>
       <span class="dv-n">${esc(name)}</span><span class="dv-h">${h}</span><span class="dv-sub">best ${b ? b + 's' : '—'}</span>
       <span class="dv-clock">${out ? 'OUT' : hitting ? (Math.round((performance.now() - HIT.start) / 100) / 10).toFixed(1) + 's' : vrMS(left) + (cool ? ' ❄' : '')}</span></div>`;
   };
-  return `<div class="dv-arena" style="--c1:${c1};--c2:${c2}">${me.out || op.out ? '' : `<span class="dv-tag">● LIVE</span>`}
-    ${player('You', duelAv(), me.h, me.b, duelLeft(), me.out, me.cool > 0 && duelHot(), true, c1)}<span class="dv-vs">VS</span>${player(op.n || '…', op.a, op.h || 0, op.b || 0, op.left || 0, op.out, op.cool, false, c2)}</div>`;
+  return `<div class="dv-arena" style="--c1:${c1};--c2:${c2};--c1b:${p1[1] || c1};--c2b:${p2[1] || c2}">${me.out || op.out ? '' : `<span class="dv-tag">● LIVE</span>`}
+    ${player('You', duelAv(), me.h, me.b, duelLeft(), me.out, me.cool > 0 && duelHot(), true, c1)}<span class="dv-vs" style="background:linear-gradient(135deg,${p1.slice(0, 2).join(',')},${p2.slice(0, 2).join(',')})">VS</span>${player(op.n || '…', op.a, op.h || 0, op.b || 0, op.left || 0, op.out, op.cool, false, c2)}</div>`;
 }
 // big FIGHT / VICTORY splash and the "+1" when a hit counts
 function duelSplash(txt, sub, pc){
@@ -9010,7 +9022,7 @@ function duelFrame(){
   let f = $('#dvFrame'); const on = DUEL.on && (DUEL.ph === 'live' || DUEL.ph === 'count');
   if (!on){ if (f) f.remove(); return; }
   if (!f){ f = document.createElement('div'); f.id = 'dvFrame'; document.body.appendChild(f); }
-  f.style.setProperty('--pc', duelColor()); f.classList.toggle('low', DUEL.ph === 'live' && !DUEL.me.out && duelLeft() < 30);
+  f.style.setProperty('--pc', duelColor()); f.style.setProperty('--pg', palGrad(duelPal().concat(duelPal()[0]), '135deg')); f.classList.toggle('low', DUEL.ph === 'live' && !DUEL.me.out && duelLeft() < 30);
 }
 // the match was accepted: start the Peak heating on the 1v1 profile
 async function duelAutoStart(){
@@ -9072,7 +9084,7 @@ function drawPills(){
   let el = $('#fpills');
   const items = [];
   if (DUEL.on && !$('.egg.duel')){ const D = DUEL, lv = D.ph === 'live', low = lv && !D.me.out && duelLeft() < 30;
-    items.push(`<button class="fpill duel${low ? ' low' : ''}" data-pill="duel" style="--c1:${duelColor()};--c2:${okColor(D.op && D.op.c)}">${lv ? `<i>${D.me.h}</i><em>VS</em><i>${D.op ? D.op.h : 0}</i><span>${D.me.out ? 'out' : vrMS(duelLeft())}</span>` : D.ph === 'done' ? '1v1 · Done' : D.ph === 'count' ? '1v1 · Heating up' : '1v1 · Lobby'}</button>`); }
+    items.push(`<button class="fpill duel${low ? ' low' : ''}" data-pill="duel" style="background:linear-gradient(90deg,${duelPal().slice(0, 2).join(',')},#1a1622 45%,#1a1622 55%,${((D.op && D.op.p) || [okColor(D.op && D.op.c)]).slice(0, 2).reverse().join(',')})">${lv ? `<i>${D.me.h}</i><em>VS</em><i>${D.op ? D.op.h : 0}</i><span>${D.me.out ? 'out' : vrMS(duelLeft())}</span>` : D.ph === 'done' ? '1v1 · Done' : D.ph === 'count' ? '1v1 · Heating up' : '1v1 · Lobby'}</button>`); }
   if (VRH.code) items.push(`<button class="fpill" data-pill="vr">VR ${VRH.panelAt && Date.now() - VRH.panelAt < 30000 ? 'linked' : 'waiting'}</button>`);
   if (!items.length){ if (el) el.remove(); return; }
   if (!el){ el = document.createElement('div'); el.id = 'fpills'; document.body.appendChild(el);
