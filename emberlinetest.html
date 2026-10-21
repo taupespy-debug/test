@@ -8651,7 +8651,7 @@ async function vrDo(c, v, remote){
 /* phone side: the bridge for a linked panel */
 const VRH = { rt:null, code:null, last:'', lastAt:0, timer:null, panelAt:0 };
 function vrLink(code, quiet){
-  if (!duelAllowed()) return false;
+  if (!vrAllowed()) return false;
   code = rtClean(code);
   if (code.length !== 6){ toast('Type the 6-character code from the VR panel'); return false; }
   vrUnlink(true);
@@ -8776,7 +8776,7 @@ const VR_PEAK_SVG = `<svg viewBox="0 0 100 130" aria-hidden="true"><defs><radial
 function vrBuild(){
   let el = $('#vrp'); if (el) return;
   el = document.createElement('div'); el.id = 'vrp';
-  const bt = !!navigator.bluetooth && duelAllowed(), here = location.origin + location.pathname;
+  const bt = !!navigator.bluetooth && vrAllowed(), here = location.origin + location.pathname;
   el.innerHTML = `<div class="vr-top"><span class="vr-dot" id="vrDot"></span><h1>Emberline <i>VR</i><span class="beta-tag">BETA</span></h1><span class="vr-src" id="vrSrc"></span><button class="vr-btn sm" data-vr="pt" id="vrPtBtn" hidden>Passthrough <span class="beta-tag">BETA</span></button><button class="vr-btn sm" data-vr="duel">1v1</button><button class="vr-btn sm" data-vr="exit">Exit</button></div>
     <div class="vr-card vr-wait" id="vrWait">
       <span class="vr-lbl">Link your phone</span>
@@ -8820,7 +8820,7 @@ function vrPress(b){
   if (k === 'exit') return vrClose();
   if (k === 'duel') return duelSheet();
   if (k === 'pt') return ptIntro();
-  if (k === 'connect'){ if (!duelAllowed()) return; return vrDo('connect'); }
+  if (k === 'connect'){ if (!vrAllowed()) return; return vrDo('connect'); }
   if (!src) return toast('Link your phone or connect first');
   const s = src.s;
   if (k === 'tap'){ // the Puffco picture: start it, or boost while it heats or is Ready
@@ -8846,7 +8846,8 @@ function vrPaint(){
   if (!VRP.on) return; const root = $('#vrp'); if (!root) return;
   const src = vrSource(), dot = $('#vrDot'), set = (id, v) => { const e = root.querySelector('#' + id); if (e && e.textContent !== String(v)) e.textContent = v; };
   $('#vrWait').hidden = !!src; $('#vrMain').hidden = !src;
-  { const b = $('#vrPtBtn'); if (b) b.hidden = !(PT.sup && (duelAllowed() || (src && src.how === 'link'))); } // beta: only once a beta phone links (or a beta account is here)
+  { const b = $('#vrPtBtn'); if (b) b.hidden = !(PT.sup && (vrAllowed() || (src && src.how === 'link'))); }
+  { const b = root.querySelector('[data-vr="duel"]'); if (b) b.hidden = !duelAllowed(); } // 1v1 has its own beta list // beta: only once a beta phone links (or a beta account is here)
   set('vrSrc', src ? src.src : 'Not connected');
   dot.className = 'vr-dot' + (src ? ' ok' : VRP.rt && VRP.rt.open ? ' wait' : '');
   if (!src){
@@ -9014,11 +9015,13 @@ const DUEL_OPTS = { min:[2, 3, 5], win:[180, 240, 300], cap:[0, 600, 1200, 1800]
 // the 1v1 profile everyone plays on. Public matches: 505°F, 120s, Bold, Boost +1°F / +15s. Friend games pick their own
 const DUEL_PUBLIC = { tempF:505, time:120, vapor:0.5, boostF:1, boostT:15 };
 const DUEL_RP_REAL = false; // bets move real RP only once the server settles them (both phones must agree). Until then: shown, never sent
-/* beta: the VR panel, Passthrough and 1v1s. Live: only the people on this list (Emberline usernames, any case, or player ids) */
-const BETA_USERS = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco']; // Rich, infused.taco
-function betaUser(){ const me = LB.me || lbStore().meCache; if (!me) return false; const n = String(me.username || '').toLowerCase(); return BETA_USERS.some(u => u === me.id || (n && u.toLowerCase() === n)); }
-const duelAllowed = () => IS_TEST || isRich() || betaUser();
-function duelGate(){ const ok = duelAllowed(); [['#duelOpen', 'flex'], ['#vrCard', 'grid']].forEach(([q, d]) => { const e = $(q); if (e) e.style.display = ok ? d : 'none'; }); }
+/* betas on live, each with its own list (Emberline usernames, any case, or player ids). The test build has everything */
+const VR_BETA = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco']; // VR panel + Passthrough: Rich, infused.taco
+const DUEL_BETA = ['a1ca5a326c89dd177960d792e64d0e82']; // 1v1s: Rich
+function onList(list){ const me = LB.me || lbStore().meCache; if (!me) return false; const n = String(me.username || '').toLowerCase(); return list.some(u => u === me.id || (n && u.toLowerCase() === n)); }
+const duelAllowed = () => IS_TEST || isRich() || onList(DUEL_BETA);
+const vrAllowed = () => IS_TEST || isRich() || onList(VR_BETA);
+function duelGate(){ [['#duelOpen', 'flex', duelAllowed()], ['#vrCard', 'grid', vrAllowed()]].forEach(([q, d, ok]) => { const e = $(q); if (e) e.style.display = ok ? d : 'none'; }); }
 const QUEUE_BUYIN = 10; // every matchmaking 1v1 costs 10 RP to enter, winner takes both. Test build: shown, never sent to the leaderboard
 const DUEL_BETS = [0, 10, 25, 50, 100, 500]; // quick picks for friend games; any amount can be typed
 const myRpNow = () => { try { return myRank().rp || 0; } catch(e){ return 0; } };
@@ -9559,7 +9562,7 @@ function lobbyInv(m){
   });
 }
 function duelInvClose(){ LOBBY.inv = null; const el = $('.egg.dinv'); if (!el) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); }
-(function lobbyBoot(n){ if (duelAllowed()){ duelGate(); if (!document.hidden) lobbyOn(); return; } if (n < 20) setTimeout(() => lobbyBoot(n + 1), 15000); })(0); // in the lobby while the app is open, so friends' invites reach you (waits for the profile to load)
+(function lobbyBoot(n){ duelGate(); if (duelAllowed()){ if (!document.hidden) lobbyOn(); return; } if (n < 20) setTimeout(() => lobbyBoot(n + 1), 15000); })(0); // in the lobby while the app is open, so friends' invites reach you (waits for the profile to load)
 // links: ?vr opens the panel
 { const q = new URLSearchParams(location.search);
   if (q.has('vr')) setTimeout(() => vrOpen(), 300);
