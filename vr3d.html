@@ -1,0 +1,211 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Emberline VR Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&family=Manrope:wght@500;700;800&display=swap">
+<style>
+/* a walkable 3D room (three.js) with the REAL Emberline ?vr panel hung in it as a screen (CSS3D) and a clickable Puffco on the table */
+:root{color-scheme:dark;--ink:#f3f0fa;--dim:#b3abc8;--chip:rgba(14,12,22,.78);--edge:rgba(255,255,255,.14);--ember:#b04bff;--ember2:#ff5ec8;--f-disp:'Unbounded',system-ui,sans-serif;--f-body:'Manrope',system-ui,sans-serif}
+html,body{margin:0;height:100%;overflow:hidden;background:#05040a;color:var(--ink);font-family:var(--f-body)}
+#view{position:fixed;inset:0;touch-action:none;cursor:grab}
+#view.drag{cursor:grabbing}#view.point{cursor:pointer}
+#css,#gl{position:absolute;inset:0}
+#gl{pointer-events:none}
+.bar{position:fixed;z-index:5;top:calc(env(safe-area-inset-top,0px) + 12px);left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));display:flex;flex-wrap:wrap;gap:8px;align-items:center;pointer-events:none}
+.bar > *{pointer-events:auto}
+.title{font:800 16px var(--f-disp);padding:9px 14px;border-radius:99px;background:var(--chip);border:1px solid var(--edge);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.title i{font-style:normal;background:linear-gradient(90deg,var(--ember),var(--ember2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.bar button,.bar a{font:700 13px var(--f-body);color:var(--ink);background:var(--chip);border:1px solid var(--edge);border-radius:99px;padding:9px 13px;cursor:pointer;text-decoration:none;-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.bar button[aria-pressed="true"]{background:var(--ember);border-color:var(--ember)}
+.bar .sp{flex:1}
+.help{position:fixed;z-index:5;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 14px);font:700 13px var(--f-body);color:var(--dim);background:var(--chip);border:1px solid var(--edge);border-radius:99px;padding:9px 16px;white-space:nowrap;pointer-events:none;max-width:calc(100% - 24px);overflow:hidden;text-overflow:ellipsis}
+.help b{color:var(--ink)}
+.toast{position:fixed;z-index:6;left:50%;top:calc(env(safe-area-inset-top,0px) + 64px);transform:translateX(-50%);font:700 14px var(--f-body);background:#fff;color:#111;border-radius:99px;padding:9px 16px;opacity:0;transition:opacity .25s;pointer-events:none}
+.toast.on{opacity:1}
+.load{position:fixed;inset:0;z-index:9;display:grid;place-items:center;background:#05040a;font:700 15px var(--f-body);color:var(--dim)}
+button:focus-visible,a:focus-visible{outline:2px solid var(--ember2);outline-offset:2px}
+</style></head><body>
+<div id="view"><div id="css"></div><canvas id="gl"></canvas></div>
+<div class="bar">
+  <span class="title">Emberline <i>VR</i> room</span>
+  <button data-src="test" aria-pressed="true">Test build</button><button data-src="live" aria-pressed="false">Live</button>
+  <span class="sp"></span>
+  <button id="home">Back to the panel</button><a href="vrsim.html">Flat simulator</a>
+</div>
+<div class="help" id="help"><b>Drag</b> to look · <b>Click the floor</b> to walk · <b>WASD</b> to move · <b>Click the Puffco</b> to start it</div>
+<div class="toast" id="toast"></div>
+<div class="load" id="load">Building the room…</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS3DRenderer.js"></script>
+<script>
+(() => {
+  const $ = s => document.querySelector(s), T = THREE;
+  if (!T || !T.CSS3DRenderer){ $('#load').textContent = 'Couldn’t load the 3D engine. Check your connection and reload.'; return; }
+  const SRC = { test: 'emberlinetest.html?vr', live: 'https://emberlineapp.github.io/emberline/?vr' };
+  const view = $('#view'), W = () => innerWidth, H = () => innerHeight;
+  const toast = t => { const e = $('#toast'); e.textContent = t; e.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => e.classList.remove('on'), 2200); };
+
+  // ---------- renderers: CSS3D (the real panel) underneath, WebGL (the room) on top with a see-through hole where the panel is
+  const gl = new T.WebGLRenderer({ canvas: $('#gl'), antialias:true, alpha:true });
+  gl.setPixelRatio(Math.min(devicePixelRatio || 1, 1.6)); gl.setClearColor(0x000000, 0); gl.outputEncoding = T.sRGBEncoding;
+  const css = new T.CSS3DRenderer(); $('#css').appendChild(css.domElement);
+  const scene = new T.Scene(), cssScene = new T.Scene();
+  const cam = new T.PerspectiveCamera(70, 1, .05, 100);
+  const me = { x:0, z:1.5, yaw:0, pitch:-.22, eye:1.6, tx:null, tz:null };
+  function size(){ gl.setSize(W(), H(), false); css.setSize(W(), H()); cam.aspect = W() / H(); cam.fov = W() < H() ? 82 : 70; cam.updateProjectionMatrix(); }
+  addEventListener('resize', size);
+
+  // ---------- the room (6m x 7m)
+  const RW = 6, RD = 7, RH = 3.2;
+  const std = (c, o) => new T.MeshStandardMaterial(Object.assign({ color:c, roughness:.85, metalness:0 }, o || {}));
+  const box = (w, h, d, m, x, y, z) => { const b = new T.Mesh(new T.BoxGeometry(w, h, d), m); b.position.set(x, y, z); scene.add(b); return b; };
+  // floor with a faint plank pattern
+  const fc = document.createElement('canvas'); fc.width = fc.height = 512; const fx = fc.getContext('2d');
+  fx.fillStyle = '#1c1520'; fx.fillRect(0, 0, 512, 512);
+  for (let i = 0; i < 16; i++){ fx.fillStyle = `rgba(255,255,255,${.012 + (i % 3) * .008})`; fx.fillRect(0, i * 32, 512, 30); fx.fillStyle = 'rgba(0,0,0,.35)'; fx.fillRect(0, i * 32 + 30, 512, 2); fx.fillRect(((i * 197) % 512), i * 32, 2, 30); }
+  const ftex = new T.CanvasTexture(fc); ftex.wrapS = ftex.wrapT = T.RepeatWrapping; ftex.repeat.set(3, 3.5); ftex.encoding = T.sRGBEncoding;
+  const floor = new T.Mesh(new T.PlaneGeometry(RW, RD), std(0xffffff, { map:ftex, roughness:.6 })); floor.rotation.x = -Math.PI / 2; floor.position.z = .5; scene.add(floor);
+  const wallM = std(0x231a2c), ceilM = std(0x120e18);
+  box(RW, RH, .1, wallM, 0, RH / 2, -3); box(RW, RH, .1, wallM, 0, RH / 2, 4); box(.1, RH, RD, wallM, -3, RH / 2, .5); box(.1, RH, RD, wallM, 3, RH / 2, .5);
+  box(RW, .1, RD, ceilM, 0, RH, .5);
+  // the window on the left wall: a neon city at night
+  const wc = document.createElement('canvas'); wc.width = 1024; wc.height = 512; const wx = wc.getContext('2d');
+  const sky = wx.createLinearGradient(0, 0, 0, 512); sky.addColorStop(0, '#0a0420'); sky.addColorStop(.6, '#3d0f52'); sky.addColorStop(1, '#ff5e9a'); wx.fillStyle = sky; wx.fillRect(0, 0, 1024, 512);
+  for (let i = 0; i < 160; i++){ wx.fillStyle = `rgba(255,255,255,${Math.random() * .7})`; wx.fillRect(Math.random() * 1024, Math.random() * 260, 2, 2); }
+  wx.fillStyle = '#ffd23f'; wx.beginPath(); wx.arc(760, 380, 110, Math.PI, 0); wx.fill();
+  for (let i = 0; i < 40; i++){ const bw = 20 + Math.random() * 50, bh = 80 + Math.random() * 260, x = i * 27 - 20; wx.fillStyle = '#0b0614'; wx.fillRect(x, 512 - bh, bw, bh);
+    for (let y = 512 - bh + 10; y < 500; y += 16) for (let k = 4; k < bw - 6; k += 10) if (Math.random() < .35){ wx.fillStyle = ['#ff5ec8', '#2bd9ff', '#ffd23f', '#b04bff'][(i + k) % 4]; wx.globalAlpha = .7; wx.fillRect(x + k, y, 4, 6); wx.globalAlpha = 1; } }
+  const wtex = new T.CanvasTexture(wc); wtex.encoding = T.sRGBEncoding;
+  const win = new T.Mesh(new T.PlaneGeometry(4.2, 2.1), new T.MeshBasicMaterial({ map:wtex })); win.rotation.y = Math.PI / 2; win.position.set(-2.94, 1.65, .7); scene.add(win);
+  const frameM = std(0x0d0a12); box(.06, .08, 4.3, frameM, -2.92, .58, .7); box(.06, .08, 4.3, frameM, -2.92, 2.72, .7); box(.06, 2.2, .06, frameM, -2.92, 1.65, .7);
+  // neon strips along the ceiling edges
+  const neon = c => new T.MeshBasicMaterial({ color:c });
+  box(RW - .2, .03, .03, neon(0xb04bff), 0, RH - .06, -2.93); box(.03, .03, RD - .2, neon(0xff5ec8), 2.93, RH - .06, .5); box(.03, .03, RD - .2, neon(0x2bd9ff), -2.93, RH - .06, .5);
+  // couch facing the panel, coffee table in front of it
+  const couchM = std(0x3a2a48, { roughness:.95 });
+  box(2.2, .42, .9, couchM, 0, .21, 2.75); box(2.2, .5, .22, couchM, 0, .67, 3.15); box(.22, .32, .9, couchM, -1.0, .58, 2.75); box(.22, .32, .9, couchM, 1.0, .58, 2.75);
+  const table = box(1.1, .06, .6, std(0x2a2030, { roughness:.4, metalness:.2 }), 0, .44, .35);
+  [[-.48, -.24], [.48, -.24], [-.48, .24], [.48, .24]].forEach(([x, z]) => box(.04, .42, .04, frameM, x, .21, .35 + z));
+  // a rug, a plant and a floor lamp so it reads as a place
+  const rug = new T.Mesh(new T.CircleGeometry(1.5, 48), std(0x2c1f3a, { roughness:1 })); rug.rotation.x = -Math.PI / 2; rug.position.set(0, .005, .7); scene.add(rug);
+  box(.35, .45, .35, std(0x1a1420), 2.4, .225, 3.4); const leaf = new T.Mesh(new T.IcosahedronGeometry(.42, 0), std(0x1f6b45, { flatShading:true })); leaf.position.set(2.4, .9, 3.4); scene.add(leaf);
+  box(.04, 1.6, .04, frameM, -2.4, .8, 3.3); const lampShade = new T.Mesh(new T.CylinderGeometry(.16, .24, .3, 24, 1, true), new T.MeshBasicMaterial({ color:0xffb86b, side:T.DoubleSide })); lampShade.position.set(-2.4, 1.7, 3.3); scene.add(lampShade);
+  // lights
+  scene.add(new T.HemisphereLight(0x9a86ff, 0x1a1020, .55));
+  const pl = (c, i, x, y, z, d) => { const l = new T.PointLight(c, i, d || 6, 2); l.position.set(x, y, z); scene.add(l); return l; };
+  pl(0xb04bff, 1.6, 0, 2.9, -2.2); pl(0xff5ec8, 1.2, 2.6, 2.9, 1); pl(0x2bd9ff, 1.0, -2.6, 2.9, 1); pl(0xffb86b, 1.4, -2.4, 1.6, 3.2, 4);
+
+  // ---------- the real panel: an iframe in 3D, plus a matching hole in the WebGL layer so it shows through
+  const PW = 1000, PH = 640, PS = .0023; // 2.3m x 1.5m
+  const frame = document.createElement('iframe');
+  frame.src = SRC.test; frame.title = 'Emberline VR panel'; frame.allow = "bluetooth; screen-wake-lock; fullscreen 'none'";
+  frame.style.cssText = `width:${PW}px;height:${PH}px;border:0;border-radius:22px;background:#0b0b12;box-shadow:0 0 0 2px rgba(176,75,255,.5),0 0 80px rgba(176,75,255,.35)`;
+  const panel = new T.CSS3DObject(frame); panel.position.set(0, 1.68, -2.3); panel.scale.setScalar(PS); cssScene.add(panel);
+  const hole = new T.Mesh(new T.PlaneGeometry(PW * PS, PH * PS), new T.MeshBasicMaterial({ color:0x000000, opacity:0, blending:T.NoBlending, side:T.DoubleSide }));
+  hole.position.copy(panel.position); scene.add(hole);
+  // a glow behind the panel so it floats
+  const glow = new T.Mesh(new T.PlaneGeometry(PW * PS * 1.25, PH * PS * 1.4), new T.MeshBasicMaterial({ color:0xb04bff, transparent:true, opacity:.06, depthWrite:false }));
+  glow.position.set(0, 1.68, -2.36); scene.add(glow);
+
+  // ---------- the Puffco on the table: glows in the active profile's color, puffs while you pull, click it to start
+  const REAL = { ok:false, st:0, at:0, name:'', heat:true, hit:false, stl:false, lan:false, c:'#b04bff' };
+  const puff = new T.Group(); puff.position.set(0, .47, .35); scene.add(puff);
+  const baseM = std(0x18171f, { roughness:.35, metalness:.3 }), ledM = new T.MeshBasicMaterial({ color:0xb04bff });
+  const base = new T.Mesh(new T.CylinderGeometry(.06, .068, .11, 32), baseM); base.position.y = .055; puff.add(base);
+  const led = new T.Mesh(new T.TorusGeometry(.064, .006, 8, 40), ledM); led.rotation.x = Math.PI / 2; led.position.y = .035; puff.add(led);
+  const glass = new T.Mesh(new T.CylinderGeometry(.032, .026, .12, 24, 1, true), new T.MeshStandardMaterial({ color:0xdde8ff, transparent:true, opacity:.28, roughness:.05, metalness:.1, side:T.DoubleSide })); glass.position.y = .17; puff.add(glass);
+  const puffLight = new T.PointLight(0xb04bff, .8, 1.6, 2); puffLight.position.y = .12; puff.add(puffLight);
+  const smoke = [0, 1, 2, 3].map(i => { const m = new T.Mesh(new T.SphereGeometry(.03, 12, 8), new T.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0, depthWrite:false })); puff.add(m); return m; });
+  const hit = new T.Mesh(new T.CylinderGeometry(.14, .14, .4, 12), new T.MeshBasicMaterial({ visible:false })); hit.position.y = .15; puff.add(hit);
+  // its label
+  const lc = document.createElement('canvas'); lc.width = 720; lc.height = 160; const ltex = new T.CanvasTexture(lc); ltex.encoding = T.sRGBEncoding;
+  const label = new T.Sprite(new T.SpriteMaterial({ map:ltex, transparent:true, depthTest:false })); label.scale.set(.62, .138, 1); label.position.y = .48; label.renderOrder = 9; puff.add(label);
+  let labelKey = '';
+  function drawLabel(big, small, dot){
+    const key = big + '|' + small + '|' + dot; if (key === labelKey) return; labelKey = key;
+    const c = lc.getContext('2d'); c.clearRect(0, 0, 720, 160);
+    c.fillStyle = 'rgba(12,10,20,.86)'; c.beginPath(); c.roundRect(4, 4, 712, 152, 50); c.fill(); c.strokeStyle = dot; c.lineWidth = 4; c.stroke();
+    c.fillStyle = dot; c.beginPath(); c.arc(64, 62, 14, 0, 7); c.fill();
+    c.fillStyle = '#fff'; c.font = '800 50px Manrope, system-ui, sans-serif'; c.fillText(big, 96, 78);
+    c.fillStyle = '#c9c3dc'; c.font = '600 32px Manrope, system-ui, sans-serif'; c.fillText(small, 96, 124); ltex.needsUpdate = true;
+  }
+  addEventListener('message', e => {
+    const m = e.data; if (!m || m.ember !== 'vrstate' || e.source !== frame.contentWindow) return;
+    Object.assign(REAL, m, { at: Date.now() });
+  });
+  const live = () => REAL.ok && Date.now() - REAL.at < 4000;
+  function pressPuffco(){
+    if (!live()) return toast('Link your phone in the panel first');
+    const s = REAL.st;
+    if (s === 7 || s === 8){ frame.contentWindow.postMessage({ ember:'vrcmd', c:'boost' }, '*'); return toast('Boost!'); }
+    if (s >= 9) return;
+    if (!REAL.heat) return toast('Start is off on your phone');
+    frame.contentWindow.postMessage({ ember:'vrcmd', c:'start' }, '*'); toast('Starting your ' + (REAL.name || 'Puffco') + '…');
+  }
+
+  // ---------- where you're pointing: a ring on the floor where you'd walk to
+  const aim = new T.Mesh(new T.RingGeometry(.16, .2, 40), new T.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:.7, depthWrite:false })); aim.rotation.x = -Math.PI / 2; aim.visible = false; scene.add(aim);
+  const ray = new T.Raycaster(), nv = new T.Vector2();
+  function pick(px, py){
+    nv.set(px / W() * 2 - 1, -(py / H()) * 2 + 1); ray.setFromCamera(nv, cam);
+    if (ray.intersectObject(hit, false).length) return { what:'puff' };
+    const f = ray.intersectObject(floor, false)[0];
+    return f ? { what:'floor', p:f.point } : null;
+  }
+  const clampRoom = (x, z) => [Math.max(-2.6, Math.min(2.6, x)), Math.max(-1.9, Math.min(3.6, z))];
+  const blocked = (x, z) => (Math.abs(x) < .7 && Math.abs(z - .35) < .45) || (Math.abs(x) < 1.25 && z > 2.2); // the table and the couch
+
+  // ---------- drag to look, click to walk / press, WASD
+  let drag = null;
+  view.addEventListener('pointerdown', e => { if (e.target !== css.domElement && !e.target.closest('#css')) return; drag = { x:e.clientX, y:e.clientY, yaw:me.yaw, pitch:me.pitch, moved:false, id:e.pointerId }; view.setPointerCapture(e.pointerId); view.classList.add('drag'); });
+  view.addEventListener('pointermove', e => {
+    if (drag){ const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 5) drag.moved = true;
+      me.yaw = drag.yaw - dx * .005; me.pitch = Math.max(-1.1, Math.min(1.0, drag.pitch - dy * .004)); return; }
+    const p = pick(e.clientX, e.clientY); view.classList.toggle('point', !!(p && p.what === 'puff'));
+    aim.visible = !!(p && p.what === 'floor'); if (aim.visible){ aim.position.set(p.p.x, .01, p.p.z); }
+    hover = !!(p && p.what === 'puff');
+  });
+  view.addEventListener('pointerup', e => {
+    if (!drag) return; const was = drag; drag = null; view.classList.remove('drag');
+    if (was.moved) return;
+    const p = pick(e.clientX, e.clientY); if (!p) return;
+    if (p.what === 'puff') return pressPuffco();
+    let [x, z] = clampRoom(p.p.x, p.p.z); if (blocked(x, z)){ toast('Can’t stand there'); return; }
+    me.tx = x; me.tz = z;
+  });
+  const keys = {}; addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; }); addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; }); addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+  let hover = false;
+  $('#home').addEventListener('click', () => { me.tx = 0; me.tz = 1.5; me.yaw = 0; me.pitch = -.12; });
+  document.querySelectorAll('[data-src]').forEach(b => b.addEventListener('click', () => { frame.src = SRC[b.dataset.src]; document.querySelectorAll('[data-src]').forEach(x => x.setAttribute('aria-pressed', x === b)); toast(b.dataset.src === 'live' ? 'Live panel: links with a beta phone' : 'Test panel'); }));
+
+  // ---------- loop
+  let last = performance.now();
+  function frameLoop(now){
+    const dt = Math.min(.05, Math.max(0, (now - last) / 1000)); last = now;
+    // walking: keys first, otherwise glide to the clicked spot
+    const f = (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0), r = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0);
+    if (f || r){ me.tx = null; const sp = 2.2 * dt, nx = me.x + (-Math.sin(me.yaw) * f + Math.cos(me.yaw) * r) * sp, nz = me.z + (-Math.cos(me.yaw) * f - Math.sin(me.yaw) * r) * sp; const [cx2, cz2] = clampRoom(nx, nz); if (!blocked(cx2, cz2)){ me.x = cx2; me.z = cz2; } }
+    else if (me.tx != null){ const dx = me.tx - me.x, dz = me.tz - me.z, d = Math.hypot(dx, dz); if (d < .02){ me.tx = null; } else { const st = Math.min(d, 2.4 * dt * Math.min(1, d * 2 + .3)); me.x += dx / d * st; me.z += dz / d * st; } }
+    if (keys.q) me.yaw += 1.6 * dt; if (keys.e) me.yaw -= 1.6 * dt;
+    me.eye = 1.6 + Math.sin(now / 900) * .004; // a little breathing
+    cam.position.set(me.x, me.eye, me.z); cam.rotation.set(me.pitch, me.yaw, 0, 'YXZ');
+    // the Puffco follows your real one
+    const on = live(), c = new T.Color(REAL.stl ? '#333333' : (/^#[0-9a-f]{6}$/i.test(REAL.c) ? REAL.c : '#b04bff'));
+    ledM.color.copy(c); puffLight.color.copy(c);
+    const heat = on && REAL.st === 7, ready = on && REAL.st === 8, t = now / 1000;
+    puffLight.intensity = REAL.stl ? 0 : hover ? 1.6 : ready || REAL.lan ? 1.3 : heat ? .6 + .5 * Math.sin(t * 4) : .5;
+    smoke.forEach((m, i) => { const a = (t * .8 + i / 4) % 1; m.visible = on && REAL.hit; m.position.set(Math.sin(t * 2 + i) * .03, .25 + a * .35, Math.cos(t * 1.7 + i) * .02); m.scale.setScalar(1 + a * 3); m.material.opacity = (1 - a) * .35; });
+    if (!on) drawLabel('Link your phone first', 'Type the panel’s code in Settings → VR panel', '#ffb020');
+    else if (REAL.st === 8) drawLabel(REAL.hit ? 'Hitting…' : 'Ready', hover ? 'Click to boost' : 'Take a hit', '#3ddc84');
+    else if (REAL.st === 7) drawLabel('Heating up', hover ? 'Click to boost' : (REAL.name || 'Puffco'), '#ff5ec8');
+    else if (REAL.st === 9) drawLabel('Cooling down', REAL.name || 'Puffco', '#9a9ab0');
+    else drawLabel(hover ? 'Click to start' : (REAL.name || 'Puffco'), REAL.heat ? 'Click the Puffco to heat it up' : 'Start is off on your phone', '#' + c.getHexString());
+    label.material.opacity = hover || Math.hypot(me.x - puff.position.x, me.z - puff.position.z) < 2.6 ? 1 : .55;
+    aim.material.opacity = .45 + .25 * Math.sin(t * 5);
+    gl.render(scene, cam); css.render(cssScene, cam);
+    requestAnimationFrame(frameLoop);
+  }
+  size(); requestAnimationFrame(frameLoop);
+  setTimeout(() => { $('#load').remove(); }, 400);
+  if (matchMedia('(pointer: coarse)').matches) $('#help').innerHTML = '<b>Drag</b> to look · <b>Tap the floor</b> to walk · <b>Tap the Puffco</b> to start it';
+})();
+</script></body></html>
