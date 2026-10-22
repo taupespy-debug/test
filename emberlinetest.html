@@ -9647,15 +9647,20 @@ function queueJoin(){
   lobbySendQ(); lobbyTimer(); wakeOn(); duelMenuPaint();
 }
 function queueLeave(){ if (!LOBBY.q) return; if (LOBBY.rt) LOBBY.rt.send('q:left', { id: qId() }); LOBBY.q = null; wakeOff(); duelMenuPaint(); }
-function lobbySendQ(){ if (!LOBBY.q || !LOBBY.rt) return; LOBBY.q.sentAt = Date.now(); LOBBY.rt.send('q:here', { id: qId(), n: duelName(), bet: LOBBY.q.bet }); }
+/* rank matching: your rank first, then one rank either side after 15s, two after 30s, anyone after 45s.
+   Two players match when either one's search has widened far enough to reach the other */
+function myTierIdx(){ try { const n = myRank().tier.n, i = RANK_TIERS.findIndex(t => t.n === n); return i < 0 ? 0 : i; } catch(e){ return 0; } }
+const qSpread = secs => secs < 15 ? 0 : secs < 30 ? 1 : secs < 45 ? 2 : 9;
+const qWait = () => LOBBY.q ? (Date.now() - LOBBY.q.at) / 1000 : 0;
+function lobbySendQ(){ if (!LOBBY.q || !LOBBY.rt) return; LOBBY.q.sentAt = Date.now(); LOBBY.rt.send('q:here', { id: qId(), n: duelName(), bet: LOBBY.q.bet, t: myTierIdx(), w: Math.round(qWait()) }); }
 function lobbyQHere(m){
   if (!m.id || String(m.id) === qId()) return;
   LOBBY.online.set(String(m.id).split('~')[0], { at: Date.now(), busy:false });
-  if (LOBBY.q && (+m.bet || 0) === LOBBY.q.bet) LOBBY.q.seen.set(String(m.id), { n: String(m.n || 'Player').slice(0, 20), at: Date.now() }); // only people betting the same
+  if (LOBBY.q && (+m.bet || 0) === LOBBY.q.bet) LOBBY.q.seen.set(String(m.id), { n: String(m.n || 'Player').slice(0, 20), at: Date.now(), t: clamp(+m.t || 0, 0, 9), w: Math.max(0, +m.w || 0) }); // only people betting the same
 }
 function lobbyQMatch(m){
   if (!qMe(m)) return;
-  if (!LOBBY.q || DUEL.on || (+m.bet || 0) !== LOBBY.q.bet){ LOBBY.rt.send('q:no', { id: qId(), to: m.id }); return; }
+  if (!LOBBY.q || DUEL.on || (+m.bet || 0) !== LOBBY.q.bet || (m.t != null && Math.abs(+m.t - myTierIdx()) > Math.max(+m.sp || 0, qSpread(qWait())))){ LOBBY.rt.send('q:no', { id: qId(), to: m.id }); return; }
   const code = rtClean(m.code); if (code.length !== 6) return;
   LOBBY.rt.send('q:ok', { id: qId(), to: m.id, code });
   const bet = LOBBY.q.bet; queueLeave(); duelStart('guest', code, Object.assign({}, QUEUE_RULES, { bet })); DUEL.auto = true;
@@ -9674,8 +9679,10 @@ function lobbyTick(){
     q.seen.forEach((v, k) => { if (now - v.at > 8000) q.seen.delete(k); });
     if (q.pend && now - q.pend.at > 6000){ q.skip.set(q.pend.to, now + 15000); q.pend = null; } // no answer: try someone else
     if (!q.pend && LOBBY.rt && LOBBY.rt.open){
-      const me = qId(), ids = [...q.seen.keys()].filter(k => !(q.skip.get(k) > now)).sort();
-      if (ids.length && me < ids[0]){ q.pend = { to: ids[0], code: rtCode(), at: now }; LOBBY.rt.send('q:match', { id: me, to: ids[0], n: duelName(), code: q.pend.code, bet: q.bet }); }
+      const me = qId(), myT = myTierIdx(), mySp = qSpread(qWait());
+      const fits = v => Math.abs(v.t - myT) <= Math.max(mySp, qSpread(v.w + (now - v.at) / 1000)); // close enough in rank for one of us
+      const ids = [...q.seen.keys()].filter(k => !(q.skip.get(k) > now) && fits(q.seen.get(k))).sort();
+      if (ids.length && me < ids[0]){ q.pend = { to: ids[0], code: rtCode(), at: now }; LOBBY.rt.send('q:match', { id: me, to: ids[0], n: duelName(), code: q.pend.code, bet: q.bet, t: myT, sp: mySp }); }
     }
   }
   if (LOBBY.inv && now - LOBBY.inv.at > 40000) duelInvClose();
@@ -9687,7 +9694,10 @@ function lobbyTick(){
 function duelMenuPaint(){
   const box = $('#dqBox'), fr = $('#dFr'); if (!box && !fr) return;
   const now = Date.now(), q = LOBBY.q, up = LOBBY.rt && LOBBY.rt.open;
-  if (box) setHTML(box, q ? `<div class="dq-spin"></div><b>${up ? 'Finding a match…' : 'Connecting…'}</b><span class="muted" style="font-size:13px">${vrMS((now - q.at) / 1000)} · ${q.seen.size ? q.seen.size + ' other' + (q.seen.size === 1 ? '' : 's') + ' in the queue' : 'nobody else in the queue yet'}</span>
+  if (box) setHTML(box, q ? `<div class="dq-spin"></div><b>${up ? 'Finding a match…' : 'Connecting…'}</b><span style="font-size:13px">${(() => { const sp = qSpread((now - q.at) / 1000), t = myTierIdx(), nm = i => (RANK_TIERS[i] || {}).n;
+      if (sp >= 9) return 'Looking for anyone'; const lo = Math.max(0, t - sp), hi = Math.min(RANK_TIERS.length - 1, t + sp);
+      const next = sp === 0 ? 15 : sp === 1 ? 30 : 45, left = Math.max(0, Math.ceil(next - (now - q.at) / 1000));
+      return `Looking for <b style="color:${(RANK_TIERS[t] || {}).c}">${lo === hi ? nm(t) : nm(lo) + '–' + nm(hi)}</b> players · wider in ${left}s`; })()}</span><span class="muted" style="font-size:13px">${vrMS((now - q.at) / 1000)} · ${q.seen.size ? q.seen.size + ' other' + (q.seen.size === 1 ? '' : 's') + ' in the queue' : 'nobody else in the queue yet'}</span>
       ${now - q.at > 20000 && !q.seen.size ? `<span class="muted" style="font-size:12px">Quiet right now. Find players in the Discord, or keep waiting.</span><a class="btn small ddisc-s" href="${DISCORD_URL}" target="_blank" rel="noopener">Find players on Discord</a>` : ''}<button class="btn small" data-d="qx">Cancel</button>`
     : `<button class="btn primary" data-d="q" style="width:100%">Find a match · ${QUEUE_BUYIN} RP buy-in</button>`);
   if (fr){
