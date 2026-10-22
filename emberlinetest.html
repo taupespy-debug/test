@@ -9050,8 +9050,8 @@ const DUEL_OPTS = { min:[2, 3, 5], win:[180, 240, 300], cap:[0, 600, 1200, 1800]
 const DUEL_PUBLIC = { tempF:505, time:120, vapor:0.5, boostF:1, boostT:15 };
 const DUEL_RP_REAL = false; // bets move real RP only once the server settles them (both phones must agree). Until then: shown, never sent
 /* betas on live, each with its own list (Emberline usernames, any case, or player ids). The test build has everything */
-const VR_BETA = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco', 'bkmoonrock', 'mara']; // VR panel + Passthrough: Rich, infused.taco, BKmoonrock, Mara
-const DUEL_BETA = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco', 'bkmoonrock', 'mara']; // 1v1s: Rich, infused.taco, BKmoonrock, Mara
+const VR_BETA = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco', 'bkmoonrock', 'mara', 'whoscert']; // VR panel + Passthrough: Rich, infused.taco, BKmoonrock, Mara, whoscert
+const DUEL_BETA = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco', 'bkmoonrock', 'mara', 'whoscert']; // 1v1s: Rich, infused.taco, BKmoonrock, Mara, whoscert
 function onList(list){ const me = LB.me || lbStore().meCache; if (!me) return false; const n = String(me.username || '').toLowerCase(); return list.some(u => u === me.id || (n && u.toLowerCase() === n)); }
 const duelAllowed = () => IS_TEST || isRich() || onList(DUEL_BETA);
 const vrAllowed = () => IS_TEST || isRich() || onList(VR_BETA);
