@@ -3325,23 +3325,41 @@ function previewProfile(i){
 const HIT = { on:false, start:0, last:null, hits:[], supported:null, base:0, peak:0, loop:null, inflight:false, live:0 };
 const HIT_DELAY = -250; // the sensor lags the real pull a little, so start the clock a touch early
 const HIT_MERGE = 700; // a dip shorter than this is the same hit
+const hitMerge = () => HIT.mode === 'heat' ? 1600 : HIT_MERGE; // older Peaks time hits from the heater, which dips mid-pull
 const HIT_IDLE = .03; // typical sensor value with nobody pulling
 function hitReset(){ HIT.lastSt = -1; HIT.armed = false; HIT.quiet = 0; HIT.endAt = 0; HIT.lastStart = 0; HIT.pbase = null; HIT.diaAt = 0; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.ends = []; HIT.base = HIT_IDLE; HIT.live = 0; }
 function hitSample(v, now){
+  // some firmware freezes the inhale reading on its last value (e.g. a mood with reactive light off). A real pull
+  // never reads the exact same number for ~1.5s, so a frozen reading counts as no pull
+  // a maxed-out sensor (hard pull) also repeats, so only values below the top count as frozen
+  if (HIT.mode !== 'heat' && v > 0 && v < .9 && v === HIT.lastV){ if (++HIT.same >= 19) v = 0; } else { HIT.same = 0; HIT.lastV = v; HIT.sameAt = now; }
+  if (HIT.on && v === 0 && HIT.same >= 19){ // froze mid-hit: the pull ended when the reading stopped changing, so keep the hit up to that point
+    HIT.on = false; HIT.endAt = 0; const secs = ((HIT.sameAt || now) - HIT.start) / 1000;
+    if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); (HIT.ends = HIT.ends || []).push(Date.now()); if (cur) cur.hits = HIT.hits.slice(); }
+    render(); return;
+  }
+  if (HIT.on && now - HIT.start > 30000){ HIT.on = false; HIT.endAt = 0; HIT.live = 0; HIT.base = Math.min(.6, v); render(); return; } // nobody pulls for 30s: stuck reading, drop it and treat this level as resting
   // v = inhale strength (0..1). Hysteresis so a shaky draw counts as one hit.
   // learn the resting level only from quiet samples, so a pull that's already going when Ready hits still counts
   if (!HIT.on){ const b = HIT.base || HIT_IDLE; if (v < b + .05) HIT.base = Math.min(.08, b * .9 + v * .1); }
   const up = Math.max(.12, HIT.base + .1), down = Math.max(.06, HIT.base + .04);
-  // Ready just started: a reading left over from preheat must not count as a hit (see live build)
-  if (S.state === 8 && HIT.lastSt !== 8){ HIT.armed = HIT.mode === 'heat'; HIT.quiet = 0; HIT.readyT = now; HIT.rmin = HIT.rmax = HIT.still = null; }
+  // Ready just started: wait until the sensor reads quiet once before timing. Otherwise a reading left over from
+  // preheat (the Proxy holds and slowly fades its last value) counts as a long fake hit
+  // remember the last few preheat readings: if they were low, whatever reads high at Ready is a real pull
+  if (S.state === 7){ (HIT.pre = HIT.pre || []).push(v); if (HIT.pre.length > 6) HIT.pre.shift(); }
+  if (S.state === 8 && HIT.lastSt !== 8){ HIT.armed = HIT.mode === 'heat'; HIT.quiet = 0; HIT.readyT = now; HIT.rmin = HIT.rmax = HIT.still = null;
+    const pre = (HIT.pre || []).slice(-3); HIT.preHigh = pre.length ? Math.max(...pre) >= up : null; HIT.pre = []; }
   HIT.lastSt = S.state;
   if (S.state === 8 && !HIT.armed){
-    if (v < down){ if (++HIT.quiet >= 2) HIT.armed = true; } // quiet: nobody's pulling, start timing from here
+    if (v < down){ if (++HIT.quiet >= 1) HIT.armed = true; } // quiet: nobody's pulling, start timing from here
+    else if (HIT.preHigh === false && v >= up){ // low all through preheat, high now: a real pull that started at Ready, so count it right away
+      HIT.armed = true; HIT.on = true; HIT.start = Math.max(HIT.readyT + HIT_DELAY, now + HIT_DELAY); HIT.peak = v; HIT.party = false; buzz(15); if (!hitRaf) hitRaf = requestAnimationFrame(hitTick);
+    }
     else {
       HIT.quiet = 0; HIT.rmin = Math.min(HIT.rmin ?? v, v); HIT.rmax = Math.max(HIT.rmax ?? v, v);
-      // Peak: never quiet after 2.5s of Ready. A reading that moves is someone who started pulling before Ready (time it
+      // Peak: never quiet after 1s of Ready. A reading that moves is someone who started pulling before Ready (time it
       // from Ready); one that sits still is left over from preheat (the Ready light), so treat that level as resting
-      if (!isProxy() && now - HIT.readyT > 2500){
+      if (!isProxy() && now - HIT.readyT > 1000){
         if (HIT.still == null && HIT.rmax - HIT.rmin > .06 && v >= up){ HIT.armed = true; HIT.on = true; HIT.start = HIT.readyT; HIT.peak = v; HIT.party = false; if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
         else if (HIT.still == null) HIT.still = HIT.rmax; // left over: wait until it goes quiet, or a real pull lifts it clearly above this level
         else if (v > HIT.still + .12){ HIT.armed = true; HIT.on = true; HIT.start = now + HIT_DELAY; HIT.peak = v; HIT.party = false; buzz(15); if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
@@ -3350,12 +3368,12 @@ function hitSample(v, now){
     render(); return;
   }
   if (S.state !== 8){ if (HIT.on){ HIT.on = false; const secs = (now - HIT.start) / 1000; if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); (HIT.ends = HIT.ends || []).push(Date.now()); if (cur) cur.hits = HIT.hits.slice(); } } render(); return; } // not Ready: close any hit that was still open
-  if (!HIT.on && v >= up && HIT.endAt && now - HIT.endAt < HIT_MERGE && HIT.hits.length){ HIT.on = true; HIT.hits.pop(); if (HIT.ends) HIT.ends.pop(); HIT.start = HIT.lastStart; if (cur) cur.hits = HIT.hits.slice(); HIT.last = HIT.hits.length ? HIT.hits[HIT.hits.length - 1] : null; if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); } // short dip: keep counting the same hit
+  if (!HIT.on && v >= up && HIT.endAt && now - HIT.endAt < hitMerge() && HIT.hits.length){ HIT.on = true; HIT.hits.pop(); if (HIT.ends) HIT.ends.pop(); HIT.start = HIT.lastStart; if (cur) cur.hits = HIT.hits.slice(); HIT.last = HIT.hits.length ? HIT.hits[HIT.hits.length - 1] : null; if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); } // short dip: keep counting the same hit
   else if (!HIT.on && v >= up){ HIT.on = true; HIT.start = now + HIT_DELAY; HIT.peak = v; HIT.party = false; buzz(15); if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
   else if (HIT.on){
     HIT.peak = Math.max(HIT.peak, v); HIT.live = Math.max(0, (now - HIT.start) / 1000);
     if (!HIT.party && store.bigHit !== false && HIT.live >= bigHitAt()){ HIT.party = true; bigHit(); }
-    if (v <= Math.max(down, HIT.peak * .3)){ // ends when the pull fades, not only when it's fully gone
+    if (v <= Math.max(down, Math.min(HIT.peak * .3, .15))){ // ends when the pull fades, not only when it's fully gone
       HIT.on = false; HIT.endAt = now; HIT.lastStart = HIT.start; const secs = (now - HIT.start) / 1000;
       if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); (HIT.ends = HIT.ends || []).push(Date.now()); if (cur) cur.hits = HIT.hits.slice(); }
     }
