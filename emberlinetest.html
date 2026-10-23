@@ -8198,7 +8198,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -8402,6 +8402,8 @@ $('#testTools').addEventListener('click', e => {
   if (k === 'vr3d'){ location.href = 'vr3d.html'; return; }
   if (k === 'ptmode'){ if (!$('#vrp')) vrOpen(); setTimeout(ptIntro, 300); return; }
   if (k === 'dueldemo'){ duelDemo(); return; }
+  if (k === 'dfxall'){ dfxTryAll(); return; }
+  if (k === 'dfxpv'){ store.dfxPv = !store.dfxPv; save(); b.textContent = '1v1 effects while heating: ' + (store.dfxPv ? 'preview channel' : 'live heat light'); return; }
   if (k === 'dcap'){ store.duelCapSeen = ''; duelCapPop(); return; }
   if (k === 'dcapfill'){ const full = duelDayNet() >= DUEL_DAY_MAX; store.duelDay = { d: dayKey(), id: acctId() || 'local', net: full ? 0 : DUEL_DAY_MAX }; store.duelCapSeen = ''; save(); toast(full ? 'Today’s 1v1 limit reset' : 'Today’s 1v1 limit filled (no RP added)'); return; }
   if (k === 'duelbot' || k === 'duelfast'){ duelSheet(); duelStart('host', 'BOT', k === 'duelfast' ? { min:1, win:60, cap:300 } : duelRules(), true); return; }
@@ -8620,7 +8622,7 @@ function rankTaxNotice(force, n){
 const WN_ITEMS = [
   ['1v1s are here <span class="beta-tag">BETA</span>', 'Tap 1V1 in Social. Get matched with someone near your rank, or invite a friend you follow (and who follows you back).'],
   ['How you win', 'Matches last 2 minutes. Every second of every hit is 10 points, so long pulls win. Blinkers set your side on fire.'],
-  ['Bets', 'Random matches have a 10 RP buy-in and friend games can bet up to 100 RP. The winner takes the loser’s RP, straight into this month’s ranked score.'],
+  ['Bets', 'Random matches have a 10 RP buy-in and friend games can bet up to 25 RP. The winner takes the loser’s RP, straight into this month’s ranked score.'],
   ['Daily limit', 'You can win up to 150 RP a day from 1v1s to start. After that, wins don’t add RP until tomorrow.'],
   ['Fixes', 'Your first hit now counts the moment your Puffco hits Ready.']
 ]
@@ -9144,7 +9146,7 @@ const DUEL_OPTS = { min:[1, 2, 3, 5], win:[180, 240, 300], cap:[120, 300, 600, 1
 // the 1v1 profile everyone plays on. Public matches: 505°F, 120s, Bold, Boost +1°F / +15s. Friend games pick their own
 const DUEL_PUBLIC = { tempF:505, time:120, vapor:0.5, boostF:1, boostT:15 };
 const DUEL_RP_REAL = true; // 1v1 buy-ins and bets move your ranked RP this month (win +bet, lose -bet). Up to 100 RP: the server refuses bigger drops
-const DUEL_BET_MAX = 100;
+const DUEL_BET_MAX = 25; // friend games: 25 RP max
 // your 1v1 RP this month, for this account (added to your ranked RP)
 function duelNet(){ const m = lbMonth(), id = acctId() || 'local', b = (store.duelRp || {})[m]; return (b && +b[id]) || 0; }
 const DUEL_DAY_MAX = 150; // most RP you can profit from 1v1s in one day (a loss lowers today's total, so you can win it back)
@@ -9178,10 +9180,10 @@ const vrAllowed = () => IS_TEST || isRich() || onList(VR_BETA);
 function duelGate(){ [['#duelOpen', 'flex', duelAllowed()], ['#vrCard', 'grid', vrAllowed()]].forEach(([q, d, ok]) => { const e = $(q); if (e) e.style.display = ok ? d : 'none'; }); }
 const DISCORD_URL = 'https://discord.gg/JSHyWbxrUV';
 const QUEUE_BUYIN = 10; // every matchmaking 1v1 costs 10 RP to enter, winner takes both. Test build: shown, never sent to the leaderboard
-const DUEL_BETS = [0, 10, 25, 50, 75, 100]; // quick picks for friend games; any amount can be typed
+const DUEL_BETS = [0, 5, 10, 25]; // the only bets for friend games (no typed amounts)
 const myRpNow = () => { try { return myRank().rp || 0; } catch(e){ return 0; } };
 const betOk = v => Math.max(0, Math.min(DUEL_RP_REAL ? DUEL_BET_MAX : 1e6, Math.floor(+v || 0)));
-const duelBet = () => betOk(store.duelBet); // friend games only
+const duelBet = () => { const v = betOk(store.duelBet); return DUEL_BETS.filter(b => b <= v).pop() || 0; }; // friend games only. An old typed amount snaps down to a pick
 const betTxt = b => b ? b + ' RP bet' : 'No bet';
 const DUEL_VAPORS = [0, 0.5, 1]; // Smooth, Bold, Intense (the Proxy has no Extreme, so a 1v1 never uses it)
 const DUEL_COLORS = ['#ff3b4a', '#ff8a2b', '#ffd23f', '#3ddc84', '#2bd9ff', '#2d7cf0', '#9900cc', '#ff5ec8', '#ffffff'];
@@ -9279,7 +9281,7 @@ function duelCount(){
 const duelReady = () => S.mode !== 'live' || S.state === 8; // not connected: nothing to wait for
 function duelLive(at){
   const D = DUEL; if (D.ph !== 'count') return;
-  D.ph = 'live'; D.start = at || Date.now(); D.me.at = D.start; buzz([40, 60, 40]); duelSplash('FIGHT!', duelTimed(D.rules) ? 'Every second counts' : 'Hit ' + D.rules.min + 's+ to stay in');
+  D.ph = 'live'; D.start = at || Date.now(); D.me.at = D.start; buzz([40, 60, 40]); duelSplash('FIGHT!', duelTimed(D.rules) ? 'Every second counts' : 'Hit ' + D.rules.min + 's+ to stay in'); D.fxLead = undefined; D.fxFinal = false; D.fxStreak = 0; dfx('fight');
   if (D.bot){ D.op.next = D.start + (5 + Math.random() * 20) * 1000; D.op.outAt = D.start + (D.rules.cap ? D.rules.cap * 1000 * (.35 + Math.random() * .9) : D.rules.win * 1000 * (1.5 + Math.random() * 3)); }
   duelDraw();
 }
@@ -9301,13 +9303,14 @@ function duelTick(){
     if (D.ph === 'count' && now - (D.sentAt || 0) >= 1000 && !D.bot){ D.sentAt = now; duelSend('d:st', Object.assign({ ph:'count' }, duelStats())); } // ready news goes out fast
   }
   if (D.ph === 'live'){
+    try { dfxTick(); } catch(e){}
     const capAt = capAtOf(D), ends = HIT.ends || [], hits = HIT.hits || [];
     for (let j = 1; j <= Math.min(ends.length, hits.length); j++){ // hits that ended since the start, each one once (matched from the end: a reload can put back hits without end times)
       const t = ends[ends.length - j], secs = hits[hits.length - j]; if (!t || t < D.start || t > capAt || D.me.seen.has(t)) continue;
       const stopAt = Math.min(D.me.out || Infinity, (D.op && D.op.out) || Infinity); if (t > D.start + stopAt) continue; // the match ended when the first clock ran out
       D.me.seen.add(t);
       if (secs >= r.min && !D.bot && S.mode === 'live' && !duelProfOk()){ D.me.bad = (D.me.bad || 0) + 1; toast('That hit didn’t count: use the 1v1 profile (P1)'); continue; }
-      if (secs >= r.min){ D.me.h++; D.me.b = Math.max(D.me.b, secs); D.me.tot = (D.me.tot || 0) + secs; if (!D.me.out) D.me.at = Math.max(D.me.at, t); buzz(15); duelPop(true, Math.round(secs * DUEL_PPS));
+      if (secs >= r.min){ D.me.h++; D.me.b = Math.max(D.me.b, secs); D.me.tot = (D.me.tot || 0) + secs; if (!D.me.out) D.me.at = Math.max(D.me.at, t); buzz(15); duelPop(true, Math.round(secs * DUEL_PPS)); dfxHit(secs);
         if (secs >= duelBlinkAt()){ D.me.bl = (D.me.bl || 0) + 1; setTimeout(() => duelBlaze(true), 60); } }
     }
     if (!D.me.out){
@@ -9365,12 +9368,98 @@ function duelArenaUpdate(ar){
     el.querySelector('.dv-clock').textContent = out ? 'OUT' : hitting ? (Math.round((performance.now() - HIT.start) / 100) / 10).toFixed(1) + 's' : vrMS(left) + (cool ? ' ❄' : '');
   });
 }
+/* ---- 1v1 Puffco effects (test build): the light on your Puffco reacts to the match.
+   Peak Pro gets animated looks (one write each). Proxy and the original Peak only take solid colors, so they get quick color steps.
+   While heating it paints the live heat light (/p/app/thc/colr) and puts your 1v1 light back after. Not heating: the preview channel, cleared after. ---- */
+const DFX = { gen:0, cur:null, k:'', until:0, t:0, ft:0, pend:0, last:{}, ch:'', pxN:0 };
+const dfxOpC = () => okColor(DUEL.op && DUEL.op.c) || '#ff3b8a';
+const DFX_FX = {
+  fight:  { n:'Fight!',          why:'The clock starts',                pri:5, ms:1600, tag:'emberline-fx-strobe',      cols:['#ffffff'], t:1,   frames: c => [['#ffffff', 250], ['#000000', 250]] },
+  fire:   { n:'On fire',         why:'You hit a blinker',               pri:6, ms:6000, tag:'emberline-fx-wave',        cols:['#ff2200', '#ff7a00', '#ffcc00'], t:.95, frames: c => [['#ff2200', 300], ['#ff8800', 250], ['#ffcc00', 250], ['#ff4400', 300]] },
+  burn:   { n:'Under fire',      why:'They hit a blinker',              pri:4, ms:3000, tag:'emberline-fx-police',      cols: () => [dfxOpC(), '#ff0000'], t:.9 },
+  streak: { n:'Hot streak',      why:'3 hits of 5s+ in a row',          pri:3, ms:4000, tag:'emberline-fx-comet',       cols: () => [duelColor(), '#ffffff'], t:.9 },
+  lead:   { n:'Took the lead',   why:'You pass them on points',         pri:2, ms:2200, gap:6000, tag:'emberline-fx-strobe', cols:['#ffd23f'], t:.8, frames: c => [['#ffd23f', 250], ['#000000', 250]] },
+  lost:   { n:'Lost the lead',   why:'They pass you on points',         pri:2, ms:2500, gap:6000, tag:'emberline-fx-heartbeat', cols:['#ff1a1a'], t:.75, frames: c => [['#ff1a1a', 300], ['#300000', 300]] },
+  final:  { n:'Final 15 seconds', why:'Heartbeat in your color to the end', pri:1, ms: () => Math.max(1500, Math.min(15000, capAtOf(DUEL) - Date.now())), tag:'emberline-fx-heartbeat', cols: () => [duelColor()], t:.95, frames: c => [[c[0], 300], ['#000000', 300]] },
+  win:    { n:'Victory',         why:'You won',                         pri:9, ms:10000, tag:'pikaled2-spin-mood-light', cols:['#ffd23f', '#ffffff', '#ffb020', '#ffffff'], t:.7, frames: c => [['#ffd23f', 400], ['#ffffff', 300], ['#ffb020', 400]] },
+  lose:   { n:'Defeat',          why:'You lost or gave up',             pri:9, ms:6000, tag:'emberline-fx-breathe',     cols:['#ff1a1a'], t:.35, frames: c => [['#ff1a1a', 700], ['#400000', 700]] },
+  draw:   { n:'Draw',            why:'Nobody wins',                     pri:9, ms:4000, tag:'emberline-fx-breathe',     cols:['#9a9ab0'], t:.4,  frames: c => [['#9a9ab0', 700], ['#202028', 700]] }
+};
+const dfxOn = () => store.dfx !== false && S.mode === 'live';
+const dfxAnim = () => !isProxy() && S.api !== 2; // Peak Pro (and new Peak firmware): animated moods
+const dfxHeating = () => S.state >= 7 && S.state <= 9;
+async function dfxProxy(path, blob){ // the Proxy: find the write that works once, then reuse it without reading back
+  if (!DFX.pxN){ DFX.pxN = await proxyColr(path, blob); return; }
+  const tries = [() => ble.write(path, blob, 0, 4), () => ble.writeBlob(path, blob), () => ble.write(path, blob, 0, 1), () => ble.write(path, blob, 0, 0)];
+  return tries[DFX.pxN - 1]();
+}
+async function dfxWrite(ch, look){ // look: { blob } (animated, Peak Pro) or { hex }
+  if (ch === 'pv') return previewWrite(look.blob || look.hex);
+  if (isProxy()) return dfxProxy('/p/app/thc/colr', proxyBlob(look.hex));
+  if (S.api === 2) return ble.write('/p/app/thc/colr', rgbt(look.hex));
+  return ble.writeBlob('/p/app/thc/colr', look.blob || solidPayload(look.hex));
+}
+function dfxQ(fn){ if (DFX.pend > 1) return; DFX.pend++; ledJob(() => fn().catch(() => {})).finally(() => DFX.pend--); } // drop a step rather than pile up Bluetooth writes
+function dfx(k, force){
+  const fx = DFX_FX[k]; if (!fx || !dfxOn() || (!force && !DUEL.on)) return;
+  const now = Date.now();
+  if (!force && DFX.cur && DFX.cur.pri > fx.pri && now < DFX.until) return; // something bigger is showing
+  if (!force && now - (DFX.last[k] || 0) < (fx.gap || 0)) return;
+  DFX.last[k] = now;
+  const gen = ++DFX.gen, ms = typeof fx.ms === 'function' ? fx.ms() : fx.ms, cols = typeof fx.cols === 'function' ? fx.cols() : fx.cols;
+  const ch = dfxHeating() && !store.dfxPv ? 'thc' : 'pv';
+  if (DFX.ch && DFX.ch !== ch && DFX.cur) dfxRestore(DFX.ch); // switched channel mid-effect: tidy the old one
+  DFX.cur = fx; DFX.k = k; DFX.until = now + ms; DFX.ch = ch; clearTimeout(DFX.t); clearTimeout(DFX.ft);
+  if (dfxAnim()){
+    let blob = null; try { blob = moodPayload({ kind:'tpl', tag: fx.tag, name: fx.n, meta:{ userColors: cols, tempoFrac: fx.t, dynamicInhale: 0 } }); } catch(e){}
+    dfxQ(() => dfxWrite(ch, blob ? { blob } : { hex: cols[0] }));
+  } else {
+    const frames = fx.frames ? fx.frames(cols) : cols.length > 1 ? cols.map(c => [c, 350]) : [[cols[0], 350], ['#000000', 350]]; let i = 0;
+    const step = () => { if (gen !== DFX.gen) return; const [hex, f] = frames[i++ % frames.length]; dfxQ(() => dfxWrite(ch, { hex })); DFX.ft = setTimeout(step, Math.max(250, f)); };
+    step();
+  }
+  DFX.t = setTimeout(() => dfxEnd(gen), ms);
+  try { const l = $('#dfxNow'); if (l) l.textContent = fx.n; } catch(e){}
+}
+function dfxEnd(gen){
+  if (gen !== DFX.gen) return;
+  clearTimeout(DFX.ft); const ch = DFX.ch, was = DFX.k; DFX.cur = null; DFX.k = '';
+  const D = DUEL; if (was !== 'final' && D.on && D.ph === 'live' && D.fxFinal && capAtOf(D) - Date.now() > 1500) return dfx('final'); // back to the heartbeat
+  dfxRestore(ch); DFX.ch = '';
+  try { const l = $('#dfxNow'); if (l) l.textContent = ''; } catch(e){}
+}
+function dfxRestore(ch){
+  if (S.mode !== 'live') return;
+  if (ch === 'pv') return void ledJob(() => previewClear().catch(() => {}));
+  const m = duelMoodRef(); let blob = null;
+  if (dfxAnim()){ try { blob = m ? moodPayload(m) : null; } catch(e){} }
+  dfxQ(() => dfxWrite('thc', blob ? { blob } : { hex: duelColor() })); // your 1v1 light again
+}
+function dfxStop(){ if (!DFX.cur) return; DFX.gen++; clearTimeout(DFX.t); clearTimeout(DFX.ft); const ch = DFX.ch; DFX.cur = null; DFX.k = ''; DFX.ch = ''; dfxRestore(ch); }
+// lead changes and the last 15 seconds, checked every second while live
+function dfxTick(){
+  const D = DUEL; if (D.ph !== 'live' || !dfxOn()) return;
+  const sc = duelScore(D.me, D.op || {}), lead = sc.a > sc.b ? 1 : sc.a < sc.b ? -1 : 0;
+  if (D.fxLead !== undefined && lead !== D.fxLead && lead){ dfx(lead > 0 ? 'lead' : 'lost'); }
+  D.fxLead = lead;
+  if (duelTimed(D.rules) && !D.fxFinal && capAtOf(D) - Date.now() <= 15000){ D.fxFinal = true; dfx('final'); }
+}
+function dfxHit(secs){ const D = DUEL; D.fxStreak = secs >= 5 ? (D.fxStreak || 0) + 1 : 0; if (D.fxStreak === 3) dfx('streak'); }
+// test tools: play every effect, one after another
+function dfxTryAll(){
+  if (S.mode !== 'live') return toast(`Connect your ${devWord()} first`);
+  if (store.dfx === false) return toast('Turn Puffco effects on first');
+  const ks = Object.keys(DFX_FX); let i = 0;
+  const next = () => { if (i >= ks.length){ dfxStop(); return toast('Done'); } const k = ks[i++], fx = DFX_FX[k]; toast(`${fx.n}: ${fx.why}`); dfx(k, true); setTimeout(next, 4200); };
+  next();
+}
 // a blinker: flames behind that player's name for a few seconds
 function duelBlaze(you){
   const el = document.querySelector(`.egg.duel .dv-p[data-side="${you ? 'me' : 'op'}"]`); if (!el) return;
   el.classList.remove('blaze'); void el.offsetWidth; el.classList.add('blaze');
   clearTimeout(el._bz); el._bz = setTimeout(() => el.classList.remove('blaze'), 4200);
   if (you) buzz([30, 30, 30, 30, 80]);
+  dfx(you ? 'fire' : 'burn');
 }
 // big FIGHT / VICTORY splash and the "+1" when a hit counts
 function duelSplash(txt, sub, pc){
@@ -9440,6 +9529,7 @@ function duelDecide(now){
 function duelFinish(res, why, sc, quit){
   const D = DUEL, now = Date.now(); if (D.res) return;
   D.res = { r: res, why, sc, quit: !!quit }; D.ph = 'done'; D.finalAt = now; D.endAt = now;
+  try { dfx(res === 'win' ? 'win' : res === 'lose' ? 'lose' : 'draw'); } catch(e){}
   if (D.demo){ buzz([60, 40, 60, 40, 120]); duelSplash(res === 'win' ? 'VICTORY' : 'DEFEAT', sc ? sc.a + ' – ' + sc.b : '', res === 'win' ? '#ffd23f' : '#ff3b4a'); if (res === 'win') setTimeout(duelConfetti, 250); duelDraw(); return; } // demo: show it, save nothing
   const rec = store.duelRec = store.duelRec || { w:0, l:0, d:0 }; rec[res === 'win' ? 'w' : res === 'lose' ? 'l' : 'd']++;
   if (D.rules.bet && res !== 'draw') rec.rp = (rec.rp || 0) + (res === 'win' ? D.rules.bet : -D.rules.bet);
@@ -9510,7 +9600,6 @@ function drawPills(){
 function duelCustom(){ const r = duelRules(); r.prof = duelProfSan(r.prof); return r; }
 function duelInput(e){
   const t = e.target;
-  if (t.id === 'dBetIn'){ store.duelBet = betOk(t.value); save(); document.querySelectorAll('.egg.duel [data-d="bet"]').forEach(x => x.classList.toggle('on', +x.dataset.v === store.duelBet)); return; }
   if (!t.dataset || !t.dataset.dp) return;
   try { syncRange(t); } catch(_){}
   const c = duelCustom(); c.prof[t.dataset.dp] = +t.value; c.prof = duelProfSan(c.prof); store.duelRules = c; save();
@@ -9602,13 +9691,13 @@ function duelDraw(){
           <p class="dnote">Min hit: how long a hit has to be to reset your clock. Clock: how long you have between hits.</p></div>
         <div class="dpanel"><div class="dset-h"><span class="label">Bet RP</span><span class="muted" style="font-size:13px">You have ${myRp} RP</span></div>
           <div class="dchips dbet">${betBtns}</div>
-          <div class="dbet-in"><input type="number" id="dBetIn" min="0" step="1" inputmode="numeric" placeholder="Or type any amount" value="${duelBet() || ''}"><b>RP</b></div>
           <p class="dnote">Winner takes it from the loser. ${DUEL_RP_REAL ? 'You can’t bet more RP than you have.' : 'For now it’s shown only, your RP doesn’t change.'}</p></div>
         <div class="dpanel"><span class="label">Invite a friend</span><div id="dFr" class="dfr-list"></div></div></div>
       <div class="dpanel"><div class="dset-h"><span class="label">Your light</span><span class="muted" style="font-size:13px" id="dLightName">${duelMoodRef() ? esc(duelMoodRef().name || 'Mood') : 'Solid color'}</span></div>
         <div class="dcol-row">${DUEL_COLORS.map(c => `<button class="dcol${!duelMoodRef() && c === duelColor() ? ' on' : ''}" data-d="col" data-c="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join('')}<button class="btn small" data-d="moods" style="margin-left:auto">Moods</button></div>
         <div class="dmood-grid" id="dMoods" hidden></div>
-        <span class="muted" style="font-size:12px">Your ${esc(devWord())} shows it during a 1v1, and its main color marks your side of the score.</span></div>
+        <span class="muted" style="font-size:12px">Your ${esc(devWord())} shows it during a 1v1, and its main color marks your side of the score.</span>
+        <div class="dset-h" style="gap:10px;align-items:center"><span style="font-size:14px;flex:1;min-width:0"><b>Puffco effects</b> <span class="beta-tag">TEST</span><br><span class="muted" style="font-size:12px">Your light reacts: on fire for blinkers, gold when you take the lead, a heartbeat in the last 15s</span></span><button class="btn small${store.dfx !== false ? ' primary' : ''}" data-d="dfx" style="flex:none;min-width:64px">${store.dfx !== false ? 'On' : 'Off'}</button></div></div>
       <p class="dnote">Points: ${DUEL_PTS_TXT}. Your clock pauses (up to 2 min) if your ${esc(devWord())}’s battery gets hot. Your Profile 1 is saved and swapped for the 1v1 profile, then put back when you’re done.</p>
       <p class="dnote">Record: ${rec.w} W · ${rec.l} L${rec.d ? ' · ' + rec.d + ' D' : ''}${rec.rp ? ` · bets ${rec.rp > 0 ? '+' : ''}${rec.rp} RP` : ''}${DUEL_RP_REAL ? `. Today ${duelDayNet() > 0 ? '+' : ''}${duelDayNet()} of ${DUEL_DAY_MAX} RP you can win a day` : ' (not real yet)'}. Consume responsibly, take breaks.</p>
       <button class="btn small" data-d="bot">Practice vs a bot</button>
@@ -9679,11 +9768,12 @@ function duelClick(e){
   const b = e.target.closest('[data-d]'); if (!b) return; const k = b.dataset.d;
   const rules = () => { const r = duelCustom(); el.querySelectorAll('[data-dr]').forEach(s => r[s.dataset.dr] = +s.value); store.duelRules = r; save(); return duelRules(); };
   if (k === 'close'){ queueLeave(); return duelHide(); }
+  if (k === 'dfx'){ store.dfx = store.dfx === false; save(); b.classList.toggle('primary', store.dfx !== false); b.textContent = store.dfx !== false ? 'On' : 'Off'; if (store.dfx === false) dfxStop(); return; }
   if (k === 'q') return queueJoin();
   if (k === 'demo') return duelDemo();
   if (k === 'bot'){ duelStart('host', 'BOT', Object.assign({}, QUEUE_RULES, { bet:0 }), true); return; }
   if (k === 'mode'){ const m = b.dataset.m; queueLeave(); el.querySelectorAll('.dmode-b').forEach(x => x.classList.toggle('on', x === b)); $('#dSecR').hidden = m !== 'r'; $('#dSecF').hidden = m !== 'f'; el.querySelectorAll('input[type=range]').forEach(syncRange); if (m === 'f') lobbyPing(true); duelMenuPaint(); return; }
-  if (k === 'bet'){ store.duelBet = +b.dataset.v; save(); el.querySelectorAll('[data-d="bet"]').forEach(x => x.classList.toggle('on', x === b)); const i = $('#dBetIn'); if (i) i.value = store.duelBet || ''; return; }
+  if (k === 'bet'){ store.duelBet = +b.dataset.v; save(); el.querySelectorAll('[data-d="bet"]').forEach(x => x.classList.toggle('on', x === b)); return; }
   if (k === 'qx') return queueLeave();
   if (k === 'inv'){ rules(); return duelInvite(b.dataset.id, b.dataset.n); }
   if (k === 'col'){ store.duelColor = b.dataset.c; store.duelMood = null; save(); el.querySelectorAll('.dcol').forEach(x => x.classList.toggle('on', x === b)); el.querySelectorAll('.dmood').forEach(x => x.classList.remove('on')); const n = $('#dLightName'); if (n) n.textContent = 'Solid color'; return; }
