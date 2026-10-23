@@ -1948,6 +1948,9 @@ body.vr-on #dvFrame{display:none}
 .dh-sc{display:grid;justify-items:end;font:800 15px var(--f-round,system-ui);font-variant-numeric:tabular-nums}.dh-sc small{font:700 11px var(--f-body,system-ui)}.dh-sc small.win{color:#3ddc84}.dh-sc small.lose{color:#ff3b4a}
 .dh-row .dstat{margin:0 12px;width:calc(100% - 24px)}.dh-row .dnote{padding:6px 12px 10px}
 /* 1v1 menu */
+.wn-vs{display:flex;align-items:center;justify-content:center;gap:12px;padding:6px 0}
+.wn-vs span{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;font:900 26px var(--f-round,system-ui);color:#fff;background:linear-gradient(135deg,var(--pc),#ffffff55);box-shadow:0 0 0 4px var(--pc),0 0 24px var(--pc);animation:dvVs 3.2s ease-in-out infinite}
+.wn-vs b{font:900 italic 24px var(--f-round,system-ui);padding:5px 9px;border-radius:10px;color:#fff;background:linear-gradient(135deg,#9900cc,#ff3b8a);transform:skewX(-8deg)}
 .ddisc{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:18px;background:linear-gradient(110deg,#5865f2,#7b5cff);color:#fff!important;text-decoration:none;min-width:0}
 .ddisc svg{width:28px;height:28px;flex:none}.ddisc span{display:grid;gap:2px;flex:1;min-width:0}.ddisc b{font-size:15px}.ddisc small{font-size:12px;opacity:.9;line-height:1.3}
 .ddisc em{font-style:normal;font-weight:800;font-size:13px;padding:7px 12px;border-radius:99px;background:rgba(255,255,255,.2);flex:none}
@@ -2119,7 +2122,7 @@ body.vr-on #dvFrame{display:none}
     <h1 class="largetitle">Social</h1>
     <div class="card soc-me" id="socMe"></div>
     <button class="card ish-entry" id="ishOpen">ITEM SHOP<small>Shop · Ember Pass · Locker</small></button>
-    <button class="card ish-entry duel-entry" id="duelOpen">1V1 <span class="beta-tag">BETA</span><small>Last one hitting wins</small></button>
+    <button class="card ish-entry duel-entry" id="duelOpen">1V1 <span class="beta-tag">BETA</span><small>2-minute matches · every second scores</small></button>
     <div class="card soc-find"><span class="label">Find people</span>
       <div class="soc-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" id="socQ" placeholder="Search usernames" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
       <div class="soc-list" id="socResults"></div></div>
@@ -8558,7 +8561,7 @@ document.fonts && document.fonts.ready.then(() => moveTabPill(view));
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { applyTheme(); draw(); });
 
 /* ---- What's new: shows once per update ---- */
-const WN_VER = '2026-10-legend';
+const WN_VER = '2026-10-1v1';
 /* ---- limited edition lights: owners can share their device's light files so we can add that edition's colorway ---- */
 const ED_LIGHT_PATHS = () => [0,1,2,3].map(i => `/u/app/hc/${i}/colr`).concat(['/p/app/thc/colr', '/p/app/ltrn/colr'],
   S.api === 2 ? [0,1,2,3].flatMap(i => [`/u/app/hc/${i}/phcl`, `/u/app/hc/${i}/accl`]) : [0,1,2,3,4,5].map(i => `/u/app/led/aa/${i}`).concat([0,1,2,3,4,5,6,7].flatMap(i => [`/u/app/led/ca/${i}`, `/u/app/led/oa/${i}`])));
@@ -8608,26 +8611,29 @@ function rankTaxNotice(force, n){
   el.querySelector('#rtnOk').addEventListener('click', () => { if (Date.now() - opened < 500) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); });
 }
 const WN_ITEMS = [
-  ['New rank: Legend', 'There’s a new tier above Champion. Hit 5,000 RP in a month to become a Legend and get the purple crowned badge.'],
-  ['Legend rules', 'Like Champion, blinkers need 11 seconds. Each 30s+ session costs 10 RP, so every blinker matters.'],
-  ['Fixes', 'Connecting is more reliable, the clean meter works on the Proxy, and the app runs cooler on your phone.']
+  ['1v1s are here <span class="beta-tag">BETA</span>', 'Tap 1V1 in Social. Get matched with someone near your rank, or invite a friend you follow (and who follows you back).'],
+  ['How you win', 'Matches last 2 minutes. Every second of every hit is 10 points, so long pulls win. Blinkers set your side on fire.'],
+  ['Bets', 'Random matches have a 10 RP buy-in and friend games can bet any amount. While 1v1s are in beta your RP doesn’t actually change.'],
+  ['Fixes', 'Your first hit now counts the moment your Puffco hits Ready.']
 ]
 function whatsNew(force){
   if (!force && store.wnSeen === WN_VER) return;
-  if (!force && !store.wnSeen && !(store.sessions || []).length && !store.lastDeviceId){ store.wnSeen = WN_VER; save(); return; } // brand-new users don't need a changelog
+  // everyone sees this one, new users included
   if (document.querySelector('.egg')) return;
   store.wnSeen = WN_VER; save();
   const el = document.createElement('div'); el.className = 'egg';
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="What's new" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
-    <span class="label" style="text-align:center">Update</span>
-    <h2 style="text-align:center;margin:0">What’s new</h2>
-    <div style="width:96px;justify-self:center">${rankBadge(new Date().getMonth(), RB_TIERS.length - 1)}</div>
+    <span class="label" style="text-align:center">New</span>
+    <h2 style="text-align:center;margin:0">We added 1v1s</h2>
+    <div class="wn-vs" aria-hidden="true"><span style="--pc:#9900cc">Y</span><b>VS</b><span style="--pc:#ff3b8a">?</span></div>
     ${WN_ITEMS.map(([t, d]) => `<div style="display:grid;gap:2px"><b>${t}</b><span class="muted" style="font-size:14px">${d}</span></div>`).join('')}
-    <button class="btn primary" id="wnGo" style="width:100%">Nice</button></div>`;
+    <button class="btn primary" id="wnPlay" style="width:100%">Play a 1v1</button><button class="btn" id="wnGo" style="width:100%">Later</button></div>`;
   document.body.appendChild(el); applyHaptics();
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
   const opened = Date.now();
-  el.querySelector('#wnGo').addEventListener('click', () => { if (Date.now() - opened < 500) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); });
+  const shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.querySelector('#wnGo').addEventListener('click', () => { if (Date.now() - opened < 500) return; shut(); });
+  el.querySelector('#wnPlay').addEventListener('click', () => { if (Date.now() - opened < 500) return; shut(); show('social'); setTimeout(() => duelSheet({ queue:false }), 350); });
 }
 // wait until the welcome and any other popup are gone, then show it
 (function wnWait(n){ if (store.wnSeen === WN_VER || n > 40) return; const busy = greetOpen || document.getElementById('spl') || document.querySelector('.egg') || [...document.querySelectorAll('.welcome, #welcome')].some(w => !w.hidden && getComputedStyle(w).display !== 'none' && w.childElementCount > 0); // fixed popups have no offsetParent, so check display instead
@@ -9133,7 +9139,7 @@ const DUEL_RP_REAL = false; // bets move real RP only once the server settles th
 const VR_BETA = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco', 'bkmoonrock', 'mara', 'whoscert']; // VR panel + Passthrough: Rich, infused.taco, BKmoonrock, Mara, whoscert
 const DUEL_BETA = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco', 'bkmoonrock', 'mara', 'whoscert']; // 1v1s: Rich, infused.taco, BKmoonrock, Mara, whoscert
 function onList(list){ const me = LB.me || lbStore().meCache; if (!me) return false; const n = String(me.username || '').toLowerCase(); return list.some(u => u === me.id || (n && u.toLowerCase() === n)); }
-const duelAllowed = () => IS_TEST || isRich() || onList(DUEL_BETA);
+const duelAllowed = () => true; // 1v1s are open to everyone (still labeled BETA). DUEL_BETA is kept for reference
 const vrAllowed = () => IS_TEST || isRich() || onList(VR_BETA);
 function duelGate(){ [['#duelOpen', 'flex', duelAllowed()], ['#vrCard', 'grid', vrAllowed()]].forEach(([q, d, ok]) => { const e = $(q); if (e) e.style.display = ok ? d : 'none'; }); }
 const DISCORD_URL = 'https://discord.gg/JSHyWbxrUV';
@@ -9529,7 +9535,7 @@ function duelDraw(){
     const rec = store.duelRec || { w:0, l:0, d:0 };
     const cu = duelCustom(), cp = cu.prof, deg = f => store.unit === 'C' ? Math.round((f - 32) * 5 / 9) + '°C' : f + '°F';
     const myRp = myRpNow(), betBtns = DUEL_BETS.map(v => `<button class="dchip${v === duelBet() ? ' on' : ''}" data-d="bet" data-v="${v}">${v ? v : 'None'}</button>`).join('');
-    card.innerHTML = `<span class="label" style="text-align:center">1v1 <span class="beta-tag">BETA</span></span><h2 style="margin:0;text-align:center">Last one hitting wins</h2>
+    card.innerHTML = `<span class="label" style="text-align:center">1v1 <span class="beta-tag">BETA</span></span><h2 style="margin:0;text-align:center">Every second counts</h2>
       <div class="dmode"><button class="dmode-b" data-d="mode" data-m="r"><b>Random match</b><small>Matchmaking with anyone</small></button><button class="dmode-b" data-d="mode" data-m="f"><b>Play a friend</b><small>Custom game, you pick the settings</small></button></div>
       <a class="ddisc" href="${DISCORD_URL}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.3 5.3A17 17 0 0 0 15.1 4l-.5 1a15.7 15.7 0 0 0-5.2 0l-.5-1a17 17 0 0 0-4.2 1.3C2 9.2 1.3 13 1.6 16.7a17 17 0 0 0 5.2 2.6l1.1-1.8c-.6-.2-1.2-.5-1.8-.9l.4-.3a12 12 0 0 0 11 0l.4.3c-.6.4-1.2.7-1.8.9l1.1 1.8a17 17 0 0 0 5.2-2.6c.4-4.3-.7-8-3.1-11.4ZM8.7 14.5c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Zm6.6 0c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Z"/></svg><span><b>Looking for players?</b><small>Join the Emberline Discord and find someone to 1v1</small></span><em>Join</em></a>
       <div id="dSecR" class="dpanel" hidden><span class="label">Random match</span>
@@ -9770,7 +9776,7 @@ function lobbyInv(m){
   LOBBY.inv = { from: String(m.id), n: String(m.n || 'Someone').slice(0, 20), code, r: m.r || {}, at: Date.now() }; lobbyTimer();
   const r = LOBBY.inv.r, el = document.createElement('div'); el.className = 'egg dinv';
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="1v1 invite" style="gap:12px"><span class="label">1v1</span><h2 style="margin:0">${esc(LOBBY.inv.n)} wants to 1v1</h2>
-    <p>Last one hitting wins · hits ${duelSan(r).min}s+ · ${duelSan(r).win / 60} min clock · ${capTxt(duelSan(r).cap)}</p><p><b>${esc(profTxt(duelSan(r).prof))}</b></p>${duelSan(r).bet ? `<p style="color:#ffd23f;font-weight:700">Bet: ${duelSan(r).bet} RP. Winner takes it${DUEL_RP_REAL ? '' : ' (not real RP yet)'}</p>` : ''}
+    <p>${rulesTxt(duelSan(r))}</p><p><b>${esc(profTxt(duelSan(r).prof))}</b></p>${duelSan(r).bet ? `<p style="color:#ffd23f;font-weight:700">Bet: ${duelSan(r).bet} RP. Winner takes it${DUEL_RP_REAL ? '' : ' (not real RP yet)'}</p>` : ''}
     <p style="font-size:13px">Your Profile 1 is saved and swapped for this, then comes back when you’re done.</p>
     <div class="row" style="gap:8px;width:100%"><button class="btn" data-i="no" style="flex:1">Not now</button><button class="btn primary" data-i="ok" style="flex:1">Accept</button></div></div>`;
   document.body.appendChild(el); applyHaptics(); buzz([40, 60, 40]); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
