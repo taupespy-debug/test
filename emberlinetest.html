@@ -8198,7 +8198,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -8402,6 +8402,8 @@ $('#testTools').addEventListener('click', e => {
   if (k === 'vr3d'){ location.href = 'vr3d.html'; return; }
   if (k === 'ptmode'){ if (!$('#vrp')) vrOpen(); setTimeout(ptIntro, 300); return; }
   if (k === 'dueldemo'){ duelDemo(); return; }
+  if (k === 'dcap'){ store.duelCapSeen = ''; duelCapPop(); return; }
+  if (k === 'dcapfill'){ const full = duelDayNet() >= DUEL_DAY_MAX; store.duelDay = { d: dayKey(), id: acctId() || 'local', net: full ? 0 : DUEL_DAY_MAX }; store.duelCapSeen = ''; save(); toast(full ? 'Today’s 1v1 limit reset' : 'Today’s 1v1 limit filled (no RP added)'); return; }
   if (k === 'duelbot' || k === 'duelfast'){ duelSheet(); duelStart('host', 'BOT', k === 'duelfast' ? { min:1, win:60, cap:300 } : duelRules(), true); return; }
   if (k === 'rtcheck'){ const r = new Relay('ember-check-' + rtCode()), t0 = Date.now(); let done = false; toast('Checking the relay…');
     r.on('open', () => { done = true; toast(`Relay works (${Date.now() - t0} ms)`); r.close(); }).on('error', p => { done = true; toast('Relay refused: ' + JSON.stringify(p || {}).slice(0, 80)); r.close(); }).connect();
@@ -8566,7 +8568,7 @@ document.fonts && document.fonts.ready.then(() => moveTabPill(view));
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { applyTheme(); draw(); });
 
 /* ---- What's new: shows once per update ---- */
-const WN_VER = '2026-10-1v1';
+const WN_VER = '2026-10-1v1rp'; // bumped: 1v1 RP is real now, with a daily limit
 /* ---- limited edition lights: owners can share their device's light files so we can add that edition's colorway ---- */
 const ED_LIGHT_PATHS = () => [0,1,2,3].map(i => `/u/app/hc/${i}/colr`).concat(['/p/app/thc/colr', '/p/app/ltrn/colr'],
   S.api === 2 ? [0,1,2,3].flatMap(i => [`/u/app/hc/${i}/phcl`, `/u/app/hc/${i}/accl`]) : [0,1,2,3,4,5].map(i => `/u/app/led/aa/${i}`).concat([0,1,2,3,4,5,6,7].flatMap(i => [`/u/app/led/ca/${i}`, `/u/app/led/oa/${i}`])));
@@ -8619,17 +8621,19 @@ const WN_ITEMS = [
   ['1v1s are here <span class="beta-tag">BETA</span>', 'Tap 1V1 in Social. Get matched with someone near your rank, or invite a friend you follow (and who follows you back).'],
   ['How you win', 'Matches last 2 minutes. Every second of every hit is 10 points, so long pulls win. Blinkers set your side on fire.'],
   ['Bets', 'Random matches have a 10 RP buy-in and friend games can bet up to 100 RP. The winner takes the loser’s RP, straight into this month’s ranked score.'],
+  ['Daily limit', 'You can win up to 150 RP a day from 1v1s to start. After that, wins don’t add RP until tomorrow.'],
   ['Fixes', 'Your first hit now counts the moment your Puffco hits Ready.']
 ]
 function whatsNew(force){
   if (!force && store.wnSeen === WN_VER) return;
   // everyone sees this one, new users included
   if (document.querySelector('.egg')) return;
+  if (store.wnSeen && store.wnSeen !== WN_VER) store.wnSeenOld = store.wnSeen; // saw the first 1v1 popup: this one leads with the RP news
   store.wnSeen = WN_VER; save();
   const el = document.createElement('div'); el.className = 'egg';
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="What's new" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
     <span class="label" style="text-align:center">New</span>
-    <h2 style="text-align:center;margin:0">We added 1v1s</h2>
+    <h2 style="text-align:center;margin:0">${store.wnSeenOld === '2026-10-1v1' ? '1v1s now use real RP' : 'We added 1v1s'}</h2>
     <div class="wn-vs" aria-hidden="true"><span style="--pc:#9900cc">Y</span><b>VS</b><span style="--pc:#ff3b8a">?</span></div>
     ${WN_ITEMS.map(([t, d]) => `<div style="display:grid;gap:2px"><b>${t}</b><span class="muted" style="font-size:14px">${d}</span></div>`).join('')}
     <button class="btn primary" id="wnPlay" style="width:100%">Play a 1v1</button><button class="btn" id="wnGo" style="width:100%">Later</button></div>`;
@@ -9143,6 +9147,27 @@ const DUEL_RP_REAL = true; // 1v1 buy-ins and bets move your ranked RP this mont
 const DUEL_BET_MAX = 100;
 // your 1v1 RP this month, for this account (added to your ranked RP)
 function duelNet(){ const m = lbMonth(), id = acctId() || 'local', b = (store.duelRp || {})[m]; return (b && +b[id]) || 0; }
+const DUEL_DAY_MAX = 150; // most RP you can profit from 1v1s in one day (a loss lowers today's total, so you can win it back)
+const dayKey = () => new Date().toDateString();
+function duelDayNet(){ const d = store.duelDay; return d && d.d === dayKey() && d.id === (acctId() || 'local') ? +d.net || 0 : 0; }
+function duelDayAdd(n){ store.duelDay = { d: dayKey(), id: acctId() || 'local', net: duelDayNet() + n }; }
+const duelDayLeft = () => Math.max(0, DUEL_DAY_MAX - duelDayNet());
+// popup: today's 1v1 limit is hit. With go: asked before a match, "Play anyway" carries on (once a day)
+function duelCapPop(go){
+  if (store.duelCapSeen === dayKey() || $('#dcOk')) return go && go(); // once a day
+  store.duelCapSeen = dayKey(); save();
+  const el = document.createElement('div'); el.className = 'egg'; el.style.zIndex = 240; // above the 1v1 screen
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Daily 1v1 limit" style="gap:12px">
+    <span class="label">1v1</span>
+    <h2 style="margin:0">Daily limit reached</h2>
+    <p class="muted" style="margin:0;font-size:14px">You can win up to <b style="color:#ffd23f">${DUEL_DAY_MAX} RP a day</b> from 1v1s, and you hit it today. Wins won’t add RP until tomorrow, but losses still cost RP. You can still play for fun and for your record.</p>
+    <button class="btn primary" id="dcOk" style="width:100%">${go ? 'Play anyway' : 'Got it'}</button>${go ? '<button class="btn" id="dcNo" style="width:100%">Not now</button>' : ''}</div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now(), shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.querySelector('#dcOk').addEventListener('click', () => { if (Date.now() - opened < 400) return; shut(); if (go) go(); });
+  const no = el.querySelector('#dcNo'); if (no) no.addEventListener('click', () => { if (Date.now() - opened < 400) return; shut(); });
+}
 function duelRpAdd(n){ const m = lbMonth(), id = acctId() || 'local'; store.duelRp = store.duelRp || {}; Object.keys(store.duelRp).forEach(k => { if (k !== m) delete store.duelRp[k]; }); const b = store.duelRp[m] = store.duelRp[m] || {}; b[id] = (+b[id] || 0) + n; save(); }
 /* betas on live, each with its own list (Emberline usernames, any case, or player ids). The test build has everything */
 const VR_BETA = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco', 'bkmoonrock', 'mara', 'whoscert']; // VR panel + Passthrough: Rich, infused.taco, BKmoonrock, Mara, whoscert
@@ -9420,7 +9445,7 @@ function duelFinish(res, why, sc, quit){
   if (D.rules.bet && res !== 'draw') rec.rp = (rec.rp || 0) + (res === 'win' ? D.rules.bet : -D.rules.bet);
   // real RP: not for practice, and not for a win because the other player just left (they never pay, so nobody gets paid)
   const leftOnly = res === 'win' && D.op && D.op.gone && !D.op.quit;
-  if (DUEL_RP_REAL && !D.bot && D.rules.bet && res !== 'draw' && !leftOnly){ D.res.paid = res === 'win' ? D.rules.bet : Math.min(D.rules.bet, myRpNow()); duelRpAdd(res === 'win' ? D.res.paid : -D.res.paid); setTimeout(() => { try { lbPush(true); drawRank(); } catch(e){} }, 400); }
+  if (DUEL_RP_REAL && !D.bot && D.rules.bet && res !== 'draw' && !leftOnly){ D.res.real = true; D.res.paid = res === 'win' ? Math.min(D.rules.bet, duelDayLeft()) : Math.min(D.rules.bet, myRpNow()); D.res.capped = res === 'win' && D.res.paid < D.rules.bet; const n = res === 'win' ? D.res.paid : -D.res.paid; if (n){ duelDayAdd(n); duelRpAdd(n); } if (D.res.capped) setTimeout(() => duelCapPop(), 1800); setTimeout(() => { try { lbPush(true); drawRank(); } catch(e){} }, 400); }
   const op = D.op || {}, pick = o => ({ h: o.h || 0, b: o.b || 0, bl: o.bl || 0, tot: Math.round((o.tot || 0) * 10) / 10, out: o.out || 0 });
   (store.duelHist = store.duelHist || []).unshift({ t: D.start || D.made || now, end: now, op: op.n || 'Player', bot: !!D.bot, r: res, why, quit: !!quit, opQuit: !!op.quit,
     sc: sc ? [sc.a, sc.b] : null, bet: D.rules.bet || 0, me: pick(D.me), them: pick(op), rules: { min: D.rules.min, win: D.rules.win, cap: D.rules.cap } });
@@ -9578,7 +9603,7 @@ function duelDraw(){
         <div class="dmood-grid" id="dMoods" hidden></div>
         <span class="muted" style="font-size:12px">Your ${esc(devWord())} shows it during a 1v1, and its main color marks your side of the score.</span></div>
       <p class="dnote">Points: ${DUEL_PTS_TXT}. Your clock pauses (up to 2 min) if your ${esc(devWord())}’s battery gets hot. Your Profile 1 is saved and swapped for the 1v1 profile, then put back when you’re done.</p>
-      <p class="dnote">Record: ${rec.w} W · ${rec.l} L${rec.d ? ' · ' + rec.d + ' D' : ''}${rec.rp ? ` · bets ${rec.rp > 0 ? '+' : ''}${rec.rp} RP` : ''}${DUEL_RP_REAL ? '' : ' (not real yet)'}. Consume responsibly, take breaks.</p>
+      <p class="dnote">Record: ${rec.w} W · ${rec.l} L${rec.d ? ' · ' + rec.d + ' D' : ''}${rec.rp ? ` · bets ${rec.rp > 0 ? '+' : ''}${rec.rp} RP` : ''}${DUEL_RP_REAL ? `. Today ${duelDayNet() > 0 ? '+' : ''}${duelDayNet()} of ${DUEL_DAY_MAX} RP you can win a day` : ' (not real yet)'}. Consume responsibly, take breaks.</p>
       <button class="btn small" data-d="bot">Practice vs a bot</button>
       ${isRich() || IS_TEST ? '<button class="btn small" data-d="demo">Demo match for videos</button>' : ''}
       ${duelBack() ? '<button class="btn small" data-d="restore">Put my Profile 1 back</button>' : ''}
@@ -9623,7 +9648,7 @@ function duelDraw(){
     const res = D.res || { r:'draw', why:'' }, them = op || {}, dur = D.endAt && D.start ? D.endAt - D.start : 0;
     const big = res.r === 'win' ? 'You won' : res.quit ? 'You gave up' : res.r === 'lose' ? 'You lost' : 'Draw';
     body = `<div class="dres ${res.r}"><div class="dres-big">${big}</div><p>${esc(res.why)}</p></div>
-      ${r.bet && res.r !== 'draw' ? `<p class="duel-bet ${res.r}">${res.paid || D.demo ? (res.r === 'win' ? '+' : '−') + (+res.paid || r.bet) + ' RP' : '<small>No RP this time' + (D.bot ? ' (practice)' : ' (they left)') + '</small>'}${res.paid ? '<small>Added to your ranked RP this month</small>' : ''}</p>` : r.bet ? '<p style="margin:0;text-align:center" class="muted">Draw: nobody pays</p>' : ''}
+      ${r.bet && res.r !== 'draw' ? `<p class="duel-bet ${res.r}">${res.real || D.demo ? (res.r === 'win' ? '+' : '−') + (res.real ? res.paid : r.bet) + ' RP' : '<small>No RP this time' + (D.bot ? ' (practice)' : ' (they left)') + '</small>'}${res.capped ? `<small>Daily 1v1 limit: ${DUEL_DAY_MAX} RP a day</small>` : res.paid ? '<small>Added to your ranked RP this month</small>' : ''}</p>` : r.bet ? '<p style="margin:0;text-align:center" class="muted">Draw: nobody pays</p>' : ''}
       ${duelStatTable(me, them, them.n, dur)}
       ${res.sc ? `<div class="dsc"><div class="dsc-t" style="border:0;padding:0"><span>Points</span><b>${res.sc.a} – ${res.sc.b}</b></div><span class="dnote">${DUEL_PPS} points per second of every counted hit${res.sc.a === res.sc.b && res.sc.tie ? ' · tied, so the longest hit decided it' : ''}</span></div>` : ''}
       <p class="dnote" style="text-align:center">Match ${dur ? vrMS(dur / 1000) : '0:00'} · hits ${r.min}s+ · ${duelTimed(r) ? matchLen(r.cap) + ' match' : r.win / 60 + ' min clock · ' + capTxt(r.cap)} · ${D.demo ? 'demo match, not saved' : 'saved to Stats → 1v1 match history'}</p>`;
@@ -9709,6 +9734,7 @@ function lobbyPing(force){ if (!LOBBY.rt || !LOBBY.rt.open || !$('.egg.duel')) r
 function queueJoin(){
   if (DUEL.on || LOBBY.q) return;
   if (DUEL_RP_REAL && myRpNow() < QUEUE_BUYIN){ toast(`Matchmaking costs ${QUEUE_BUYIN} RP to enter. You have ${myRpNow()}`); return; }
+  if (DUEL_RP_REAL && !duelDayLeft() && store.duelCapSeen !== dayKey()) return duelCapPop(queueJoin);
   lobbyOn(); LOBBY.q = { at: Date.now(), seen: new Map(), skip: new Map(), pend: null, sentAt: 0, bet: QUEUE_BUYIN };
   lobbySendQ(); lobbyTimer(); wakeOn(); duelMenuPaint();
 }
@@ -9781,6 +9807,7 @@ function duelMenuPaint(){
 function duelInvite(id, name){
   const me = LB.me || lbStore().meCache; if (!me || !me.id) return toast('Make a ranked profile in Social to challenge friends');
   if (DUEL_RP_REAL && duelBet() > myRpNow()) return toast(`You only have ${myRpNow()} RP to bet`);
+  if (DUEL_RP_REAL && duelBet() && !duelDayLeft() && store.duelCapSeen !== dayKey()) return duelCapPop(() => duelInvite(id, name));
   queueLeave(); lobbyOn(); lobbyTimer();
   const code = rtCode(); duelStart('host', code, duelRules());
   DUEL.inviting = { to: String(id), n: String(name || 'your friend').slice(0, 20), at: Date.now() };
