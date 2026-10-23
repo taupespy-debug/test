@@ -9741,6 +9741,15 @@ function lobbyInv(m){
 }
 function duelInvClose(){ LOBBY.inv = null; const el = $('.egg.dinv'); if (!el) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); }
 (function lobbyBoot(n){ duelGate(); if (duelAllowed()){ if (!document.hidden) lobbyOn(); return; } if (n < 20) setTimeout(() => lobbyBoot(n + 1), 15000); })(0); // in the lobby while the app is open, so friends' invites reach you (waits for the profile to load)
+// Rich's personal moods: put in his My moods once (Spin works on both the Peak and the Proxy). Delete one and it stays gone
+const RICH_MOODS = [{ id:'rich-spin', name:'Rich Spin', tag:'pikaled2-spin-mood-light', meta:{ userColors:['#8a00ff', '#ffffff', '#8a00ff', '#ffffff'], tempoFrac:.62, dynamicInhale:0 } }];
+function richMoods(n){
+  if (!isRich()){ if (n < 40) setTimeout(() => richMoods(n + 1), 15000); return; } // waits for the profile to load
+  store.richMoods = store.richMoods || []; let added = 0;
+  RICH_MOODS.forEach(m => { if (store.richMoods.includes(m.id)) return; store.richMoods.push(m.id); if (!store.myMoods.some(x => x.id === m.id)){ store.myMoods.unshift(JSON.parse(JSON.stringify(m))); added++; } });
+  save(); if (added){ try { if (view === 'lights') drawMoods(); } catch(e){} toast('Rich Spin is in your moods'); }
+}
+setTimeout(() => richMoods(0), 3000);
 // links: ?vr opens the panel
 { const q = new URLSearchParams(location.search);
   if (q.has('vr')) setTimeout(() => vrOpen(), 300);
