@@ -1963,6 +1963,7 @@ body.vr-on #dvFrame{display:none}
 .dsc div{display:flex;justify-content:space-between;gap:8px}.dsc b.win{color:#3ddc84}.dsc b.lose{color:#ff3b4a}
 .dsc-t{border-top:1px solid var(--line,rgba(255,255,255,.12));padding-top:6px;font-size:16px}
 .d-body,.d-foot{display:grid;gap:12px;min-width:0}
+.vc-row{display:flex;gap:8px;align-items:center;min-width:0}.vc-st{flex:1;min-width:0;font-size:13px}
 .btn.danger{background:#ff3b4a!important;color:#fff!important;border-color:#ff3b4a!important}
 .egg.duel .egg-card{width:min(100%,400px);grid-template-columns:minmax(0,1fr);justify-items:stretch;text-align:left;padding:20px 16px;gap:14px}
 .egg.duel .egg-card > *{min-width:0}
@@ -8207,7 +8208,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -8412,6 +8413,7 @@ $('#testTools').addEventListener('click', e => {
   if (k === 'ptmode'){ if (!$('#vrp')) vrOpen(); setTimeout(ptIntro, 300); return; }
   if (k === 'dueldemo'){ duelDemo(); return; }
   if (k === 'dfxall'){ dfxTryAll(); return; }
+  if (k === 'micchk'){ vcMicCheck(); return; }
   if (k === 'dfxpv'){ store.dfxPv = !store.dfxPv; save(); b.textContent = '1v1 effects while heating: ' + (store.dfxPv ? 'preview channel' : 'live heat light'); return; }
   if (k === 'dcap'){ store.duelCapSeen = ''; duelCapPop(); return; }
   if (k === 'dcapfill'){ const full = duelDayNet() >= DUEL_DAY_MAX; store.duelDay = { d: dayKey(), id: acctId() || 'local', net: full ? 0 : DUEL_DAY_MAX }; store.duelCapSeen = ''; save(); toast(full ? 'Today’s 1v1 limit reset' : 'Today’s 1v1 limit filled (no RP added)'); return; }
@@ -9230,13 +9232,89 @@ function duelStart(role, code, rules, bot){
       .on('d:quit', m => { if (DUEL.op && m.id === DUEL.op.id && !DUEL.res && (DUEL.ph === 'live' || DUEL.ph === 'count')){ DUEL.op.quit = true; duelFinish('win', `${DUEL.op.n} gave up`, null); } })
       .on('d:bye', m => { if (DUEL.op && m.id === DUEL.op.id){ DUEL.op.gone = true; duelDraw(); } })
       .on('open', () => { duelSend('d:hi', { n: duelName(), role, c: duelColor(), p: duelPal(), a: duelAv() }); duelDraw(); })
+      .on('v:on', vcOnOn).on('v:off', vcOnOff).on('v:sig', vcOnSig) // voice chat (test build)
       .on('down', duelDraw);
     DUEL.rt.connect();
   }
   clearInterval(DUEL.timer); DUEL.timer = setInterval(duelTick, 1000);
   wakeOn(); duelDraw(); drawPills();
 }
+/* ---- 1v1 voice chat (test build). WebRTC, phone to phone: no server hears it. The 1v1 relay only carries the setup (one offer, one answer).
+   Both players tap Voice chat; the host calls once both are on. No TURN server, so a few phone networks won't connect ---- */
+const VC = { on:false, opOn:false, mic:null, pc:null, muted:false, state:'', audio:null };
+const VC_ICE = [{ urls:['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+const vcOk = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.RTCPeerConnection);
+function vcAudio(){ if (!VC.audio){ const a = VC.audio = document.createElement('audio'); a.autoplay = true; a.playsInline = true; a.setAttribute('playsinline', ''); document.body.appendChild(a); } return VC.audio; }
+async function vcMic(){
+  return navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true } });
+}
+const vcErr = e => e && e.name === 'NotAllowedError' ? 'Mic blocked. Allow the microphone for this browser in iPhone Settings' : 'No mic: ' + ((e && (e.message || e.name)) || e);
+async function vcStart(){
+  if (!vcOk()) return toast('This browser can’t do voice chat');
+  try { vcAudio().play().catch(() => {}); } catch(e){} // inside the tap, so iPhone lets it play later
+  try { VC.mic = await vcMic(); } catch(e){ return toast(vcErr(e)); }
+  if (!DUEL.on){ VC.mic.getTracks().forEach(t => t.stop()); VC.mic = null; return; }
+  VC.on = true; VC.muted = false; VC.state = 'wait'; duelSend('v:on', {}); vcMaybeCall(); duelDraw();
+}
+function vcMaybeCall(){ if (VC.on && VC.opOn && !VC.pc && DUEL.role === 'host') vcPeer(true); }
+// wait for the network addresses, then send the whole description in one message
+function vcGathered(pc){ return new Promise(res => { if (pc.iceGatheringState === 'complete') return res(); const t = setTimeout(res, 2500); pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete'){ clearTimeout(t); res(); } }); }); }
+function vcPeer(offer){
+  const pc = VC.pc = new RTCPeerConnection({ iceServers: VC_ICE });
+  VC.mic.getTracks().forEach(t => pc.addTrack(t, VC.mic));
+  pc.ontrack = e => { const a = vcAudio(); a.srcObject = e.streams[0] || new MediaStream([e.track]); a.play().catch(() => { VC.state = 'tap'; duelDraw(); }); };
+  pc.onconnectionstatechange = () => { if (pc !== VC.pc) return; const st = pc.connectionState;
+    if (st === 'connected'){ if (VC.state !== 'tap') VC.state = 'live'; buzz(20); }
+    else if (st === 'failed'){ VC.state = 'failed'; toast('Voice couldn’t connect. Some phone networks block it, try Wi-Fi'); }
+    else if (st === 'disconnected') VC.state = 'wait';
+    duelDraw(); };
+  if (offer) (async () => { try { await pc.setLocalDescription(await pc.createOffer()); await vcGathered(pc); if (pc === VC.pc) duelSend('v:sig', { sdp: pc.localDescription.toJSON() }); } catch(e){ VC.state = 'failed'; duelDraw(); } })();
+}
+async function vcOnSig(m){
+  if (!DUEL.op || m.id !== DUEL.op.id || !VC.on || !m.sdp || !m.sdp.type) return;
+  try {
+    if (m.sdp.type === 'offer'){ if (VC.pc){ VC.pc.close(); VC.pc = null; } vcPeer(false); const pc = VC.pc;
+      await pc.setRemoteDescription(m.sdp); await pc.setLocalDescription(await pc.createAnswer()); await vcGathered(pc); if (pc === VC.pc) duelSend('v:sig', { sdp: pc.localDescription.toJSON() }); }
+    else if (m.sdp.type === 'answer' && VC.pc) await VC.pc.setRemoteDescription(m.sdp);
+  } catch(e){ VC.state = 'failed'; duelDraw(); }
+}
+function vcOnOn(m){ if (!DUEL.op || m.id !== DUEL.op.id) return; const was = VC.opOn; VC.opOn = true; if (VC.on && !was) duelSend('v:on', {}); vcMaybeCall(); duelDraw(); } // answer once, so a late joiner knows we're on
+function vcOnOff(m){ if (!DUEL.op || m.id !== DUEL.op.id) return; VC.opOn = false; if (VC.pc){ VC.pc.close(); VC.pc = null; } if (VC.on) VC.state = 'wait'; duelDraw(); }
+function vcOff(send){
+  if (send && VC.on) duelSend('v:off', {});
+  if (VC.pc){ VC.pc.close(); VC.pc = null; } if (VC.mic){ VC.mic.getTracks().forEach(t => t.stop()); VC.mic = null; }
+  if (VC.audio) VC.audio.srcObject = null;
+  VC.on = false; VC.state = ''; VC.muted = false; if (!send) VC.opOn = false;
+}
+function vcMute(){ VC.muted = !VC.muted; if (VC.mic) VC.mic.getAudioTracks().forEach(t => t.enabled = !VC.muted); duelDraw(); }
+function vcRow(){
+  const D = DUEL; if (!IS_TEST || !D.op || D.bot || D.demo || !D.rt || D.op.gone) return '';
+  const n = esc(D.op.n || 'them');
+  if (!VC.on) return `<div class="vc-row"><button class="btn small${VC.opOn ? ' primary' : ''}" data-d="vc" style="flex:1">🎙 ${VC.opOn ? `${n} wants voice · Join` : 'Voice chat'}</button></div>`;
+  const txt = VC.state === 'live' ? `🔊 Talking with ${n}` : VC.state === 'failed' ? 'Voice couldn’t connect' : VC.state === 'tap' ? `Tap Hear to hear ${n}` : VC.opOn ? 'Connecting…' : `Voice on · waiting for ${n} to join`;
+  return `<div class="vc-row"><span class="vc-st">${txt}${VC.muted ? ' · muted' : ''}</span>${VC.state === 'tap' ? '<button class="btn small primary" data-d="vcplay">Hear</button>' : ''}<button class="btn small" data-d="vcmute">${VC.muted ? 'Unmute' : 'Mute'}</button><button class="btn small" data-d="vcoff">End</button></div>`;
+}
+// test tools: can this browser use the mic? (Path might not let it)
+async function vcMicCheck(){
+  const out = [];
+  out.push('getUserMedia: ' + (navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? 'yes' : 'NO'), 'WebRTC: ' + (window.RTCPeerConnection ? 'yes' : 'NO'));
+  if (!vcOk()) return alertBox('Mic check', out.join('<br>') + '<br><br>This browser can’t do voice chat.');
+  let mic; try { mic = await vcMic(); } catch(e){ return alertBox('Mic check', out.join('<br>') + '<br><br><b>' + esc(vcErr(e)) + '</b>'); }
+  const ctx = new (window.AudioContext || window.webkitAudioContext)(), an = ctx.createAnalyser(); ctx.createMediaStreamSource(mic).connect(an); an.fftSize = 512;
+  const buf = new Uint8Array(an.fftSize); let peak = 0; const t0 = Date.now();
+  toast('Talk for 4 seconds…');
+  await new Promise(res => { const tick = () => { an.getByteTimeDomainData(buf); for (const v of buf) peak = Math.max(peak, Math.abs(v - 128)); if (Date.now() - t0 < 4000) requestAnimationFrame(tick); else res(); }; tick(); });
+  mic.getTracks().forEach(t => t.stop()); try { ctx.close(); } catch(e){}
+  alertBox('Mic check', out.join('<br>') + `<br>Mic: works<br>Loudest: ${Math.round(peak / 128 * 100)}%<br><br>${peak > 6 ? 'Heard you. Voice chat should work here.' : 'The mic opened but heard almost nothing. Check it isn’t muted.'}`);
+}
+function alertBox(title, html){
+  const el = document.createElement('div'); el.className = 'egg'; el.style.zIndex = 240;
+  el.innerHTML = `<div class="egg-card" role="dialog" style="gap:12px"><h2 style="margin:0">${esc(title)}</h2><p class="muted" style="margin:0;font-size:14px;text-align:left">${html}</p><button class="btn primary" style="width:100%">OK</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  el.querySelector('button').onclick = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+}
 function duelEnd(quiet){
+  try { vcOff(true); } catch(e){}
   if (DUEL.demo){ clearInterval(DUEL.demoTimer); HIT.on = false; }
   if (DUEL.inviting && !DUEL.op && LOBBY.rt) LOBBY.rt.send('inv:x', { id: lobbyId(), to: DUEL.inviting.to, code: DUEL.code }); // tell the friend the invite is off
   if (DUEL.rt){ const r = DUEL.rt; if (DUEL.ph !== 'done') r.send('d:bye', { id: DUEL.id }); setTimeout(() => r.close(), 400); }
@@ -9760,8 +9838,8 @@ function duelDraw(){
       <p class="dnote" style="text-align:center">Match ${dur ? vrMS(dur / 1000) : '0:00'} · hits ${r.min}s+ · ${duelTimed(r) ? matchLen(r.cap) + ' match' : r.win / 60 + ' min clock · ' + capTxt(r.cap)} · ${D.demo ? 'demo match, not saved' : 'saved to Stats → 1v1 match history'}</p>`;
   }
   el.classList.toggle('res-win', ph === 'done' && !!D.res && D.res.r === 'win'); el.classList.toggle('res-lose', ph === 'done' && !!D.res && D.res.r === 'lose'); el.classList.toggle('res-draw', ph === 'done' && !!D.res && D.res.r === 'draw');
-  const foot = ph === 'done' ? `<button class="btn primary" data-d="end" style="width:100%">Clear</button>`
-    : `<div class="row" style="gap:8px"><button class="btn" data-d="min" style="flex:1">Minimize</button><button class="btn${D.quitAt && Date.now() - D.quitAt < 4000 ? ' danger' : ''}" data-d="leave" style="flex:1">${ph !== 'live' && ph !== 'count' ? 'Leave' : D.quitAt && Date.now() - D.quitAt < 4000 ? 'Tap again to give up' : 'Give up'}</button></div>`;
+  const foot = vcRow() + (ph === 'done' ? `<button class="btn primary" data-d="end" style="width:100%">Clear</button>`
+    : `<div class="row" style="gap:8px"><button class="btn" data-d="min" style="flex:1">Minimize</button><button class="btn${D.quitAt && Date.now() - D.quitAt < 4000 ? ' danger' : ''}" data-d="leave" style="flex:1">${ph !== 'live' && ph !== 'count' ? 'Leave' : D.quitAt && Date.now() - D.quitAt < 4000 ? 'Tap again to give up' : 'Give up'}</button></div>`);
   // the buttons sit in their own box and only redraw when they change, so a tap never lands on a button that just got replaced
   if (!card.querySelector(':scope > .d-body')){ card.innerHTML = '<span class="label" style="text-align:center"></span><div class="d-body"></div><div class="d-foot"></div>'; }
   setHTML(card.firstElementChild, '1v1' + (D.bot && !D.demo ? ' · practice' : '') + ' <span class="beta-tag">BETA</span>');
@@ -9778,6 +9856,10 @@ function duelClick(e){
   const b = e.target.closest('[data-d]'); if (!b) return; const k = b.dataset.d;
   const rules = () => { const r = duelCustom(); el.querySelectorAll('[data-dr]').forEach(s => r[s.dataset.dr] = +s.value); store.duelRules = r; save(); return duelRules(); };
   if (k === 'close'){ queueLeave(); return duelHide(); }
+  if (k === 'vc') return vcStart();
+  if (k === 'vcmute') return vcMute();
+  if (k === 'vcoff'){ vcOff(true); return duelDraw(); }
+  if (k === 'vcplay'){ vcAudio().play().then(() => { VC.state = 'live'; duelDraw(); }).catch(() => toast('Still blocked. Turn your volume up and tap again')); return; }
   if (k === 'dfx'){ store.dfx = store.dfx === false; save(); b.classList.toggle('primary', store.dfx !== false); b.textContent = store.dfx !== false ? 'On' : 'Off'; if (store.dfx === false) dfxStop(); return; }
   if (k === 'q') return queueJoin();
   if (k === 'demo') return duelDemo();
