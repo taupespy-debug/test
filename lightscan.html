@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Puffco Light Scan</title>
+<meta name="description" content="Scans a Puffco's light settings so Emberline can add control for its lights.">
+<style>
+:root{--bg:#120f18;--panel:#1c1824;--fg:#efeaf6;--muted:#a59db3;--line:#2e2838;--accent:#b46cff;--ink:#140b1f;--ok:#4cd68a;--bad:#ff6b6b;--warn:#ffc04d;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,system-ui,sans-serif;padding:max(20px,env(safe-area-inset-top)) 16px 48px}
+.wrap{max-width:640px;margin:0 auto;display:grid;gap:14px}
+h1{font-size:24px;margin:0} h2{font-size:17px;margin:0;display:flex;gap:8px;align-items:center}
+h2 .n{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--ink);font-size:13px;flex:none}
+p{margin:0;color:var(--muted)} b{color:var(--fg)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;display:grid;gap:10px;min-width:0}
+.card.done h2 .n{background:var(--ok)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button{border:0;border-radius:10px;padding:11px 14px;font:600 14px system-ui;background:var(--accent);color:var(--ink);cursor:pointer}
+button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+button[aria-pressed="true"]{background:var(--ok);color:var(--ink)}
+button:disabled{opacity:.4;cursor:default}
+.big{width:100%;padding:14px;font-size:16px}
+#status{font-weight:600} .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)}
+.bar{height:8px;border-radius:4px;background:#2a2433;overflow:hidden}.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.sw{display:inline-block;width:22px;height:22px;border-radius:6px;border:1px solid var(--line);vertical-align:middle}
+.flash{display:grid;gap:8px;padding:10px;border:1px solid var(--line);border-radius:12px}
+.flash .q{display:flex;flex-wrap:wrap;gap:6px}.flash .q button{padding:8px 10px;font-size:13px}
+textarea{width:100%;height:200px;background:#0b0910;color:var(--fg);border:1px solid var(--line);border-radius:10px;font:11px/1.4 ui-monospace,Menlo,monospace;padding:8px}
+ol{margin:0;padding-left:20px;display:grid;gap:4px;color:var(--muted)}
+.chg{font:12px/1.4 ui-monospace,Menlo,monospace;word-break:break-all;color:var(--fg)}
+</style></head><body>
+<div class="wrap">
+  <h1>Puffco Light Scan</h1>
+  <p>Helps <b>Emberline</b> learn how your Puffco’s lights work, so we can add controls for them. It only reads light settings, and only shows test colors when you tap a test. Nothing is changed for good, and no serial number is read.</p>
+
+  <div class="card" id="c1">
+    <h2><span class="n">1</span>Connect</h2>
+    <ol><li><b>Fully close the Puffco app</b> (swipe it away). Only one app can talk to the Puffco at a time.</li><li>Open this page in <b>Path</b> or <b>Bluefy</b> (iPhone), or Chrome (Android or computer).</li></ol>
+    <div id="status">Not connected</div>
+    <div id="info" style="color:var(--muted);font-size:13px"></div>
+    <button id="bConnect" class="big">Connect</button>
+  </div>
+
+  <div class="card" id="c2">
+    <h2><span class="n">2</span>First scan</h2>
+    <p>Reads every light setting it can find. Takes about a minute, keep the phone close.</p>
+    <div class="bar"><i id="bar1"></i></div><div id="s1" style="font-size:13px;color:var(--muted)"></div>
+    <button id="bScan1" class="big" disabled>Scan</button>
+  </div>
+
+  <div class="card" id="c3">
+    <h2><span class="n">3</span>Change the back lights, then scan again</h2>
+    <ol>
+      <li>Open the <b>Puffco app</b> and change the <b>back lights</b> to something very different (for example bright red, or turn them off).</li>
+      <li><b>Fully close the Puffco app again.</b></li>
+      <li>Come back here, tap <b>Connect</b> again, then <b>Scan again</b>.</li>
+    </ol>
+    <p>Comparing the two scans shows exactly which setting controls the back lights. You can repeat this with another color for an even better match.</p>
+    <div class="bar"><i id="bar2"></i></div><div id="s2" style="font-size:13px;color:var(--muted)"></div>
+    <button id="bScan2" class="big" disabled>Scan again</button>
+    <div id="diff" class="chg"></div>
+  </div>
+
+  <div class="card" id="c4">
+    <h2><span class="n">4</span>Color test</h2>
+    <p>Shows a color for a few seconds using the same safe preview the Puffco app uses, then goes back to normal. For each one, tap which lights changed.</p>
+    <div id="flashes" style="display:grid;gap:8px"></div>
+  </div>
+
+  <div class="card" id="c5">
+    <h2><span class="n">5</span>Send it</h2>
+    <p>Sends the scan to Emberline (no account, no serial number, just the light data and the device model). If sending fails, tap Copy and paste it in a DM instead.</p>
+    <label style="display:grid;gap:4px;font-size:13px;color:var(--muted)">Your name or Discord (optional, so we know it’s yours)<input id="who" maxlength="40" style="padding:10px;border-radius:10px;border:1px solid var(--line);background:#0b0910;color:var(--fg);font-size:16px"></label>
+    <label style="display:grid;gap:4px;font-size:13px;color:var(--muted)">Which Puffco is it? (optional, e.g. "white Peak Pro with back lights")<input id="what" maxlength="80" style="padding:10px;border-radius:10px;border:1px solid var(--line);background:#0b0910;color:var(--fg);font-size:16px"></label>
+    <div class="row"><button id="bSend" disabled style="flex:1">Send to Emberline</button><button id="bCopy" class="ghost" style="flex:1">Copy report</button></div>
+    <div id="sent" style="font-size:13px"></div>
+  </div>
+
+  <textarea id="log" readonly placeholder="The report shows up here"></textarea>
+</div>
+<script>
+const IS_PATH = /Path\//i.test(navigator.userAgent || '') || !!window.notifications;
+const store = {}; const DEV = { series:'peach', api:3, name:'' }; const isProxy = () => DEV.series === 'toad';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function withTimeout(p, ms, stage){ let t; return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(Object.assign(new Error('Timed out'), { stage })), ms); })]).finally(() => clearTimeout(t)); }
+const SVC='e276967f-ea8a-478a-a92e-d78f5dd15dd5', CMD='60133d5c-5727-4f2c-9697-d842c5292a3c',
+      REPLY='8dc5ec05-8f7d-45ad-99db-3fbde65dbd9c', VERSION='05434bca-cc7f-4ef6-bbb3-b1c520b9800c';
+const PIKACHU='06caf9c0-74d3-454f-9be9-e30cd999c17a', PUP='420b9b40-457d-4abe-a3bf-71609d79581b', PUFFCO_CO=3075;
+const MASTER = new Uint8Array([0x64,0xc6,0x45,0x62,0x56,0xf2,0x6f,0x5b,0x1c,0xa1,0x27,0x37,0xa5,0xdd,0x71,0xfb]);
+const OP = { SEED:0x00, UNLOCK:0x01, READ:0x10, WRITE:0x11 };
+const enc = new TextEncoder(), dec = new TextDecoder();
+const MAX_MSG = 128; // Peak Pro ATT MTU is 131 (minus 3 byte header)
+
+
+class Lorax {
+  constructor(){ this.seq=1; this.pending=new Map(); this.queue=Promise.resolve(); this.dev=null; this.ints={}; }
+  async request(showAll, name, id){
+    const opt = { optionalServices:[SVC, PIKACHU, PUP], optionalManufacturerData:[PUFFCO_CO] };
+    const base = [{ services:[SVC] }, { services:[PIKACHU] }, { manufacturerData:[{ companyIdentifier:PUFFCO_CO }] }];
+    const names = [{namePrefix:'Peak'},{namePrefix:'PEAK'},{namePrefix:'Puffco'},{namePrefix:'PUFFCO'},{namePrefix:'Proxy'},{namePrefix:'PROXY'}];
+    let filters;
+    if (name) filters = IS_PATH ? (id ? [{ deviceId: id }, { name }] : [{ name }]) : [{ name }]; // Path reconnects to a known id with no popup
+    else filters = [...base, ...names];
+    const attempt = f => navigator.bluetooth.requestDevice(showAll && !name ? Object.assign({ acceptAllDevices:true }, opt) : Object.assign({ filters:f }, opt));
+    this.lastRequest = filters;
+    let dev;
+    try { dev = await attempt(filters); }
+    catch(e){
+      // older browsers reject filters they don't know (deviceId / manufacturerData); retry with the plain ones
+      if (e && e.name === 'TypeError'){ const plain = filters.filter(x => !x.deviceId && !x.manufacturerData); dev = await navigator.bluetooth.requestDevice({ filters: plain, optionalServices:[SVC, PIKACHU] }); }
+      else throw e;
+    }
+    this.adopt(dev); return dev;
+  }
+  adopt(dev){
+    if (this.dev === dev) return;
+    if (this.dev && this._onGone) this.dev.removeEventListener('gattserverdisconnected', this._onGone);
+    this.dev = dev; this._onGone = () => this._dropped();
+    dev.addEventListener('gattserverdisconnected', this._onGone);
+  }
+  get connected(){ return !!(this.dev && this.dev.gatt && this.dev.gatt.connected && this.cmd); }
+  async attach(onStage, quick){
+    const st = x => onStage && onStage(x);
+    this.cmd = null;
+    st('gatt'); const gatt = await withTimeout(this.dev.gatt.connect(), quick ? 8000 : 15000, 'gatt');
+    st('service'); let svc;
+    try { svc = await withTimeout(gatt.getPrimaryService(SVC), 10000, 'service'); } catch(e){ e.code = 'noservice'; throw e; }
+    if (!quick){ try { const v = await svc.getCharacteristic(VERSION); await withTimeout(v.readValue(), 5000, 'gatt'); } catch(e){} } // triggers bonding (already bonded on a reconnect)
+    const cmd = await svc.getCharacteristic(CMD), rep = await svc.getCharacteristic(REPLY);
+    if (this.rep && this._onRep){ try { this.rep.removeEventListener('characteristicvaluechanged', this._onRep); } catch(e){} }
+    this._onRep = e => this._onReply(e.target.value);
+    rep.addEventListener('characteristicvaluechanged', this._onRep);
+    await withTimeout(rep.startNotifications(), 8000, 'gatt');
+    this.rep = rep; this.cmd = cmd; this.seq = 1; this.ints = {}; this.pending.clear(); this.queue = Promise.resolve();
+    st('auth'); await this._auth();
+  }
+  disconnect(silent){
+    this.cmd = null;
+    try { if (this.dev && this.dev.gatt.connected){ this._silent = !!silent; this.dev.gatt.disconnect(); } } catch(e){}
+  }
+  _dropped(){
+    this.cmd = null;
+    for (const p of this.pending.values()){ clearTimeout(p.timer); p.rej(new Error('Disconnected')); }
+    this.pending.clear(); this.queue = Promise.resolve();
+    if (this._silent){ this._silent = false; return; }
+    this.onDisconnect && this.onDisconnect();
+  }
+  _onReply(dv){
+    if (dv.byteLength < 3) return;
+    const seq = dv.getUint16(0,true), status = dv.getUint8(2);
+    const p = this.pending.get(seq); if (!p) return;
+    this.pending.delete(seq); clearTimeout(p.timer);
+    const body = new Uint8Array(dv.buffer.slice(dv.byteOffset+3, dv.byteOffset+dv.byteLength));
+    status === 0 ? p.res(body) : p.rej(Object.assign(new Error('Device status 0x'+status.toString(16)), {status}));
+  }
+  run(op, body = new Uint8Array(0), timeout = 4000){
+    const job = () => new Promise(async (res, rej) => {
+      if (!this.cmd) return rej(new Error('Disconnected'));
+      const seq = this.seq; this.seq = this.seq >= 0xffff ? 1 : this.seq + 1;
+      const msg = new Uint8Array(3 + body.length);
+      msg[0] = seq & 0xff; msg[1] = seq >> 8; msg[2] = op; msg.set(body, 3);
+      const timer = setTimeout(() => { this.pending.delete(seq); rej(new Error('Timed out')); }, timeout);
+      this.pending.set(seq, {res, rej, timer});
+      try {
+        if (this.cmd.writeValueWithoutResponse) await this.cmd.writeValueWithoutResponse(msg);
+        else await this.cmd.writeValue(msg);
+      } catch(e){ clearTimeout(timer); this.pending.delete(seq); rej(e); }
+    });
+    const p = this.queue.then(job, job);
+    this.queue = p.catch(()=>{});
+    return p;
+  }
+  async _auth(){
+    const seed = await this.run(OP.SEED, new Uint8Array(0), 6000);
+    if (seed.length < 16) throw new Error('Bad access seed');
+    const buf = new Uint8Array(32); buf.set(MASTER,0); buf.set(seed.slice(0,16),16);
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
+    await this.run(OP.UNLOCK, digest.slice(0,16));
+  }
+  read(path, size, offset = 0){
+    const p = enc.encode(path), b = new Uint8Array(4 + p.length);
+    b[0]=offset&0xff; b[1]=offset>>8; b[2]=size&0xff; b[3]=size>>8; b.set(p,4);
+    return this.run(OP.READ, b, 3000);
+  }
+  write(path, bytes, offset = 0, flags = 0){
+    const p = enc.encode(path), b = new Uint8Array(3 + p.length + 1 + bytes.length);
+    b[0]=offset&0xff; b[1]=offset>>8; b[2]=flags; b.set(p,3); b[3+p.length]=0; b.set(bytes, 4+p.length);
+    return this.run(OP.WRITE, b, 3000);
+  }
+  // Peak Pro stores numbers as 32-bit floats. The Proxy stores some as whole numbers, which read as ~0 if treated
+  // as floats (that's the 0% battery / 32°F bug). Spot that, read them as integers, and remember it for writes.
+  async f32(path, size = 4){
+    const r = await this.read(path, size);
+    if (r.length < 4){ const dv0 = new DataView(r.buffer, r.byteOffset, r.length); const v = r.length >= 2 ? dv0.getUint16(0, true) : r.length ? r[0] : 0; this.ints[path] = { scale: 1 }; return v; }
+    const dv = new DataView(r.buffer, r.byteOffset, r.length), f = dv.getFloat32(0, true), bits = dv.getUint32(0, true);
+    if (bits !== 0 && (!isFinite(f) || Math.abs(f) < 1e-20)){
+      const v = dv.getInt32(0, true), scale = this.intScale(path);
+      this.ints[path] = { scale }; return v === -2147483648 ? 0 : v / scale; // that value means "not set"
+    }
+    return f;
+  }
+  intScale(path){
+    // Proxy units (from the device inspector): temps in tenths of °C, times in hundredths of a second,
+    // battery in hundredths of a percent, volts in millivolts
+    // from Puffco's own app (Proxy int32 scales)
+    if (/info\/(dpd|drem)/.test(path)) return 256;               // dabs per day, dabs left
+    if (/msoc|lbws/.test(path)) return 100;                        // battery limit %, low battery warning %
+    if (/chg\/(etf|elap)/.test(path)) return 200;                 // charge time to full / elapsed
+    if (/bat\/(cap|curr)|chg\/iout/.test(path)) return 1000;      // battery capacity / current
+    if (/tmpo/.test(path)) return 10;                              // boost temp
+    if (/timo/.test(path)) return 200;                             // boost time
+    if (/intn|lbrt/.test(path)) return 256;                       // vapor setting, brightness
+    if (/temp|btmp|tcmd/.test(path)) return 10;
+    if (/elap|tott|time|btim|mbct/.test(path)) return 200;         // Puffco web app: times are seconds x 200
+    if (/bat\/soc/.test(path)) return 100;
+    if (/volt/.test(path)) return 1000;
+    if (/led\/di[fa]/.test(path)) return store.inhOld ? 1000 : 4096; // Puffco web app: 4096 = 1.0 (test build can flip back to the old 1000)
+    return 1;
+  }
+  async u8(path){ return (await this.read(path, 1))[0]; }
+  async u32(path){ const r = await this.read(path, 4); return new DataView(r.buffer).getUint32(0, true); }
+  async str(path){ const r = await this.read(path, 64); return dec.decode(r).split('\0')[0].trim(); }
+  wf32(path, v){ const b = new Uint8Array(4), t = this.ints[path] || (isProxy() ? { scale: this.intScale(path) } : null); /* Proxy stores whole numbers everywhere, even when the value reads 0 */ if (t) new DataView(b.buffer).setInt32(0, Math.round(v * t.scale), true); else new DataView(b.buffer).setFloat32(0, v, true); return this.write(path, b); }
+  async readAll(path){
+    const out = []; let off = 0;
+    while (off < 4096){
+      const chunk = await this.read(path, 125, off);
+      out.push(...chunk); off += chunk.length;
+      if (chunk.length < 125) break;
+    }
+    return new Uint8Array(out);
+  }
+  async writeBlob(path, blob){
+    const pl = enc.encode(path), room = MAX_MSG - (6 + pl.length + 1);
+    // fits in one message: single write that truncates the file
+    if (blob.length <= room){ try { await this.write(path, blob, 0, 4); return; } catch(e){} }
+    // bigger: open a handle, write the pieces, close. The Peak only applies the file on close,
+    // so it never sees half a light pattern (half patterns are what made it go white)
+    let h = null;
+    for (const fl of [4, 5, 0]){ try { const r = await this.run(0x20, new Uint8Array([fl, ...pl]), 3000); if (r.length >= 2){ h = r[0] | (r[1] << 8); break; } } catch(e){} }
+    if (h != null){
+      const step = MAX_MSG - 3 - 4;
+      try {
+        for (let off = 0; off < blob.length; off += step){
+          const piece = blob.slice(off, off + step), b = new Uint8Array(4 + piece.length);
+          b[0] = h & 255; b[1] = h >> 8; b[2] = off & 255; b[3] = off >> 8; b.set(piece, 4);
+          await this.run(0x22, b, 3000);
+        }
+      } finally { try { await this.run(0x26, new Uint8Array([h & 255, h >> 8]), 3000); } catch(e){} }
+      return;
+    }
+    return this.writeBlobLegacy(path, blob);
+  }
+  async writeBlobLegacy(path, blob){
+    const room = MAX_MSG - (6 + enc.encode(path).length + 1);
+    let off = 0, truncated = true;
+    // first piece truncates the file (flag 4) so no old bytes are left behind
+    try { await this.write(path, blob.slice(0, room), 0, 4); }
+    catch(e){ truncated = false; try { await this.write(path, blob.slice(0, room), 0, 1); } catch(e2){ await this.write(path, blob.slice(0, room), 0, 0); } }
+    off = Math.min(room, blob.length);
+    while (off < blob.length){ const piece = blob.slice(off, off + room); await this.write(path, piece, off, 0); off += piece.length; }
+    // older firmware without truncate: pad the tail with zeros instead
+    if (!truncated){ try { await this.write(path, new Uint8Array(Math.min(64, room)), blob.length, 0); } catch(e){} }
+  }
+}
+/* minimal canonical CBOR encoder (for LED color payloads) */
+function cbor(v){
+  const out = [];
+  const head = (major, n) => {
+    if (n < 24) out.push(major<<5 | n);
+    else if (n < 256) out.push(major<<5 | 24, n);
+    else if (n < 65536) out.push(major<<5 | 25, n>>8, n&255);
+    else if (n < 4294967296) out.push(major<<5 | 26, (n>>>24)&255, (n>>>16)&255, (n>>>8)&255, n&255);
+    else { const hi = Math.floor(n / 4294967296), lo = n >>> 0; out.push(major<<5 | 27, (hi>>>24)&255, (hi>>>16)&255, (hi>>>8)&255, hi&255, (lo>>>24)&255, (lo>>>16)&255, (lo>>>8)&255, lo&255); }
+  };
+  const w = x => {
+    if (x instanceof Uint8Array){ head(2, x.length); out.push(...x); }
+    else if (typeof x === 'boolean'){ out.push(x ? 0xf5 : 0xf4); }
+    else if (x === null || x === undefined){ out.push(0xf6); }
+    else if (typeof x === 'number' && !Number.isInteger(x)){
+      if (Math.fround(x) === x && !cbor.f64){ const b = new Uint8Array(4); new DataView(b.buffer).setFloat32(0, x); out.push(0xfa, ...b); }
+      else { const b = new Uint8Array(8); new DataView(b.buffer).setFloat64(0, x); out.push(0xfb, ...b); }
+    }
+    else if (typeof x === 'number'){ x >= 0 ? head(0, x) : head(1, -1 - x); }
+    else if (typeof x === 'string'){ const b = enc.encode(x); head(3, b.length); out.push(...b); }
+    else if (Array.isArray(x)){ head(4, x.length); x.forEach(w); }
+    else if (x instanceof Map){
+      const keys = [...x.keys()].map(k => ({k, b: cbor(k)})).sort((a,b) => a.b.length - b.b.length || cmpBytes(a.b, b.b));
+      head(5, keys.length); keys.forEach(({k,b}) => { out.push(...b); w(x.get(k)); });
+    }
+    else {
+      const keys = Object.keys(x).map(k => ({k, b: cbor(k)}))
+        .sort((a,b) => a.b.length - b.b.length || cmpBytes(a.b, b.b));
+      head(5, keys.length); keys.forEach(({k,b}) => { out.push(...b); w(x[k]); });
+    }
+  };
+  w(v); return new Uint8Array(out);
+}
+function cborDecode(buf){
+  let i = 0; const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const len = ai => ai < 24 ? ai : ai === 24 ? buf[i++] : ai === 25 ? (i += 2, dv.getUint16(i-2)) : ai === 26 ? (i += 4, dv.getUint32(i-4)) : ai === 27 ? (i += 8, Number(dv.getBigUint64(i-8))) : -1;
+  const item = () => {
+    const b = buf[i++], mt = b >> 5, ai = b & 31;
+    if (mt === 7){
+      if (ai === 20) return false; if (ai === 21) return true; if (ai === 22 || ai === 23) return null;
+      if (ai === 25){ i += 2; const h = dv.getUint16(i-2), e = (h>>10)&31, f = h&1023, sg = h>>15 ? -1 : 1; return sg * (e === 0 ? f*2**-24 : e === 31 ? (f ? NaN : Infinity) : (1+f/1024)*2**(e-15)); }
+      if (ai === 26){ i += 4; return dv.getFloat32(i-4); }
+      if (ai === 27){ i += 8; return dv.getFloat64(i-8); }
+      return undefined;
+    }
+    const n = len(ai);
+    if (mt === 0) return n;
+    if (mt === 1) return -1 - n;
+    if (mt === 2){ const v = buf.slice(i, i+n); i += n; return {$b: [...v].map(x=>x.toString(16).padStart(2,'0')).join('')}; }
+    if (mt === 3){ const v = dec.decode(buf.slice(i, i+n)); i += n; return v; }
+    if (mt === 4){ const a = []; for (let k=0;k<n;k++) a.push(item()); return a; }
+    if (mt === 5){ const o = {}; for (let k=0;k<n;k++){ const key = item(); o[typeof key === 'string' ? key : JSON.stringify(key)] = item(); } return o; }
+    if (mt === 6) return {tag:n, v:item()};
+  };
+  return item();
+}
+const toHex = u => [...u].map(x=>x.toString(16).padStart(2,'0')).join('');
+function cmpBytes(a,b){ for (let i=0;i<Math.min(a.length,b.length);i++) if (a[i]!==b[i]) return a[i]-b[i]; return a.length-b.length; }
+const hexBytes = h => new Uint8Array([1,3,5].map(i => parseInt(h.slice(i,i+2),16)));
+const SINGLE_OFFSETS = [0,0,0,0,0,0,65536,0,0,65536,0,0,65536,65536,0,0,65536,65536,65536,0];
+
+/* ================= light scan ================= */
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1d3phYndpa2xvb2J6dmdjZGFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4ODExOTUsImV4cCI6MjEwNjQ1NzE5NX0.dESN5nYqgX087fzd27txEXf6fEKraF4D0RW8MaUuv6w';
+const SB_URL = 'https://auwzabwikloobzvgcdaa.supabase.co';
+const ble = new Lorax();
+const $ = id => document.getElementById(id);
+const sleep2 = ms => new Promise(r => setTimeout(r, ms));
+const status = (t, c) => { $('status').textContent = t; $('status').className = c || ''; };
+const MODELS = { 0:'OG', 21:'OG', 1:'Opal', 22:'Opal', 2:'Indiglow', 4:'Guardian', 12:'Pearl', 13:'Onyx', 15:'Desert', 17:'Flourish', 19:'Storm', 23:'Daybreak', 25:'Plasma', 26:'Glacier' };
+const R = { id:{}, scans:[], flashes:{}, notes:[] }; // the report
+let SAVED = null; try { SAVED = JSON.parse(localStorage.getItem('lightscan') || 'null'); } catch(e){}
+if (SAVED && SAVED.scans && SAVED.scans.length){ Object.assign(R, SAVED); } // a scan from before reconnecting
+const keep = () => { try { localStorage.setItem('lightscan', JSON.stringify(R)); } catch(e){} };
+
+// every light file Emberline already knows, read in full
+const KNOWN = ['/p/app/thc/colr', '/p/app/thc/phcl', '/p/app/thc/accl', '/p/app/led/pclr', '/p/app/ltrn/colr', '/p/app/ltrn/cmd', '/p/app/ltrn/time', '/u/app/ui/lbrt', '/u/app/ui/stlm', '/p/app/led/dif', '/p/app/led/dia',
+  ...[0,1,2,3].flatMap(i => [`/u/app/hc/${i}/colr`, `/u/app/hc/${i}/phcl`, `/u/app/hc/${i}/accl`]), ...[0,1,2,3,4,5].map(i => `/u/app/led/aa/${i}`), ...[0,1,2,3,4,5,6,7].flatMap(i => [`/u/app/led/ca/${i}`, `/u/app/led/oa/${i}`])];
+// guesses: places a new light (like back lights) could live. Only read, never written
+const DIRS = ['/p/app/led', '/u/app/led', '/p/app/ui', '/u/app/ui', '/p/app', '/u/app', '/p/led', '/u/led', '/p/app/ltrn', '/u/app/ltrn', '/p/app/thc', '/u/app/hc/0'];
+const NAMES = ['colr','pclr','clr','col','rgb','bklt','bkl','back','rear','bk','bck','rr','logo','lgo','ring','rng','bar','strp','zone','zn','zns','aux','ax','glss','gls','base','bse','amb','acc','accl','side','sd','ulit','nlit','nite','glow','lamp','lmp','bklg','bkcl','bcol','bclr','rclr','lclr','zclr','pat','anim','mode','md','cmd','brt','lbrt','bri','stlm','en','on','cfg','map','cnt','num','time','tm','spd','ltrn','phcl','dclr','sclr','iclr','idle','chrg','chg','bat','batl','ind','lvl','nfc','ble'];
+const SUBS = ['bk','back','rear','bklt','logo','ring','zone','aux','base','glow','amb','side','strp','ind'];
+function probeList(){
+  const out = new Set();
+  DIRS.forEach(d => NAMES.forEach(n => out.add(d + '/' + n)));
+  SUBS.forEach(s => ['/p/app/', '/u/app/', '/p/app/led/', '/u/app/led/'].forEach(d => ['colr', 'cmd', 'en', 'lbrt', 'mode'].forEach(n => out.add(d + s + '/' + n))));
+  'abcdefghijklmnopqrstuvwxyz'.split('').forEach(c => [c + 'a', c + 'b', c + 'c'].forEach(x => out.add('/u/app/led/' + x + '/0')));
+  KNOWN.forEach(k => out.delete(k));
+  return [...out];
+}
+async function readFile(path, quick){ // whole file, or an error code. quick: a guess, so ask once with a short wait first
+  try {
+    if (quick){ const pl = enc.encode(path), b = new Uint8Array(4 + pl.length); b[2] = 125; b.set(pl, 4); const first = await ble.run(OP.READ, b, 1500); if (first.length < 125) return { hex: toHex(first), len: first.length }; }
+    const r = await ble.readAll(path); return { hex: toHex(r), len: r.length };
+  } catch(e){ return { err: e.status != null ? 'status 0x' + e.status.toString(16) : (e.message || 'error'), slow: /Timed out/.test(e.message || '') }; }
+}
+async function identify(){
+  const id = { name: ble.dev.name || '' };
+  const tryRead = async (k, fn) => { try { id[k] = await fn(); } catch(e){} };
+  await tryRead('model', () => ble.u32('/p/sys/hw/mdcd'));
+  await tryRead('fw', () => ble.str('/p/sys/fw/ver'));
+  await tryRead('api', async () => { const r = await ble.read('/p/sys/fw/api', 4); return r.length >= 4 ? new DataView(r.buffer, r.byteOffset).getUint32(0, true) : r[0]; });
+  await tryRead('devName', () => ble.str('/u/sys/name'));
+  await tryRead('chamber', async () => (await ble.read('/p/htr/chmt', 1))[0]);
+  id.series = /proxy/i.test(id.name) ? 'toad' : 'peach';
+  id.edition = id.series === 'peach' && id.model != null ? (MODELS[id.model] || 'model ' + id.model) : id.model != null ? 'model ' + id.model : '?';
+  id.ua = navigator.userAgent.slice(0, 160);
+  DEV.series = id.series; DEV.api = id.api || 3; DEV.name = id.name;
+  return id;
+}
+$('bConnect').onclick = async () => {
+  if (!navigator.bluetooth){ status('No Bluetooth in this browser. On iPhone use Path or Bluefy. On Android or a computer use Chrome.', 'bad'); return; }
+  try {
+    status('Pick your Puffco…'); await ble.request(false);
+    status('Connecting…'); await ble.attach(s => status('Connecting (' + s + ')…'));
+    const id = await identify();
+    if (R.id && R.id.name && R.id.name !== id.name && R.scans.length){ R.scans = []; R.flashes = {}; R.notes = []; } // a different device: start over
+    R.id = id; keep();
+    $('info').textContent = `${id.devName || id.name} · ${id.series === 'toad' ? 'Proxy' : 'Peak'} · ${id.edition} · firmware ${id.fw || '?'} · api ${id.api ?? '?'}`;
+    status('Connected', 'ok'); $('c1').classList.add('done');
+    $('bScan1').disabled = false; $('bScan2').disabled = !R.scans.length; drawFlashes(); report();
+  } catch(e){ status('Couldn’t connect: ' + e.message + '. Is the Puffco app fully closed?', 'bad'); }
+};
+ble.onDisconnect = () => { status('Disconnected. Tap Connect again.', 'bad'); $('c1').classList.remove('done'); $('bScan1').disabled = $('bScan2').disabled = true; drawFlashes(); };
+
+async function scan(n){
+  const bar = $('bar' + Math.min(n, 2)), s = $('s' + Math.min(n, 2)), files = {}, list = KNOWN.concat(probeList());
+  let found = 0, slow = 0;
+  for (let i = 0; i < list.length; i++){
+    if (!ble.connected){ s.textContent = 'Lost the connection. Connect again and scan again.'; return null; }
+    const path = list[i], r = await readFile(path, !KNOWN.includes(path));
+    slow = r.slow ? slow + 1 : 0;
+    if (slow >= 8){ s.textContent = 'The Puffco stopped answering. Move closer, connect again and scan again.'; R.notes.push('scan stopped: no answers near ' + path); return null; }
+    if (r.hex != null){ files[path] = r.hex; if (!KNOWN.includes(path)) found++; }
+    else if (KNOWN.includes(path)) files[path] = '!' + r.err; // a known file that isn't there on this device
+    bar.style.width = ((i + 1) / list.length * 100).toFixed(1) + '%';
+    if (i % 10 === 0) s.textContent = `Reading ${i + 1} of ${list.length}… ${found ? found + ' new light file' + (found > 1 ? 's' : '') + ' found' : ''}`;
+  }
+  s.textContent = `Done. ${Object.keys(files).filter(k => files[k][0] !== '!').length} files read${found ? `, ${found} new one${found > 1 ? 's' : ''} found` : ''}.`;
+  return { at: Date.now(), files };
+}
+$('bScan1').onclick = async () => {
+  $('bScan1').disabled = $('bScan2').disabled = true;
+  const sc = await scan(1); if (sc){ R.scans = [sc]; keep(); $('c2').classList.add('done'); }
+  $('bScan1').disabled = false; $('bScan2').disabled = !R.scans.length || !ble.connected; report();
+};
+$('bScan2').onclick = async () => {
+  $('bScan1').disabled = $('bScan2').disabled = true;
+  const sc = await scan(2); if (sc){ R.scans.push(sc); keep(); $('c3').classList.add('done'); drawDiff(); }
+  $('bScan1').disabled = false; $('bScan2').disabled = !ble.connected; report();
+};
+function diffs(){
+  const out = [];
+  for (let i = 1; i < R.scans.length; i++){
+    const a = R.scans[i - 1].files, b = R.scans[i].files;
+    new Set([...Object.keys(a), ...Object.keys(b)]).forEach(p => { if (a[p] !== b[p]) out.push({ scan: i + 1, path: p, before: a[p], after: b[p] }); });
+  }
+  return out;
+}
+function colorsOf(hex){ // colors in a light file, for the swatches
+  if (!hex || hex[0] === '!') return [];
+  const u = new Uint8Array((hex.match(/../g) || []).map(h => parseInt(h, 16)));
+  if (u.length === 8) return ['#' + hex.slice(0, 6)];
+  const cols = new Set(); const walk = v => { if (!v) return; if (v.$b && v.$b.length % 6 === 0 && v.$b.length <= 192) (v.$b.match(/.{6}/g) || []).forEach(c => cols.add('#' + c)); else if (typeof v === 'object') Object.values(v).forEach(walk); };
+  try { walk(cborDecode(u)); } catch(e){}
+  return [...cols].slice(0, 8);
+}
+const sw = hex => colorsOf(hex).map(c => `<span class="sw" style="background:${c}"></span>`).join(' ');
+function drawDiff(){
+  const d = diffs();
+  $('diff').innerHTML = !d.length ? '<p>No light setting changed between the scans. Make sure the back lights look clearly different, and that the Puffco app was fully closed.</p>'
+    : '<p><b>' + d.length + ' setting' + (d.length > 1 ? 's' : '') + ' changed:</b></p>' + d.map(x => `<div>${x.path}<br>${sw(x.before)} → ${sw(x.after)} <span style="color:var(--muted)">(${(x.before || '').length / 2}B → ${(x.after || '').length / 2}B)</span></div>`).join('');
+}
+
+/* ---- color test: the preview channel (what the Puffco app uses to preview a mood), cleared after ---- */
+const FLASH = [['red', '#ff0000'], ['green', '#00ff00'], ['blue', '#0000ff'], ['white', '#ffffff']];
+const PLACES = ['Front glass', 'Base / logo', 'Back lights', 'Nothing'];
+const solidBlob = hex => isProxy() ? (() => { const c = hexBytes(hex); return new Uint8Array([0xa1,0x00,0xa2,0x00,0x01,0x01,0xa1,0x00,0x43,c[0],c[1],c[2]]); })()
+  : cbor({ lamp:{ name:'pikaled2', param:{ bright:255, speed:64, anim:1, plNum:0, plDenom:1, offset: SINGLE_OFFSETS, color: hexBytes(hex), colorLen:32 } } });
+async function preview(hex){
+  if (DEV.api === 2){ const c = hexBytes(hex); return ble.write('/p/app/led/pclr', new Uint8Array([c[0], c[1], c[2], 0, 0, 0, 0, 0])); }
+  return ble.writeBlob('/p/app/led/pclr', solidBlob(hex));
+}
+async function previewClear(){
+  try { if (DEV.api === 2) await ble.write('/p/app/led/pclr', new Uint8Array(8)); else { try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(e){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } } } catch(e){}
+}
+let flashing = false;
+function drawFlashes(){
+  $('flashes').innerHTML = FLASH.map(([n, c]) => { const a = R.flashes[n] || [];
+    return `<div class="flash"><div class="row" style="justify-content:space-between"><span><span class="sw" style="background:${c}"></span> <b>${n[0].toUpperCase() + n.slice(1)}</b></span><button data-fl="${n}" ${ble.connected ? '' : 'disabled'}>Show ${n}</button></div>
+      <div class="q">${PLACES.map(p => `<button class="ghost" data-fn="${n}" data-p="${p}" aria-pressed="${a.includes(p)}">${p}</button>`).join('')}</div></div>`; }).join('');
+}
+$('flashes').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.fl){
+    if (flashing || !ble.connected) return; flashing = true; const c = FLASH.find(f => f[0] === b.dataset.fl)[1];
+    b.textContent = 'Showing…'; try { await preview(c); await sleep2(5000); } catch(err){ R.notes.push('preview ' + b.dataset.fl + ' failed: ' + err.message); } await previewClear();
+    flashing = false; b.textContent = 'Show ' + b.dataset.fl; keep(); report(); return;
+  }
+  if (b.dataset.fn){ const a = R.flashes[b.dataset.fn] = R.flashes[b.dataset.fn] || [], p = b.dataset.p, i = a.indexOf(p);
+    if (p === 'Nothing'){ a.length = 0; if (i < 0) a.push(p); } else { const k = a.indexOf('Nothing'); if (k >= 0) a.splice(k, 1); i >= 0 ? a.splice(i, 1) : a.push(p); }
+    keep(); drawFlashes(); report(); }
+});
+
+/* ---- report ---- */
+function reportText(){
+  const id = R.id || {}, L = [];
+  L.push('PUFFCO LIGHT SCAN', `who: ${$('who').value || '-'}  device: ${$('what').value || '-'}`, `name=${id.name || '?'} devName=${id.devName || '?'} series=${id.series || '?'} edition=${id.edition || '?'} model=${id.model ?? '?'} fw=${id.fw || '?'} api=${id.api ?? '?'} chamber=${id.chamber ?? '?'}`, `ua=${id.ua || ''}`);
+  L.push('', 'COLOR TEST (which lights changed):'); FLASH.forEach(([n]) => L.push(`  ${n}: ${(R.flashes[n] || []).join(', ') || 'not tried'}`));
+  const d = diffs(); L.push('', `CHANGED BETWEEN SCANS (${R.scans.length} scans): ${d.length ? '' : 'none'}`); d.forEach(x => L.push(`  scan${x.scan} ${x.path}\n    before ${x.before || '-'}\n    after  ${x.after || '-'}`));
+  const last = R.scans[R.scans.length - 1];
+  if (last){ L.push('', 'FILES (last scan):'); Object.entries(last.files).forEach(([p, h]) => L.push(`  ${p} ${h[0] === '!' ? h.slice(1) : (h.length / 2) + 'B ' + h}`)); }
+  if (R.notes.length) L.push('', 'NOTES:', ...R.notes.map(n => '  ' + n));
+  return L.join('\n');
+}
+function report(){ $('log').value = reportText(); $('bSend').disabled = !R.scans.length; }
+$('who').oninput = $('what').oninput = report;
+$('bCopy').onclick = async () => { report(); try { await navigator.clipboard.writeText($('log').value); $('sent').innerHTML = '<span class="ok">Copied. Paste it in a DM.</span>'; } catch(e){ const t = $('log'); t.focus(); t.select(); $('sent').textContent = 'Text selected. Tap Copy.'; } };
+$('bSend').onclick = async () => {
+  report(); $('bSend').disabled = true; $('sent').textContent = 'Sending…';
+  try {
+    const text = $('log').value, last = R.scans[R.scans.length - 1] || { files:{} }, files = { _report: text.slice(0, 60000) };
+    Object.entries(last.files).forEach(([p, h]) => files[p] = h.slice(0, 8000));
+    const hash = toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(text))));
+    const res = await fetch(SB_URL + '/rest/v1/edition_lights', { method:'POST', headers:{ apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify({ hash, edition: ('SCAN ' + (R.id.edition || '?') + ' ' + ($('what').value || R.id.name || '')).slice(0, 80), series: R.id.series || 'peach', fw: R.id.fw || null, api: R.id.api ?? null, files }) });
+    if (!res.ok && res.status !== 409) throw new Error('HTTP ' + res.status);
+    $('sent').innerHTML = '<span class="ok">Sent. Thank you!</span>'; $('c5').classList.add('done');
+  } catch(e){ $('sent').innerHTML = `<span class="bad">Couldn’t send (${e.message}). Tap Copy report and paste it in a DM instead.</span>`; }
+  $('bSend').disabled = false;
+};
+if (R.scans.length){ $('c2').classList.add('done'); if (R.scans.length > 1){ $('c3').classList.add('done'); drawDiff(); } }
+drawFlashes(); report();
+</script></body></html>
