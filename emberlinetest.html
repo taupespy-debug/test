@@ -9370,7 +9370,7 @@ function duelCount(){
 const duelReady = () => S.mode !== 'live' || S.state === 8; // not connected: nothing to wait for
 function duelLive(at){
   const D = DUEL; if (D.ph !== 'count') return;
-  D.ph = 'live'; D.start = at || Date.now(); D.me.at = D.start; buzz([40, 60, 40]); duelSplash('FIGHT!', duelTimed(D.rules) ? 'Every second counts' : 'Hit ' + D.rules.min + 's+ to stay in'); D.fxLead = undefined; D.fxFinal = false; D.fxStreak = 0; dfx('fight');
+  D.ph = 'live'; D.start = at || Date.now(); D.me.at = D.start; buzz([40, 60, 40]); duelSplash('FIGHT!', duelTimed(D.rules) ? 'Every second counts' : 'Hit ' + D.rules.min + 's+ to stay in'); D.fxLead = undefined; D.fxFinal = false; D.fxStreak = 0; D.fxBehind = 0; dfx('fight');
   if (D.bot){ D.op.next = D.start + (5 + Math.random() * 20) * 1000; D.op.outAt = D.start + (D.rules.cap ? D.rules.cap * 1000 * (.35 + Math.random() * .9) : D.rules.win * 1000 * (1.5 + Math.random() * 3)); }
   duelDraw();
 }
@@ -9462,18 +9462,35 @@ function duelArenaUpdate(ar){
    While heating it paints the live heat light (/p/app/thc/colr) and puts your 1v1 light back after. Not heating: the preview channel, cleared after. ---- */
 const DFX = { gen:0, cur:null, k:'', until:0, t:0, ft:0, pend:0, last:{}, ch:'', pxN:0 };
 const dfxOpC = () => okColor(DUEL.op && DUEL.op.c) || '#ff3b8a';
+// each effect is a short show: a list of steps (a mood look on Peak Pro, color steps on Proxy and the original Peak)
+const DFX_RB = ['#ff0040', '#ff9900', '#ffee00', '#00ff66', '#00ccff', '#cc00ff']; // rainbow
+const DFX_T = { strobe:'emberline-fx-strobe', wave:'emberline-fx-wave', heart:'emberline-fx-heartbeat', comet:'emberline-fx-comet', police:'emberline-fx-police', breathe:'emberline-fx-breathe',
+  spin:'pikaled2-spin-mood-light', disco:'pikaled2-disco-mood-light', fade:'pikaled2-fade-mood-light', split:'pikaled2-split-gradient-mood-light', slide:'pikaled2-vertical-slideshow-mood-light', confetti:'migration-confetti-mood-light', lava:'migration-lava-lamp-mood-light' };
+const dfxPh = (tag, cols, t, ms, more) => Object.assign({ tag, cols, t, ms }, more || {});
 const DFX_FX = {
-  fight:  { n:'Fight!',          why:'The clock starts',                pri:5, ms:1600, tag:'emberline-fx-strobe',      cols:['#ffffff'], t:1,   frames: c => [['#ffffff', 250], ['#000000', 250]] },
-  fire:   { n:'On fire',         why:'You hit a blinker',               pri:6, ms:6000, tag:'emberline-fx-wave',        cols:['#ff2200', '#ff7a00', '#ffcc00'], t:.95, frames: c => [['#ff2200', 300], ['#ff8800', 250], ['#ffcc00', 250], ['#ff4400', 300]] },
-  burn:   { n:'Under fire',      why:'They hit a blinker',              pri:4, ms:3000, tag:'emberline-fx-police',      cols: () => [dfxOpC(), '#ff0000'], t:.9 },
-  streak: { n:'Hot streak',      why:'3 hits of 5s+ in a row',          pri:3, ms:4000, tag:'emberline-fx-comet',       cols: () => [duelColor(), '#ffffff'], t:.9 },
-  lead:   { n:'Took the lead',   why:'You pass them on points',         pri:2, ms:2200, gap:6000, tag:'emberline-fx-strobe', cols:['#ffd23f'], t:.8, frames: c => [['#ffd23f', 250], ['#000000', 250]] },
-  lost:   { n:'Lost the lead',   why:'They pass you on points',         pri:2, ms:2500, gap:6000, tag:'emberline-fx-heartbeat', cols:['#ff1a1a'], t:.75, frames: c => [['#ff1a1a', 300], ['#300000', 300]] },
-  final:  { n:'Final 15 seconds', why:'Heartbeat in your color to the end', pri:1, ms: () => DUEL.on && DUEL.rules ? Math.max(1500, Math.min(15000, capAtOf(DUEL) - Date.now())) : 6000, tag:'emberline-fx-heartbeat', cols: () => [duelColor()], t:.95, frames: c => [[c[0], 300], ['#000000', 300]] },
-  win:    { n:'Victory',         why:'You won',                         pri:9, ms:10000, tag:'pikaled2-spin-mood-light', cols:['#ffd23f', '#ffffff', '#ffb020', '#ffffff'], t:.7, frames: c => [['#ffd23f', 400], ['#ffffff', 300], ['#ffb020', 400]] },
-  lose:   { n:'Defeat',          why:'You lost or gave up',             pri:9, ms:6000, tag:'emberline-fx-breathe',     cols:['#ff1a1a'], t:.35, frames: c => [['#ff1a1a', 700], ['#400000', 700]] },
-  draw:   { n:'Draw',            why:'Nobody wins',                     pri:9, ms:4000, tag:'emberline-fx-breathe',     cols:['#9a9ab0'], t:.4,  frames: c => [['#9a9ab0', 700], ['#202028', 700]] }
+  fight:    { n:'Fight!',           why:'The clock starts',                    pri:5, seq:[dfxPh(DFX_T.strobe, ['#ffffff'], 1, 700), dfxPh(DFX_T.disco, () => [duelColor(), '#ffffff', dfxOpC()], 1, 1300)] },
+  fire:     { n:'On fire',          why:'You hit a blinker',                   pri:6, seq:[dfxPh(DFX_T.strobe, ['#fff4d0'], 1, 600), dfxPh(DFX_T.lava, ['#4d0000', '#ff2200', '#ff7a00', '#ffd000'], .95, 3400, { density:8 }), dfxPh(DFX_T.confetti, ['#ff2200', '#ff9900', '#ffee00', '#ffffff'], .95, 2600, { density:12 })] },
+  bighit:   { n:'Big hit',          why:'A hit of 5s or longer',               pri:2, gap:4000, seq:[dfxPh(DFX_T.confetti, () => [duelColor(), '#ffffff', '#ffd23f'], .95, 1800, { density:12 })] },
+  streak:   { n:'Hot streak',       why:'3 hits of 5s+ in a row',              pri:3, seq:[dfxPh(DFX_T.comet, ['#00e5ff', '#ffffff'], .95, 1600), dfxPh(DFX_T.spin, ['#00e5ff', '#7a00ff', '#ff00d4', '#ffffff'], .95, 2600)] },
+  lead:     { n:'Took the lead',    why:'You pass them on points',             pri:2, gap:6000, seq:[dfxPh(DFX_T.strobe, ['#ffd23f'], 1, 500), dfxPh(DFX_T.spin, ['#ffd23f', '#ffffff', '#ffb020'], .9, 1900)] },
+  comeback: { n:'Comeback',         why:'Take the lead after being 50+ behind', pri:4, seq:[dfxPh(DFX_T.strobe, ['#ffffff'], 1, 500), dfxPh(DFX_T.spin, DFX_RB, .95, 2600), dfxPh(DFX_T.confetti, ['#ffd23f', '#ffffff', '#00ff66'], .9, 1600, { density:12 })] },
+  burn:     { n:'Under fire',       why:'They hit a blinker',                  pri:4, seq:[dfxPh(DFX_T.police, () => [dfxOpC(), '#ff0000'], .9, 3000)] },
+  lost:     { n:'Lost the lead',    why:'They pass you on points',             pri:2, gap:6000, seq:[dfxPh(DFX_T.heart, ['#ff1a1a'], .75, 2500, { frames: c => [['#ff1a1a', 300], ['#300000', 300]] })] },
+  final:    { n:'Final 15 seconds', why:'Heartbeat in your color to the end',  pri:1, seq:[dfxPh(DFX_T.heart, () => [duelColor()], .95, () => DUEL.on && DUEL.rules ? Math.max(1500, Math.min(15000, capAtOf(DUEL) - Date.now())) : 6000, { frames: c => [[c[0], 300], ['#000000', 300]] })] },
+  win:      { n:'Victory',          why:'You won',                             pri:9, seq:[dfxPh(DFX_T.strobe, ['#ffffff'], 1, 800), dfxPh(DFX_T.confetti, DFX_RB, .9, 3000, { density:12 }), dfxPh(DFX_T.spin, ['#ffd23f', '#ffffff', '#ffb020', '#ffffff'], .85, 3000), dfxPh(DFX_T.disco, () => [duelColor(), '#ffd23f', '#ffffff'], .8, 3000), dfxPh(DFX_T.fade, () => ['#ffd23f', duelColor()], .55, 3000)] },
+  flawless: { n:'Flawless victory', why:'You won and they scored 0',           pri:9, seq:[dfxPh(DFX_T.strobe, ['#ffffff'], 1, 800), dfxPh(DFX_T.spin, DFX_RB, 1, 3000), dfxPh(DFX_T.confetti, DFX_RB, .95, 3000, { density:12 }), dfxPh(DFX_T.slide, ['#ffd23f', '#ffffff', '#00e5ff', '#ff00d4'], .9, 3000), dfxPh(DFX_T.spin, ['#ffd23f', '#ffffff'], .85, 3000)] },
+  lose:     { n:'Defeat',           why:'You lost or gave up',                 pri:9, seq:[dfxPh(DFX_T.breathe, ['#ff1a1a'], .35, 6000, { frames: c => [['#ff1a1a', 700], ['#400000', 700]] })] },
+  draw:     { n:'Draw',             why:'Nobody wins',                         pri:9, seq:[dfxPh(DFX_T.split, () => [duelColor(), dfxOpC()], .5, 4000)] }
 };
+// color steps for devices that only take solid colors: smooth fades between the colors, hard flashes for a strobe
+function dfxFrames(p, cols){
+  if (p.frames) return p.frames(cols);
+  if (p.tag === DFX_T.strobe) return [[cols[0], 250], ['#000000', 250]];
+  if (cols.length < 2) return [[cols[0], 350], [mixL('#000000', cols[0], .25), 350]];
+  const fast = p.tag === DFX_T.confetti || p.tag === DFX_T.disco || p.tag === DFX_T.police, out = [];
+  cols.forEach((c, i) => { out.push([c, fast ? 250 : 300]); if (!fast) out.push([mixL(c, cols[(i + 1) % cols.length], .5), 260]); });
+  return out;
+}
 const dfxOn = () => store.dfx !== false && S.mode === 'live';
 const dfxAnim = () => !isProxy() && S.api !== 2; // Peak Pro (and new Peak firmware): animated moods
 const dfxHeating = () => S.state >= 7 && S.state <= 9;
@@ -9488,26 +9505,33 @@ async function dfxWrite(ch, look){ // look: { blob } (animated, Peak Pro) or { h
   if (S.api === 2) return ble.write('/p/app/thc/colr', rgbt(look.hex));
   return ble.writeBlob('/p/app/thc/colr', look.blob || solidPayload(look.hex));
 }
-function dfxQ(fn){ if (DFX.pend > 1) return; DFX.pend++; ledJob(() => fn().catch(() => {})).finally(() => DFX.pend--); } // drop a step rather than pile up Bluetooth writes
+function dfxQ(fn, must){ if (DFX.pend > 1 && !must) return; DFX.pend++; ledJob(() => fn().catch(() => {})).finally(() => DFX.pend--); } // drop a step rather than pile up Bluetooth writes
 function dfx(k, force){
   const fx = DFX_FX[k]; if (!fx || !dfxOn() || (!force && !DUEL.on)) return;
   const now = Date.now();
   if (!force && DFX.cur && DFX.cur.pri > fx.pri && now < DFX.until) return; // something bigger is showing
   if (!force && now - (DFX.last[k] || 0) < (fx.gap || 0)) return;
   DFX.last[k] = now;
-  const gen = ++DFX.gen, ms = typeof fx.ms === 'function' ? fx.ms() : fx.ms, cols = typeof fx.cols === 'function' ? fx.cols() : fx.cols;
+  const gen = ++DFX.gen, val = v => typeof v === 'function' ? v() : v;
+  const seq = fx.seq.map(p => Object.assign({}, p, { cols: val(p.cols), ms: val(p.ms) }));
   const ch = dfxHeating() && !store.dfxPv ? 'thc' : 'pv';
   if (DFX.ch && DFX.ch !== ch && DFX.cur) dfxRestore(DFX.ch); // switched channel mid-effect: tidy the old one
-  DFX.cur = fx; DFX.k = k; DFX.until = now + ms; DFX.ch = ch; clearTimeout(DFX.t); clearTimeout(DFX.ft);
-  if (dfxAnim()){
-    let blob = null; try { blob = moodPayload({ kind:'tpl', tag: fx.tag, name: fx.n, meta:{ userColors: cols, tempoFrac: fx.t, dynamicInhale: 0 } }); } catch(e){}
-    dfxQ(() => dfxWrite(ch, blob ? { blob } : { hex: cols[0] }));
-  } else {
-    const frames = fx.frames ? fx.frames(cols) : cols.length > 1 ? cols.map(c => [c, 350]) : [[cols[0], 350], ['#000000', 350]]; let i = 0;
-    const step = () => { if (gen !== DFX.gen) return; const [hex, f] = frames[i++ % frames.length]; dfxQ(() => dfxWrite(ch, { hex })); DFX.ft = setTimeout(step, Math.max(250, f)); };
-    step();
-  }
-  DFX.t = setTimeout(() => dfxEnd(gen), ms);
+  DFX.cur = fx; DFX.k = k; DFX.until = now + seq.reduce((a, p) => a + p.ms, 0); DFX.ch = ch; clearTimeout(DFX.t); clearTimeout(DFX.ft);
+  let pi = 0;
+  const step = () => {
+    if (gen !== DFX.gen) return; const p = seq[pi++]; if (!p) return dfxEnd(gen);
+    clearTimeout(DFX.ft); const mine = pi;
+    if (dfxAnim()){
+      let blob = null; try { blob = moodPayload({ kind:'tpl', tag: p.tag, name: fx.n, meta: Object.assign({ userColors: p.cols, tempoFrac: p.t, dynamicInhale: 0 }, p.density ? { density: p.density } : {}) }); } catch(e){}
+      dfxQ(() => dfxWrite(ch, blob ? { blob } : { hex: p.cols[0] }), true); // a new step always goes out
+    } else {
+      const fr = dfxFrames(p, p.cols); let i = 0;
+      const tick = () => { if (gen !== DFX.gen || pi !== mine) return; const [hex, f] = fr[i++ % fr.length]; dfxQ(() => dfxWrite(ch, { hex })); DFX.ft = setTimeout(tick, Math.max(250, f)); };
+      tick();
+    }
+    DFX.t = setTimeout(step, p.ms);
+  };
+  step();
   try { const l = $('#dfxNow'); if (l) l.textContent = fx.n; } catch(e){}
 }
 function dfxEnd(gen){
@@ -9529,11 +9553,12 @@ function dfxStop(){ if (!DFX.cur) return; DFX.gen++; clearTimeout(DFX.t); clearT
 function dfxTick(){
   const D = DUEL; if (D.ph !== 'live' || !dfxOn()) return;
   const sc = duelScore(D.me, D.op || {}), lead = sc.a > sc.b ? 1 : sc.a < sc.b ? -1 : 0;
-  if (D.fxLead !== undefined && lead !== D.fxLead && lead){ dfx(lead > 0 ? 'lead' : 'lost'); }
+  D.fxBehind = Math.max(D.fxBehind || 0, sc.b - sc.a); // the furthest behind you've been
+  if (D.fxLead !== undefined && lead !== D.fxLead && lead){ if (lead > 0 && D.fxBehind >= 50){ D.fxBehind = 0; dfx('comeback'); } else dfx(lead > 0 ? 'lead' : 'lost'); }
   D.fxLead = lead;
   if (duelTimed(D.rules) && !D.fxFinal && capAtOf(D) - Date.now() <= 15000){ D.fxFinal = true; dfx('final'); }
 }
-function dfxHit(secs){ const D = DUEL; D.fxStreak = secs >= 5 ? (D.fxStreak || 0) + 1 : 0; if (D.fxStreak === 3) dfx('streak'); }
+function dfxHit(secs){ const D = DUEL; D.fxStreak = secs >= 5 ? (D.fxStreak || 0) + 1 : 0; if (D.fxStreak === 3) dfx('streak'); else if (secs >= 5 && secs < duelBlinkAt()) dfx('bighit'); } // blinkers get their own fire
 // test tools: play every effect, one after another
 function dfxTryAll(){
   if (S.mode !== 'live') return toast(`Connect your ${devWord()} first`);
@@ -9618,7 +9643,7 @@ function duelDecide(now){
 function duelFinish(res, why, sc, quit){
   const D = DUEL, now = Date.now(); if (D.res) return;
   D.res = { r: res, why, sc, quit: !!quit }; D.ph = 'done'; D.finalAt = now; D.endAt = now;
-  try { dfx(res === 'win' ? 'win' : res === 'lose' ? 'lose' : 'draw'); } catch(e){}
+  try { dfx(res === 'win' ? (sc && sc.a > 0 && sc.b === 0 ? 'flawless' : 'win') : res === 'lose' ? 'lose' : 'draw'); } catch(e){}
   if (D.demo){ buzz([60, 40, 60, 40, 120]); duelSplash(res === 'win' ? 'VICTORY' : 'DEFEAT', sc ? sc.a + ' – ' + sc.b : '', res === 'win' ? '#ffd23f' : '#ff3b4a'); if (res === 'win') setTimeout(duelConfetti, 250); duelDraw(); return; } // demo: show it, save nothing
   const rec = store.duelRec = store.duelRec || { w:0, l:0, d:0 }; rec[res === 'win' ? 'w' : res === 'lose' ? 'l' : 'd']++;
   if (!D.bot){ const pub = duelPub(); pub[res === 'win' ? 'w' : res === 'lose' ? 'l' : 'd']++; if (!DUEL_RP_REAL || !D.rules.bet || res === 'draw') setTimeout(() => { try { lbPush(true); } catch(e){} }, 400); } // your profile's 1v1 record (a paid match pushes below)
