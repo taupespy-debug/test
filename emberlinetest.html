@@ -9445,7 +9445,7 @@ function duelFinish(res, why, sc, quit){
   if (D.rules.bet && res !== 'draw') rec.rp = (rec.rp || 0) + (res === 'win' ? D.rules.bet : -D.rules.bet);
   // real RP: not for practice, and not for a win because the other player just left (they never pay, so nobody gets paid)
   const leftOnly = res === 'win' && D.op && D.op.gone && !D.op.quit;
-  if (DUEL_RP_REAL && !D.bot && D.rules.bet && res !== 'draw' && !leftOnly){ D.res.real = true; D.res.paid = res === 'win' ? Math.min(D.rules.bet, duelDayLeft()) : Math.min(D.rules.bet, myRpNow()); D.res.capped = res === 'win' && D.res.paid < D.rules.bet; const n = res === 'win' ? D.res.paid : -D.res.paid; if (n){ duelDayAdd(n); duelRpAdd(n); } if (D.res.capped) setTimeout(() => duelCapPop(), 1800); setTimeout(() => { try { lbPush(true); drawRank(); } catch(e){} }, 400); }
+  if (DUEL_RP_REAL && !D.bot && D.rules.bet && res !== 'draw' && !leftOnly){ D.res.real = true; D.res.paid = res === 'win' ? Math.min(D.rules.bet, duelDayLeft()) : Math.min(D.rules.bet, myRpNow()); D.res.capped = res === 'win' && D.res.paid < D.rules.bet; const n = res === 'win' ? D.res.paid : -D.res.paid; D.res.rpFrom = myRpNow(); if (n){ duelDayAdd(n); duelRpAdd(n); } D.res.rpTo = myRpNow(); if (D.res.capped) setTimeout(() => duelCapPop(), 1800); setTimeout(() => { try { drawRank(); lbPush(true).then(() => { lbLoad(); drawRank(); }).catch(() => {}); } catch(e){} }, 400); } // send it now and reload the board so the new RP shows everywhere
   const op = D.op || {}, pick = o => ({ h: o.h || 0, b: o.b || 0, bl: o.bl || 0, tot: Math.round((o.tot || 0) * 10) / 10, out: o.out || 0 });
   (store.duelHist = store.duelHist || []).unshift({ t: D.start || D.made || now, end: now, op: op.n || 'Player', bot: !!D.bot, r: res, why, quit: !!quit, opQuit: !!op.quit,
     sc: sc ? [sc.a, sc.b] : null, bet: D.rules.bet || 0, me: pick(D.me), them: pick(op), rules: { min: D.rules.min, win: D.rules.win, cap: D.rules.cap } });
@@ -9574,6 +9574,13 @@ function duelDraw(){
     const myRp = myRpNow(), betBtns = DUEL_BETS.map(v => `<button class="dchip${v === duelBet() ? ' on' : ''}" data-d="bet" data-v="${v}">${v ? v : 'None'}</button>`).join('');
     card.innerHTML = `<span class="label" style="text-align:center">1v1 <span class="beta-tag">BETA</span></span><h2 style="margin:0;text-align:center">Every second counts</h2>
       <div class="dmode"><button class="dmode-b" data-d="mode" data-m="r"><b>Random match</b><small>Matchmaking with anyone</small></button><button class="dmode-b" data-d="mode" data-m="f"><b>Play a friend</b><small>Custom game, you pick the settings</small></button></div>
+      <details class="dhow"><summary>How 1v1 works</summary><div class="dhow-b">
+        <div><b>1. Pick a mode</b><span>Random match finds someone near your rank (${QUEUE_BUYIN} RP buy-in). Play a friend lets you invite someone you follow who follows you back, pick the settings and bet 0 to ${DUEL_BET_MAX} RP.</span></div>
+        <div><b>2. Accept and heat up</b><span>Your Profile 1 is swapped for the 1v1 profile and your ${esc(devWord())} starts heating. The preheat is the countdown.</span></div>
+        <div><b>3. Go</b><span>When both Puffcos are Ready the 2-minute clock starts. Take the longest hits you can. Your light shows the color you picked.</span></div>
+        <div><b>4. Giving up</b><span>Tap Give up twice. It stops your ${esc(devWord())} and the other player wins.</span></div>
+        <div><b>5. RP</b><span>The winner takes the buy-in or bet from the loser, straight onto this month’s ranked RP and the leaderboard. You can win up to ${DUEL_DAY_MAX} RP a day. Practice and draws don’t change RP, and if someone just leaves, nobody pays.</span></div>
+        <div><b>6. After</b><span>Profile 1 is put back. Every match is saved in Stats under Match history.</span></div></div></details>
       <details class="dhow"><summary>How points work</summary><div class="dhow-b">
         <div><b>+10 points per second</b><span>Every hit of 1 second or longer scores 10 points for each second you pull. A 4.2s hit is +42, a 9s blinker is +90.</span></div>
         <div><b>2-minute match</b><span>The clock starts when both Puffcos are Ready and runs for one 2-minute session. Hits after time’s up don’t count.</span></div>
@@ -9648,7 +9655,7 @@ function duelDraw(){
     const res = D.res || { r:'draw', why:'' }, them = op || {}, dur = D.endAt && D.start ? D.endAt - D.start : 0;
     const big = res.r === 'win' ? 'You won' : res.quit ? 'You gave up' : res.r === 'lose' ? 'You lost' : 'Draw';
     body = `<div class="dres ${res.r}"><div class="dres-big">${big}</div><p>${esc(res.why)}</p></div>
-      ${r.bet && res.r !== 'draw' ? `<p class="duel-bet ${res.r}">${res.real || D.demo ? (res.r === 'win' ? '+' : '−') + (res.real ? res.paid : r.bet) + ' RP' : '<small>No RP this time' + (D.bot ? ' (practice)' : ' (they left)') + '</small>'}${res.capped ? `<small>Daily 1v1 limit: ${DUEL_DAY_MAX} RP a day</small>` : res.paid ? '<small>Added to your ranked RP this month</small>' : ''}</p>` : r.bet ? '<p style="margin:0;text-align:center" class="muted">Draw: nobody pays</p>' : ''}
+      ${r.bet && res.r !== 'draw' ? `<p class="duel-bet ${res.r}">${res.real || D.demo ? (res.r === 'win' ? '+' : '−') + (res.real ? res.paid : r.bet) + ' RP' : '<small>No RP this time' + (D.bot ? ' (practice)' : ' (they left)') + '</small>'}${res.capped ? `<small>Daily 1v1 limit: ${DUEL_DAY_MAX} RP a day</small>` : res.real ? `<small>Your ranked RP: ${res.rpFrom} → ${res.rpTo}</small>` : ''}</p>` : r.bet ? '<p style="margin:0;text-align:center" class="muted">Draw: nobody pays</p>' : ''}
       ${duelStatTable(me, them, them.n, dur)}
       ${res.sc ? `<div class="dsc"><div class="dsc-t" style="border:0;padding:0"><span>Points</span><b>${res.sc.a} – ${res.sc.b}</b></div><span class="dnote">${DUEL_PPS} points per second of every counted hit${res.sc.a === res.sc.b && res.sc.tie ? ' · tied, so the longest hit decided it' : ''}</span></div>` : ''}
       <p class="dnote" style="text-align:center">Match ${dur ? vrMS(dur / 1000) : '0:00'} · hits ${r.min}s+ · ${duelTimed(r) ? matchLen(r.cap) + ' match' : r.win / 60 + ' min clock · ' + capTxt(r.cap)} · ${D.demo ? 'demo match, not saved' : 'saved to Stats → 1v1 match history'}</p>`;
