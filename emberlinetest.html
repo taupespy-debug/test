@@ -5050,8 +5050,15 @@ function myStats(){
   const d = new Date(), m0 = new Date(d.getFullYear(), d.getMonth(), 1).getTime(), all = rankSessions();
   const ss = all.filter(s => s.t >= m0 && !(typeof s.run === 'number' && s.run < 20) && !lowTemp(s)), hits = ss.flatMap(s => s.hits || []);
   return { sessions: ss.length, hits: hits.length, best: hits.length ? Math.round(Math.max(...hits) * 10) / 10 : 0,
-    days: new Set(ss.map(s => new Date(s.t).toDateString())).size, blAll: Math.max(all.reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0), serverBlinkers()) }; // never lower than another device already sent
+    days: new Set(ss.map(s => new Date(s.t).toDateString())).size, blAll: Math.max(all.reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0), serverBlinkers()), // never lower than another device already sent
+    ...duelPubStats() };
 }
+// 1v1 record for your profile: real matches only (no bot or demo), all time. Never lower than what another device sent
+function duelPub(){
+  if (!store.duelPub){ const h = (store.duelHist || []).filter(x => !x.bot); store.duelPub = { w: h.filter(x => x.r === 'win').length, l: h.filter(x => x.r === 'lose').length, d: h.filter(x => x.r === 'draw').length }; }
+  return store.duelPub;
+}
+function duelPubStats(){ const p = duelPub(), me = LB.me || lbStore().meCache, st = (me && me.stats) || {}; return { dw: Math.max(p.w, +st.dw || 0), dl: Math.max(p.l, +st.dl || 0), dd: Math.max(p.d, +st.dd || 0) }; }
 function lbPayload(){
   // test build: never change RP on the leaderboard, only send what the server already has
   { const m = lbMonth(), me = LB.me || lbStore().meCache; if (!me) return { gear: myGear(), month: m }; const same = me.month === m;
@@ -5163,6 +5170,8 @@ function playerStatsHtml(r, isMe){
   return `<span class="label">Stats · this month</span>
     <div class="lbp-grid">${tile(r.rp ?? 0, 'RP')}${tile(place >= 0 ? '#' + (place + 1) : dash, 'place')}${tile(v(r.blinkers), 'blinkers')}${tile(v(st && st.sessions), 'sessions')}
       ${tile(v(st && st.hits), 'hits')}${tile(st && st.best ? st.best.toFixed(1) + 's' : dash, 'best hit')}${tile(v(st && st.days), 'days dabbed')}${tile(v(st && st.blAll), 'blinkers ever')}</div>
+    ${(() => { const w = st && st.dw, l = st && st.dl, d = st && st.dd, n = (+w || 0) + (+l || 0) + (+d || 0); // 1v1 record, all time
+      return `<span class="label">1v1 · all time</span><div class="lbp-grid">${tile(v(w), 'wins')}${tile(v(l), 'losses')}${tile(v(d), 'draws')}${tile(n ? Math.round((+w || 0) / n * 100) + '%' : dash, 'win rate')}</div>`; })()}
     <p class="muted" style="margin:0;font-size:12px;text-align:center">Joined ${joined}${!isMe && !st ? ' · more stats show once they update the app' : ''}</p>`;
 }
 /* ===== badge viewer: tap a badge to see it big ===== */
@@ -9532,6 +9541,7 @@ function duelFinish(res, why, sc, quit){
   try { dfx(res === 'win' ? 'win' : res === 'lose' ? 'lose' : 'draw'); } catch(e){}
   if (D.demo){ buzz([60, 40, 60, 40, 120]); duelSplash(res === 'win' ? 'VICTORY' : 'DEFEAT', sc ? sc.a + ' – ' + sc.b : '', res === 'win' ? '#ffd23f' : '#ff3b4a'); if (res === 'win') setTimeout(duelConfetti, 250); duelDraw(); return; } // demo: show it, save nothing
   const rec = store.duelRec = store.duelRec || { w:0, l:0, d:0 }; rec[res === 'win' ? 'w' : res === 'lose' ? 'l' : 'd']++;
+  if (!D.bot){ const pub = duelPub(); pub[res === 'win' ? 'w' : res === 'lose' ? 'l' : 'd']++; if (!DUEL_RP_REAL || !D.rules.bet || res === 'draw') setTimeout(() => { try { lbPush(true); } catch(e){} }, 400); } // your profile's 1v1 record (a paid match pushes below)
   if (D.rules.bet && res !== 'draw') rec.rp = (rec.rp || 0) + (res === 'win' ? D.rules.bet : -D.rules.bet);
   // real RP: not for practice, and not for a win because the other player just left (they never pay, so nobody gets paid)
   const leftOnly = res === 'win' && D.op && D.op.gone && !D.op.quit;
