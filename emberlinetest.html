@@ -1947,6 +1947,10 @@ body.vr-on #dvFrame{display:none}
 .dh-tag{font-size:11px;color:var(--muted);font-weight:600}
 .dh-sc{display:grid;justify-items:end;font:800 15px var(--f-round,system-ui);font-variant-numeric:tabular-nums}.dh-sc small{font:700 11px var(--f-body,system-ui)}.dh-sc small.win{color:#3ddc84}.dh-sc small.lose{color:#ff3b4a}
 .dh-row .dstat{margin:0 12px;width:calc(100% - 24px)}.dh-row .dnote{padding:6px 12px 10px}
+.dhow{border-radius:16px;background:var(--surface-2,rgba(255,255,255,.06));padding:0 14px}
+.dhow summary{cursor:pointer;padding:12px 0;font-weight:700;font-size:14px;list-style:none;display:flex;justify-content:space-between}.dhow summary::-webkit-details-marker{display:none}
+.dhow summary::after{content:'+';font-size:18px;line-height:1;color:var(--muted)}.dhow[open] summary::after{content:'–'}
+.dhow-b{display:grid;gap:10px;padding:0 0 14px}.dhow-b div{display:grid;gap:2px}.dhow-b b{font-size:14px}.dhow-b span{font-size:13px;color:var(--muted);line-height:1.4}
 /* 1v1 menu */
 .wn-vs{display:flex;align-items:center;justify-content:center;gap:12px;padding:6px 0}
 .wn-vs span{width:62px;height:62px;border-radius:50%;display:grid;place-items:center;font:900 26px var(--f-round,system-ui);color:#fff;background:linear-gradient(135deg,var(--pc),#ffffff55);box-shadow:0 0 0 4px var(--pc),0 0 24px var(--pc);animation:dvVs 3.2s ease-in-out infinite}
@@ -9537,6 +9541,12 @@ function duelDraw(){
     const myRp = myRpNow(), betBtns = DUEL_BETS.map(v => `<button class="dchip${v === duelBet() ? ' on' : ''}" data-d="bet" data-v="${v}">${v ? v : 'None'}</button>`).join('');
     card.innerHTML = `<span class="label" style="text-align:center">1v1 <span class="beta-tag">BETA</span></span><h2 style="margin:0;text-align:center">Every second counts</h2>
       <div class="dmode"><button class="dmode-b" data-d="mode" data-m="r"><b>Random match</b><small>Matchmaking with anyone</small></button><button class="dmode-b" data-d="mode" data-m="f"><b>Play a friend</b><small>Custom game, you pick the settings</small></button></div>
+      <details class="dhow"><summary>How points work</summary><div class="dhow-b">
+        <div><b>+10 points per second</b><span>Every hit of 1 second or longer scores 10 points for each second you pull. A 4.2s hit is +42, a 9s blinker is +90.</span></div>
+        <div><b>2-minute match</b><span>The clock starts when both Puffcos are Ready and runs for one 2-minute session. Hits after time’s up don’t count.</span></div>
+        <div><b>Most points wins</b><span>Tied on points? The longest single hit wins. Still tied, it’s a draw.</span></div>
+        <div><b>Blinkers</b><span>8s+ (11s+ in Champion and Legend). No bonus, they just score big and set your side on fire.</span></div>
+        <div><b>Fair play</b><span>Both players get the same profile: 505°F, 120s, Bold, Boost +1°F / +15s. Hits only count on it (P1).</span></div></div></details>
       <a class="ddisc" href="${DISCORD_URL}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.3 5.3A17 17 0 0 0 15.1 4l-.5 1a15.7 15.7 0 0 0-5.2 0l-.5-1a17 17 0 0 0-4.2 1.3C2 9.2 1.3 13 1.6 16.7a17 17 0 0 0 5.2 2.6l1.1-1.8c-.6-.2-1.2-.5-1.8-.9l.4-.3a12 12 0 0 0 11 0l.4.3c-.6.4-1.2.7-1.8.9l1.1 1.8a17 17 0 0 0 5.2-2.6c.4-4.3-.7-8-3.1-11.4ZM8.7 14.5c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Zm6.6 0c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Z"/></svg><span><b>Looking for players?</b><small>Join the Emberline Discord and find someone to 1v1</small></span><em>Join</em></a>
       <div id="dSecR" class="dpanel" hidden><span class="label">Random match</span>
         <div class="dpub muted">Everyone plays the same profile: <b style="color:var(--fg)">${esc(profTxt(DUEL_PUBLIC))}</b>A 2-minute match, one session each. ${DUEL_PTS_TXT}.<br><b style="color:#ffd23f">${QUEUE_BUYIN} RP buy-in</b> · winner takes it from the loser (you have ${myRp} RP)${DUEL_RP_REAL ? '' : '. For now your RP doesn’t change'}</div>
