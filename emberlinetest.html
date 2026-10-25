@@ -314,6 +314,12 @@ section.view>*{min-width:0}
 .bnr{position:absolute;left:0;right:0;top:0;height:112px;z-index:0;pointer-events:none;overflow:hidden;-webkit-mask:linear-gradient(#000 45%,#0000);mask:linear-gradient(#000 45%,#0000)}
 .bnr svg{width:100%;height:100%;display:block}
 .prem-star{display:inline-block;vertical-align:middle;flex:none;cursor:pointer;filter:drop-shadow(0 0 4px #ffd23f88)}
+.prem-prev{position:relative;overflow:hidden;border-radius:18px;background:var(--fill-2,rgba(255,255,255,.06));padding:56px 12px 14px;box-shadow:inset 0 0 0 1px #fff1}
+.prem-prev .bnr{transition:background .6s}.prem-prev-in{position:relative;z-index:1;display:grid;justify-items:center;gap:4px;text-align:center}
+.prem-prev-in .lb-av{box-shadow:0 0 0 3px #ffd23f,0 8px 24px #0008}.prem-prev-in>b{display:flex;align-items:center;gap:6px;font:800 20px var(--f-round,system-ui);text-shadow:0 1px 8px #000d}
+.prem-prev-b{display:grid;justify-items:center;margin-top:4px}.prem-prev-b small{font-size:11px;color:var(--muted)}
+.prem-prev-n{position:absolute;top:8px;right:10px;z-index:1;font:700 11px var(--f-round,system-ui);color:#fff;text-shadow:0 1px 4px #000c;background:#0005;padding:2px 8px;border-radius:999px}
+.prem-pvbs{display:flex;gap:6px;justify-content:center;flex-wrap:wrap}.prem-pvbs button{width:28px;height:28px;border-radius:50%;border:0;cursor:pointer;box-shadow:inset 0 0 0 1px #fff3}.prem-pvbs button.on{box-shadow:0 0 0 2px var(--fg)}
 .prem-bnrs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.prem-bnr{height:44px;border:0;border-radius:10px;position:relative;cursor:pointer;box-shadow:inset 0 0 0 1px #fff2}.prem-bnr span{position:absolute;left:6px;bottom:3px;font:700 11px var(--f-round,system-ui);color:#fff;text-shadow:0 1px 4px #000c}.prem-bnr.on{box-shadow:0 0 0 2px var(--fg),inset 0 0 0 1px #fff4}
 .dbl-big{font:900 64px/1 var(--f-round,system-ui);background:linear-gradient(120deg,#ff2200,#ff9900,#ffd23f);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 18px #ff990088)}
 .dbl-note{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top) + 8px);z-index:300;display:flex;gap:10px;align-items:center;padding:12px 14px;border-radius:18px;background:linear-gradient(120deg,#ff2200,#ff9900 60%,#ffd23f);color:#1d0a00;box-shadow:0 10px 30px #0008;transform:translateY(-140%);transition:transform .45s cubic-bezier(.2,.9,.3,1.2);cursor:pointer;max-width:520px;margin:0 auto}
@@ -5131,7 +5137,8 @@ function premInfo(){
   if (document.querySelector('.egg.prem')) return;
   const me = isPremium(), el = document.createElement('div'); el.className = 'egg prem'; el.style.zIndex = 240;
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Emberline Premium" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
-    <div style="display:grid;justify-items:center;gap:6px">${premStar(54)}<h2 style="margin:0;text-align:center">Emberline Premium</h2>${me ? '<span class="label" style="color:#ffd23f">You’re Premium. Thank you!</span>' : ''}</div>
+    <div style="display:grid;justify-items:center;gap:6px"><h2 style="margin:0;text-align:center">Emberline Premium ${premStar(26)}</h2>${me ? '<span class="label" style="color:#ffd23f">You’re Premium. Thank you!</span>' : '<span class="muted" style="font-size:13px">Here’s how your profile would look</span>'}</div>
+    ${premPreview()}
     <p style="margin:0;font-size:14px"><b>Not required.</b> Emberline stays free for everyone. Premium is a way to say thanks, and it helps pay for the servers that run the leaderboard, profiles and 1v1s.</p>
     <div style="display:grid;gap:8px">
       <div><b>⭐ Premium star</b><br><span class="muted" style="font-size:14px">Next to your name everywhere. Tap it to see what it means.</span></div>
@@ -5144,8 +5151,22 @@ function premInfo(){
     <a class="btn primary" href="${DISCORD_URL}" target="_blank" rel="noopener" style="width:100%;text-align:center;text-decoration:none">Join the Discord</a>
     <button class="btn" id="premX" style="width:100%">Close</button></div>`;
   document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
-  const opened = Date.now(), shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
-  el.addEventListener('click', e => { if (Date.now() - opened < 350) return; if (e.target === el || e.target.id === 'premX') shut(); });
+  const opened = Date.now(), shut = () => { clearInterval(cyc); el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  // the preview banner cycles through every style until you tap one
+  const keys = Object.keys(PREM_BANNERS), setB = k => { const pv = el.querySelector('.prem-prev'); if (!pv) return; pv.querySelector('.bnr').style.background = PREM_BANNERS[k][1]; pv.dataset.k = k;
+    el.querySelectorAll('[data-pvb]').forEach(x => x.classList.toggle('on', x.dataset.pvb === k)); const n = el.querySelector('.prem-prev-n'); if (n) n.textContent = PREM_BANNERS[k][0] + ' banner'; };
+  let cyc = setInterval(() => { if (!document.body.contains(el)) return clearInterval(cyc); const pv = el.querySelector('.prem-prev'); setB(keys[(keys.indexOf(pv.dataset.k) + 1) % keys.length]); }, 2200);
+  el.addEventListener('click', e => { if (Date.now() - opened < 350) return; const c = e.target.closest('[data-pvb]'); if (c){ clearInterval(cyc); setB(c.dataset.pvb); return; } if (e.target === el || e.target.id === 'premX') shut(); });
+}
+// your own profile card, dressed up as Premium (the real one only changes once Premium is turned on)
+function premPreview(){
+  const me = LB.me || lbStore().meCache || {}, name = me.username || store.name || 'You', k = premBannerOf(me) || 'aurora';
+  let tier = 'Ember', rp = 0; try { const r = myRank(); tier = r.tier.n; rp = r.rp; } catch(e){}
+  return `<div class="prem-prev has-bnr" data-k="${k}"><span class="bnr" aria-hidden="true" style="background:${PREM_BANNERS[k][1]}"></span>
+      <div class="prem-prev-in">${lbAvatar(me.avatar_url, name, 64)}<b>${esc(name)}${premStar(20)}</b><span class="muted" style="font-size:13px"><span style="color:${lbTierColor(tier)};font-weight:700">${esc(tier)}</span> · ${rp} RP</span>
+      <div class="prem-prev-b">${SPB.badge(spbById('premium'), 46)}<small>Premium</small></div></div>
+      <span class="prem-prev-n">${PREM_BANNERS[k][0]} banner</span></div>
+    <div class="prem-pvbs">${Object.entries(PREM_BANNERS).map(([id, [n, css]]) => `<button type="button" data-pvb="${id}" class="${id === k ? 'on' : ''}" style="background:${css}" aria-label="${n}"></button>`).join('')}</div>`;
 }
 function drawPremCard(){ const s = $('#premCardStar'); if (s) s.innerHTML = premStar(34); const t = $('#premCardTxt'); if (t && isPremium()) t.textContent = 'You’re Premium. Thank you for keeping Emberline running!'; }
 setTimeout(() => { drawPremCard(); const c = $('#premCard'); if (c) c.onclick = () => { drawPremCard(); premInfo(); }; }, 0);
