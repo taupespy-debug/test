@@ -313,6 +313,8 @@ section.view>*{min-width:0}
 /* profile banners */
 .bnr{position:absolute;left:0;right:0;top:0;height:112px;z-index:0;pointer-events:none;overflow:hidden;-webkit-mask:linear-gradient(#000 45%,#0000);mask:linear-gradient(#000 45%,#0000)}
 .bnr svg{width:100%;height:100%;display:block}
+.prem-star{display:inline-block;vertical-align:middle;flex:none;cursor:pointer;filter:drop-shadow(0 0 4px #ffd23f88)}
+.prem-bnrs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.prem-bnr{height:44px;border:0;border-radius:10px;position:relative;cursor:pointer;box-shadow:inset 0 0 0 1px #fff2}.prem-bnr span{position:absolute;left:6px;bottom:3px;font:700 11px var(--f-round,system-ui);color:#fff;text-shadow:0 1px 4px #000c}.prem-bnr.on{box-shadow:0 0 0 2px var(--fg),inset 0 0 0 1px #fff4}
 .has-bnr{position:relative;overflow:hidden}.has-bnr>*:not(.bnr){position:relative;z-index:1}
 .af-live .bn-drift{animation:bnDrift 7s ease-in-out infinite alternate}
 @keyframes bnDrift{to{transform:translate(40px,-14px)}}
@@ -2161,6 +2163,9 @@ body.vr-on #dvFrame{display:none}
       <button class="btn small" id="tbEdShare">Share edition lights now</button>
       <div class="row" style="gap:6px;flex-wrap:wrap"><span class="muted" style="font-size:13px;width:100%">Proxy brightness test: tap each, tell Claude how bright it looks</span><button class="btn small" data-pbr="16">16</button><button class="btn small" data-pbr="64">64</button><button class="btn small" data-pbr="128">128</button><button class="btn small" data-pbr="256">256</button><button class="btn small" data-pbr="1024">1024</button><button class="btn small" data-pbr="16384">16384</button><button class="btn small" data-pbr="65280">65280</button></div>
       <div class="row" style="gap:6px"><span class="muted" style="font-size:13px;width:100%">Light test: tap each, tell Claude which turned the light red</span><button class="btn small" data-lt="a">A: new format</button><button class="btn small" data-lt="b">B: old format</button><button class="btn small" data-lt="c">C: clear</button><button class="btn small" data-lt="d">D: own light red</button><button class="btn small" data-lt="e">E: other clear</button></div>
+    </div>
+    <div class="card prem-card" id="premCard" role="button" tabindex="0" style="display:flex;gap:12px;align-items:center;cursor:pointer">
+      <span id="premCardStar"></span><div class="grow" style="display:grid;gap:2px"><b>Emberline Premium</b><span class="muted" style="font-size:13px" id="premCardTxt">Not required, but it helps keep the servers running. Get a star, a banner and early features.</span></div><span class="muted" style="font-size:20px">›</span>
     </div>
     <div class="card" id="looksCard" style="display:grid;gap:10px" hidden>
       <span class="label">Secret looks</span>
@@ -5086,6 +5091,59 @@ async function lbLoad(){
   drawLeaderboard();
 }
 function lbTierColor(n){ const t = RANK_TIERS.find(x => x.n === n); return t ? t.c : '#888'; }
+/* ---- Premium: an optional supporter tier. Not required. After someone pays in a Discord ticket, add 'premium' to their
+   players.awards in Supabase and they get: a gold star by their name, a custom profile banner, the Premium badge and early features ---- */
+const PREM_BANNERS = {
+  aurora: ['Aurora', 'linear-gradient(120deg,#00e5ff,#7a00ff 55%,#ff00d4)'],
+  gold:   ['Gold',   'linear-gradient(120deg,#7a4a00,#ffd23f 50%,#fff1a8)'],
+  sunset: ['Sunset', 'linear-gradient(120deg,#ff5f6d,#ff9a3c 55%,#ffd36e)'],
+  ember:  ['Ember',  'linear-gradient(120deg,#3a0000,#ff2200 50%,#ffcc00)'],
+  ocean:  ['Ocean',  'linear-gradient(120deg,#002f6c,#00b4db 60%,#9ff3ff)'],
+  forest: ['Forest', 'linear-gradient(120deg,#0b3d20,#30d158 60%,#c8ffb0)'],
+  candy:  ['Candy',  'linear-gradient(120deg,#ff7ad9,#ffd6f5 50%,#7afcff)'],
+  galaxy: ['Galaxy', 'radial-gradient(circle at 20% 30%,#ff00d4 0,transparent 38%),radial-gradient(circle at 80% 65%,#00e5ff 0,transparent 38%),linear-gradient(120deg,#0b0420,#2a0b5c)'],
+  mono:   ['Mono',   'linear-gradient(120deg,#111,#555 50%,#eee)']
+};
+const isPremRow = r => !!r && ((Array.isArray(r.awards) && r.awards.includes('premium')) || (IS_TEST && store.testPrem && LB.me && r.id === LB.me.id));
+const isPremium = () => isPremRow(LB.me || lbStore().meCache);
+const premBannerOf = r => isPremRow(r) ? (PREM_BANNERS[r.banner] ? r.banner : 'aurora') : null;
+const premBannerHtml = id => `<span class="bnr" aria-hidden="true" style="background:${PREM_BANNERS[id][1]}"></span>`;
+let premUid = 0;
+function premStar(size){ // tap it: what Premium is
+  const id = 'pst' + (premUid++);
+  return `<svg class="prem-star" data-prem viewBox="0 0 24 24" width="${size}" height="${size}" role="button" aria-label="Premium"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff4c9"/><stop offset=".5" stop-color="#ffd23f"/><stop offset="1" stop-color="#e09a00"/></linearGradient></defs><path d="M12 2.2l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.1l-5.9 3.1 1.2-6.5L2.5 9.1l6.6-.9z" fill="url(#${id})" stroke="#7a4a00" stroke-width=".8" stroke-linejoin="round"/></svg>`;
+}
+function premInfo(){
+  if (document.querySelector('.egg.prem')) return;
+  const me = isPremium(), el = document.createElement('div'); el.className = 'egg prem'; el.style.zIndex = 240;
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Emberline Premium" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
+    <div style="display:grid;justify-items:center;gap:6px">${premStar(54)}<h2 style="margin:0;text-align:center">Emberline Premium</h2>${me ? '<span class="label" style="color:#ffd23f">You’re Premium. Thank you!</span>' : ''}</div>
+    <p style="margin:0;font-size:14px"><b>Not required.</b> Emberline stays free for everyone. Premium is a way to say thanks, and it helps pay for the servers that run the leaderboard, profiles and 1v1s.</p>
+    <div style="display:grid;gap:8px">
+      <div><b>⭐ Premium star</b><br><span class="muted" style="font-size:14px">Next to your name everywhere. Tap it to see what it means.</span></div>
+      <div><b>🎨 Custom banner</b><br><span class="muted" style="font-size:14px">Pick a banner for the top of your profile (Edit profile).</span></div>
+      <div><b>🚀 Early access</b><br><span class="muted" style="font-size:14px">Try new features before everyone else, like the VR panel.</span></div>
+      <div><b>🏅 Premium badge</b><br><span class="muted" style="font-size:14px">A legendary badge you can show off in your showcase.</span></div>
+    </div>
+    <div style="display:grid;gap:4px"><b>How to get it</b>
+      <ol style="margin:0;padding-left:20px;color:var(--muted);font-size:14px;display:grid;gap:2px"><li>Join the Emberline Discord.</li><li>Open a ticket.</li><li>Pay with Cash App, Zelle, Venmo or Apple Pay.</li><li>We turn on Premium for your username. It shows the next time you open Emberline.</li></ol></div>
+    <a class="btn primary" href="${DISCORD_URL}" target="_blank" rel="noopener" style="width:100%;text-align:center;text-decoration:none">Join the Discord</a>
+    <button class="btn" id="premX" style="width:100%">Close</button></div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now(), shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.addEventListener('click', e => { if (Date.now() - opened < 350) return; if (e.target === el || e.target.id === 'premX') shut(); });
+}
+function drawPremCard(){ const s = $('#premCardStar'); if (s) s.innerHTML = premStar(34); const t = $('#premCardTxt'); if (t && isPremium()) t.textContent = 'You’re Premium. Thank you for keeping Emberline running!'; }
+setTimeout(() => { drawPremCard(); const c = $('#premCard'); if (c) c.onclick = () => { drawPremCard(); premInfo(); }; }, 0);
+// a tap on any Premium star opens the popup (and doesn't open the row it sits in)
+document.addEventListener('click', e => { const s = e.target.closest && e.target.closest('[data-prem]'); if (!s || s.closest('.egg.prem')) return; e.stopPropagation(); e.preventDefault(); premInfo(); }, true);
+// banner picker in Edit profile (Premium only)
+function premBannerPicker(){
+  if (!isPremium()) return '';
+  const cur = LB.bannerDraft || premBannerOf(LB.me || lbStore().meCache);
+  return `<div style="display:grid;gap:6px"><span class="label">Profile banner ${premStar(14)}</span><div class="prem-bnrs">${Object.entries(PREM_BANNERS).map(([k, [n, css]]) => `<button type="button" class="prem-bnr${k === cur ? ' on' : ''}" data-bnr="${k}" style="background:${css}" aria-label="${n} banner"><span>${n}</span></button>`).join('')}</div></div>`;
+}
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-bnr]'); if (!b) return; LB.bannerDraft = b.dataset.bnr; document.querySelectorAll('[data-bnr]').forEach(x => x.classList.toggle('on', x === b)); });
 const AV_PX = 160; // profile pictures: 160px (shown at 84px at most), about a quarter of the old 320px size
 // once per account: an old big profile picture gets shrunk and saved again, so everyone downloads less
 let avTried = false;
@@ -5155,7 +5213,7 @@ function openPlayer(r){
   let el = $('#lbProfile'); if (!el){ el = document.createElement('div'); el.id = 'lbProfile'; el.className = 'welcome'; document.body.appendChild(el); }
   const sc = r.showcase || [], meId = LB.me && LB.me.id, isMe = r.id === meId;
   el.innerHTML = `<div class="wl-card lbp"><div class="row between"><span class="label">Profile</span><button class="btn small ghost" id="lbpClose">Close</button></div>
-    <div class="lbp-head">${isRichId(r.id) ? devFramed(lbAvatar(r.avatar_url, r.username, 96), 96, true) : isMe ? framed(lbAvatar(r.avatar_url, r.username, 96), 96, myFrame(), true) : lbAvatar(r.avatar_url, r.username, 96)}<b class="lbp-name" data-pstats role="button" tabindex="0">${esc(r.username)}${r.dev ? devBadge(26) : ''}<svg class="lbp-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
+    <div class="lbp-head">${isRichId(r.id) ? devFramed(lbAvatar(r.avatar_url, r.username, 96), 96, true) : isMe ? framed(lbAvatar(r.avatar_url, r.username, 96), 96, myFrame(), true) : lbAvatar(r.avatar_url, r.username, 96)}<b class="lbp-name" data-pstats role="button" tabindex="0">${esc(r.username)}${r.dev ? devBadge(26) : ''}${isPremRow(r) ? premStar(24) : ''}<svg class="lbp-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
       <div class="soc-counts"><span><b data-cnt="followers">–</b> followers</span><span><b data-cnt="following">–</b> following</span></div></div>
     <div class="lbp-stats" id="lbpStats" hidden></div>
     ${r.bio ? `<p class="soc-bio">${esc(r.bio)}</p>` : ''}
@@ -5163,7 +5221,7 @@ function openPlayer(r){
     ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, r)}">${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}
     ${isMe ? '' : meId ? `<button class="btn soc-follow" data-follow="${r.id}" style="width:100%">Follow</button>`
       : '<p class="muted" style="margin:0;text-align:center;font-size:13px">Make your profile in Social to follow people.</p>'}</div>`;
-  { const wc = el.querySelector('.wl-card'), rb = isRichId(r.id), ob = isMe && !!myBanner(); wc.classList.toggle('has-bnr', rb || ob); if (rb) wc.insertAdjacentHTML('afterbegin', richBannerHtml()); else if (ob) wc.insertAdjacentHTML('afterbegin', bannerHtml(myBanner(), true)); }
+  { const wc = el.querySelector('.wl-card'), rb = isRichId(r.id), ob = isMe && !!myBanner(), pb = !rb && !ob && premBannerOf(r); wc.classList.toggle('has-bnr', rb || ob || !!pb); if (rb) wc.insertAdjacentHTML('afterbegin', richBannerHtml()); else if (ob) wc.insertAdjacentHTML('afterbegin', bannerHtml(myBanner(), true)); else if (pb) wc.insertAdjacentHTML('afterbegin', premBannerHtml(pb)); }
   edCard(el.querySelector('.wl-card'), isMe ? myGear() : r.gear); socPaintFollow(r.id); el.hidden = false; applyHaptics();
   const fillCounts = () => socCounts(r.id).then(c => { if (el.hidden) return; el.querySelectorAll('[data-cnt]').forEach(b => { b.textContent = c[b.dataset.cnt]; }); });
   fillCounts();
@@ -5427,6 +5485,7 @@ const I = {
   discord: c => `<path d="M14 18c4-3 8-4 12-4l1 2c-3 0-6 1-9 3 8-4 16-4 24 0-3-2-6-3-9-3l1-2c4 0 8 1 12 4 4 6 6 13 5 21-4 3-8 5-12 5l-2-4c2-1 4-2 5-3-7 3-15 3-22 0 1 1 3 2 5 3l-2 4c-4 0-8-2-12-5-1-8 1-15 5-21z" fill="${c}"/><ellipse cx="23" cy="31" rx="3.4" ry="3.8" fill="#120e19"/><ellipse cx="37" cy="31" rx="3.4" ry="3.8" fill="#120e19"/>`,
   bug: c => `<ellipse cx="30" cy="34" rx="11" ry="14" fill="${c}"/><circle cx="30" cy="17" r="6" fill="${c}"/><path d="M30 21v26" stroke="#120e19" stroke-width="2"/><path d="M19 28l-8-4M19 36H9M20 43l-8 5M41 28l8-4M41 36h10M40 43l8 5M27 12l-4-5M33 12l4-5" stroke="${c}" stroke-width="3" stroke-linecap="round"/>`,
   squad: c => [[-14, 5, .78], [14, 5, .78], [0, 0, 1]].map(([dx, dy, k]) => `<g transform="translate(${30 + dx} ${32 + dy}) scale(${k})"><circle cy="-9" r="7.5" fill="${c}" stroke="#120e19" stroke-width="${k === 1 ? 3 : 0}"/><path d="M-13 16c0-9 5.5-13.5 13-13.5S13 7 13 16z" fill="${c}" stroke="#120e19" stroke-width="${k === 1 ? 3 : 0}"/></g>`).join(''),
+  star: c => `<path d="M30 8l6.4 13.2 14.6 2-10.6 10.2 2.6 14.4L30 40.9 17 47.8l2.6-14.4L9 23.2l14.6-2z" fill="${c}"/>`,
   secret: c => `<text x="30" y="41" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="900" font-size="32" fill="${c}">???</text>`
 };
 
@@ -5456,7 +5515,8 @@ const CATS = [
     { id:'founder', name:'Founder', req:'Joined Emberline in its first month. Can never be earned again.', icon:'founder', col:['#f0d9ff','#a24bff','#3a0070'], rar:'legendary' },
     { id:'420', name:'4/20', req:'Have a session on April 20th.', icon:'leaf', col:['#d8ffc9','#4cd964','#145c1c'], rar:'rare' },
     { id:'discord', name:'Discord Member', req:'Join the Emberline Discord and ask a mod for it.', icon:'discord', col:['#dfe3ff','#5865f2','#232a8a'], rar:'common' },
-    { id:'bughunter', name:'Bug Hunter', req:'Handed out by the dev for reporting real bugs.', icon:'bug', col:['#ffe9b8','#ffb020','#7a4a00'], rar:'epic' } ]},
+    { id:'bughunter', name:'Bug Hunter', req:'Handed out by the dev for reporting real bugs.', icon:'bug', col:['#ffe9b8','#ffb020','#7a4a00'], rar:'epic' },
+    { id:'premium', name:'Premium', req:'Emberline Premium supporter. Not required, but it helps keep the servers running. Get it in the Discord (open a ticket).', icon:'star', col:['#fff4c9','#ffd23f','#8a6115'], rar:'legendary' } ]},
   { n:'Secret', c:'#ff6f91', badges:[
     { id:'secret', name:'???', req:'Nobody knows how to get this one. Yet.', hint:'Started a session at exactly 4:20.', icon:'secret', col:['#5a4a6e','#2a2236','#120e19'], rar:'mystery', secret:true } ]}
 ];
@@ -6133,7 +6193,7 @@ function socDrawFriends(){
   let mine = { rp: me.rp || 0, tier: me.tier }; try { const r = myRank(); mine = { rp: r.rp, tier: r.tier.n }; } catch(e){}
   const rows = fr.map(r => Object.assign({}, r, r.month === m ? {} : { rp: 0, tier: 'Ember' })).concat([Object.assign({}, me, mine)]).sort((a, b) => (b.rp || 0) - (a.rp || 0));
   const place = rows.findIndex(r => r.id === me.id) + 1;
-  const row = (r, i) => `<div class="lb-row${r.id === me.id ? ' me' : ''}" data-soc="${r.id}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier || 'Ember')}</small></span><b>${r.rp || 0}<small> RP</small></b></div>`;
+  const row = (r, i) => `<div class="lb-row${r.id === me.id ? ' me' : ''}" data-soc="${r.id}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}${isPremRow(r) ? premStar(18) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier || 'Ember')}</small></span><b>${r.rp || 0}<small> RP</small></b></div>`;
   el.hidden = false;
   el.innerHTML = `<details class="bb-all fr-lb"${store.frOpen ? ' open' : ''}><summary><span>Friends leaderboard</span><span class="muted">${fr.length ? `#${place} of ${rows.length}` : 'No friends yet'}</span><svg class="mt-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
     <div class="lb-list" style="margin-top:8px">${fr.length ? rows.map(row).join('') : '<p class="muted" style="margin:0;font-size:14px">Friends are people you follow who follow you back. Follow some players to fill this in.</p>'}</div></details>`;
@@ -6142,7 +6202,7 @@ function socDrawFriends(){
 function socRow(r){
   const meId = LB.me && LB.me.id, on = SOC.following.has(r.id);
   return `<div class="soc-row" data-soc="${r.id}" role="button" tabindex="0">${lbAvatar(r.avatar_url, r.username, 42)}
-    <span class="soc-name"><b>${esc(r.username)}${r.dev ? devBadge(18) : ''}</b><small style="color:${lbTierColor(r.tier)}">${esc(r.tier || 'Ember')}${r.bio ? ` <span class="muted">· ${esc(r.bio.slice(0, 40))}${r.bio.length > 40 ? '…' : ''}</span>` : ''}</small></span>
+    <span class="soc-name"><b>${esc(r.username)}${r.dev ? devBadge(18) : ''}${isPremRow(r) ? premStar(16) : ''}</b><small style="color:${lbTierColor(r.tier)}">${esc(r.tier || 'Ember')}${r.bio ? ` <span class="muted">· ${esc(r.bio.slice(0, 40))}${r.bio.length > 40 ? '…' : ''}</span>` : ''}</small></span>
     ${meId && r.id !== meId ? `<button class="btn small ${on ? 'on' : 'primary'} soc-follow" data-follow="${r.id}">${followLabel(r.id)}</button>` : ''}</div>`;
 }
 function drawSocial(){
@@ -6157,8 +6217,8 @@ function drawSocial(){
     setHTML(meEl, `<span class="label">Your profile</span><p class="muted" style="margin:0">Make a profile with a username, photo and bio. People can find you, follow you and see your badges.</p><button class="btn primary" id="socCreate">Create your profile</button>`);
   } else {
     const c = SOC.myCounts, sc = me.showcase || [];
-    const rich = isRichId(me.id), hasB = rich || !!myBanner(); meEl.classList.toggle('has-bnr', hasB);
-    setHTML(meEl, `${rich ? richBannerHtml() : bannerHtml(myBanner(), true)}<div class="soc-head" style="${hasB ? 'margin-top:44px' : ''}">${rich ? devFramed(lbAvatar(me.avatar_url, me.username, 72), 72, true) : framed(lbAvatar(me.avatar_url, me.username, 72), 72, myFrame(), true)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}</b>
+    const rich = isRichId(me.id), pb = !rich && !myBanner() && premBannerOf(me), hasB = rich || !!myBanner() || !!pb; meEl.classList.toggle('has-bnr', hasB);
+    setHTML(meEl, `${rich ? richBannerHtml() : pb ? premBannerHtml(pb) : bannerHtml(myBanner(), true)}<div class="soc-head" style="${hasB ? 'margin-top:44px' : ''}">${rich ? devFramed(lbAvatar(me.avatar_url, me.username, 72), 72, true) : framed(lbAvatar(me.avatar_url, me.username, 72), 72, myFrame(), true)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}${isPremRow(me) ? premStar(20) : ''}</b>
         <span class="muted"><span style="color:${lbTierColor(myRank().tier.n)};font-weight:700">${myRank().tier.n}</span> · ${myRank().rp} RP</span>
         <div class="soc-counts"><span><b data-cnt="followers">${c ? c.followers : '–'}</b> followers</span><span><b data-cnt="following">${c ? c.following : '–'}</b> following</span></div></div></div>
       ${me.bio ? `<p class="soc-bio">${esc(me.bio)}</p>` : '<p class="muted" style="margin:0;font-size:14px">No bio yet.</p>'}
@@ -6208,7 +6268,7 @@ document.addEventListener('click', e => {
   if (row){ const id = row.dataset.soc; const r = (SOC.results || []).concat(SOC.followingRows, LB.rows || [], LB.me ? [LB.me] : []).find(x => x.id === id); if (r) openPlayer(r); return; }
   if (e.target.closest('#socEdit') || e.target.closest('#socCreate')){ LB.edit = true; LB.err = ''; drawLeaderboard(); setTimeout(() => { const c = $('#lbCard'); if (c) c.scrollIntoView({ behavior:'smooth', block:'start' }); }, 60); }
 });
-function lbRowHtml(r, i, meId){ return `<div class="lb-row${r.id === meId ? ' me' : ''}" data-lbi="${i}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier)}</small>${(r.showcase || []).length ? `<span class="lb-show">${r.showcase.map(k => showBadge(k, undefined, r)).join('')}</span>` : ''}</span><span class="lb-medal">${rankBadge(new Date().getMonth(), rbTierIdx(r.tier), 34)}</span><b>${r.rp}<small> RP</small></b>${lbMoveHtml(r, i)}</div>`; }
+function lbRowHtml(r, i, meId){ return `<div class="lb-row${r.id === meId ? ' me' : ''}" data-lbi="${i}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}${isPremRow(r) ? premStar(18) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier)}</small>${(r.showcase || []).length ? `<span class="lb-show">${r.showcase.map(k => showBadge(k, undefined, r)).join('')}</span>` : ''}</span><span class="lb-medal">${rankBadge(new Date().getMonth(), rbTierIdx(r.tier), 34)}</span><b>${r.rp}<small> RP</small></b>${lbMoveHtml(r, i)}</div>`; }
 // up / down arrows: your place now vs what you saw on your last visit (a visit ends after 10 min away)
 function lbMarkSeen(rows){
   const m = lbMonth(), now = Date.now(), cur = {}; rows.forEach((r, i) => { cur[r.id] = i + 1; });
@@ -6248,6 +6308,7 @@ function drawLeaderboard(){
       <textarea id="lbBio" class="lb-bio" maxlength="160" rows="3" placeholder="Bio (optional): your setup, favorite temp, anything">${esc(LB.bioDraft != null ? LB.bioDraft : (me.bio || ''))}</textarea>
       <p class="muted" style="margin:0;font-size:13px">Tied to your Puffco login${acct() && acct().email ? ` (${esc(acct().email)})` : ''}. Sign in with it on any phone and your profile comes back. Usernames are one per person.</p>
       ${L.joined ? '' : '<p class="muted" style="margin:0;font-size:13px"><b style="color:var(--fg)">Heads up:</b> keep Emberline open during sessions or they won’t count. Path pauses the app in the background.</p>'}
+      ${premBannerPicker()}
       ${showcaseEditor()}
       <p class="acct-err" id="lbErr" ${LB.err ? '' : 'hidden'}>${esc(LB.err)}</p>
       <button class="btn primary" id="lbJoin" ${LB.busy ? 'disabled' : ''}>${LB.busy ? 'Saving…' : (L.joined ? 'Save profile' : 'Join the leaderboard')}</button>`;
@@ -6545,7 +6606,7 @@ async function lbSave(){
   LB.busy = true; LB.err = ''; drawLeaderboard();
   const wasJoined = !!L.joined;
   try {
-    const body = Object.assign({ username: name, bio: (($('#lbBio') && $('#lbBio').value) || '').slice(0, 160) }, lbPayload()); if (LB.avatar) body.avatar = LB.avatar; if (LB.pick) body.showcase = LB.pick.slice(0, 3);
+    const body = Object.assign({ username: name, bio: (($('#lbBio') && $('#lbBio').value) || '').slice(0, 160) }, lbPayload()); if (LB.avatar) body.avatar = LB.avatar; if (LB.bannerDraft && isPremium()) body.banner = LB.bannerDraft; if (LB.pick) body.showcase = LB.pick.slice(0, 3);
     const r = await lbCall(body);
     // the server drops badges it doesn't know; if that happened, say why instead of failing silently
     const sent = body.showcase || [], kept = (r.player && r.player.showcase) || [], lost = sent.filter(k => !kept.includes(k));
@@ -8226,7 +8287,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${Object.keys(DFX_FX).map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${Object.keys(DFX_FX).map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -8434,6 +8495,8 @@ $('#testTools').addEventListener('click', e => {
   if (k.startsWith('dfx:')){ const fx = DFX_FX[k.slice(4)]; if (S.mode !== 'live') return toast(`Connect your ${devWord()} first`); if (store.dfx === false) return toast('Turn Puffco effects on first (1v1 screen)'); toast(`${fx.n}: ${fx.why}`); dfx(k.slice(4), true); return; }
   if (k === 'dfxstop'){ dfxStop(); toast('Effect stopped'); return; }
   if (k === 'micchk'){ vcMicCheck(); return; }
+  if (k === 'premme'){ store.testPrem = !store.testPrem; save(); b.textContent = store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'; drawPremCard(); try { drawSocial(); drawLeaderboard(); } catch(e){} toast(store.testPrem ? 'Premium on (this phone only, not saved to the server)' : 'Premium off'); return; }
+  if (k === 'preminfo'){ premInfo(); return; }
   if (k === 'dfxpv'){ store.dfxPv = !store.dfxPv; save(); b.textContent = '1v1 effects while heating: ' + (store.dfxPv ? 'preview channel' : 'live heat light'); return; }
   if (k === 'dcap'){ store.duelCapSeen = ''; duelCapPop(); return; }
   if (k === 'dcapfill'){ const full = duelDayNet() >= DUEL_DAY_MAX; store.duelDay = { d: dayKey(), id: acctId() || 'local', net: full ? 0 : DUEL_DAY_MAX }; store.duelCapSeen = ''; save(); toast(full ? 'Today’s 1v1 limit reset' : 'Today’s 1v1 limit filled (no RP added)'); return; }
@@ -9207,7 +9270,7 @@ const VR_BETA = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco', 'bkmoonrock
 const DUEL_BETA = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco', 'bkmoonrock', 'mara', 'whoscert']; // 1v1s: Rich, infused.taco, BKmoonrock, Mara, whoscert
 function onList(list){ const me = LB.me || lbStore().meCache; if (!me) return false; const n = String(me.username || '').toLowerCase(); return list.some(u => u === me.id || (n && u.toLowerCase() === n)); }
 const duelAllowed = () => true; // 1v1s are open to everyone (still labeled BETA). DUEL_BETA is kept for reference
-const vrAllowed = () => IS_TEST || isRich() || onList(VR_BETA);
+const vrAllowed = () => IS_TEST || isRich() || onList(VR_BETA) || isPremium(); // Premium: early access
 function duelGate(){ [['#duelOpen', 'flex', duelAllowed()], ['#vrCard', 'grid', vrAllowed()]].forEach(([q, d, ok]) => { const e = $(q); if (e) e.style.display = ok ? d : 'none'; }); }
 const DISCORD_URL = 'https://discord.gg/JSHyWbxrUV';
 const QUEUE_BUYIN = 10; // every matchmaking 1v1 costs 10 RP to enter, winner takes both. Test build: shown, never sent to the leaderboard
