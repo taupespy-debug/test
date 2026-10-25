@@ -315,6 +315,9 @@ section.view>*{min-width:0}
 .bnr svg{width:100%;height:100%;display:block}
 .prem-star{display:inline-block;vertical-align:middle;flex:none;cursor:pointer;filter:drop-shadow(0 0 4px #ffd23f88)}
 .prem-bnrs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.prem-bnr{height:44px;border:0;border-radius:10px;position:relative;cursor:pointer;box-shadow:inset 0 0 0 1px #fff2}.prem-bnr span{position:absolute;left:6px;bottom:3px;font:700 11px var(--f-round,system-ui);color:#fff;text-shadow:0 1px 4px #000c}.prem-bnr.on{box-shadow:0 0 0 2px var(--fg),inset 0 0 0 1px #fff4}
+.dbl-big{font:900 64px/1 var(--f-round,system-ui);background:linear-gradient(120deg,#ff2200,#ff9900,#ffd23f);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 18px #ff990088)}
+.dbl-rp{display:grid;gap:2px;padding:10px 12px;border-radius:14px;background:linear-gradient(120deg,#ff2200,#ff9900 55%,#ffd23f);color:#1d0a00;cursor:pointer;animation:dblGlow 2.4s ease-in-out infinite}.dbl-rp b{font:800 16px var(--f-round,system-ui)}.dbl-rp span{font-size:13px;font-weight:600}
+@keyframes dblGlow{0%,100%{box-shadow:0 0 0 0 #ff990000}50%{box-shadow:0 0 22px 2px #ff9900aa}}
 .has-bnr{position:relative;overflow:hidden}.has-bnr>*:not(.bnr){position:relative;z-index:1}
 .af-live .bn-drift{animation:bnDrift 7s ease-in-out infinite alternate}
 @keyframes bnDrift{to{transform:translate(40px,-14px)}}
@@ -4861,26 +4864,34 @@ const lowTemp = s => { const f = typeof s.setF === 'number' ? s.setF : s.target;
 function notCounted(s){ const lk = rankLock(); return lk && s.t >= lk - RANK_LOCK_MS ? 'Not counted: locked out of ranked' : lowTemp(s) ? `Not counted for ranked: set below ${RANK_MIN_F}°F (232°C). Ranked needs ${RANK_MIN_F}°F or hotter.` : typeof s.run === 'number' && s.run < 20 ? 'Not counted: shorter than 20s' : ''; }
 const rankTier = rp => RANK_TIERS.slice().reverse().find(t => rp >= t.min) || RANK_TIERS[0];
 const RANK_DAY_MAX = 1000, RANK_LOCK_MS = 864e5; // going past 1000 RP in one day locks you out of ranked for 24h
+// Double RP events: sessions and blinkers in the window count 2x (local time). Never back-dated: it would land a day's worth of RP at once
+const DOUBLE_RP = [{ from: new Date(2026, 9, 25).getTime(), to: new Date(2026, 9, 26, 6).getTime(), n:'Double RP weekend', id:'2026-10-dbl' }];
+const dblAt = t => DOUBLE_RP.find(e => t >= e.from && t < e.to) || null;
+const dblNow = () => dblAt(Date.now());
 function rankFor(sessions, when){
   const d = new Date(when || Date.now()), m0 = new Date(d.getFullYear(), d.getMonth(), 1).getTime(), m1 = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
   const ss = sessions.filter(s => s.t >= m0 && s.t < m1 && !(typeof s.run === 'number' && s.run < 20) && !lowTemp(s)).sort((a, b) => a.t - b.t); // ranked only counts sessions that ran 20s+
   const r = { lockedUntil:0, locked:0, tax:0, taxed:0, rp:0, sessions:0, firsts:0, blinkers:0, extreme:0, dirty:0, sessPts:0, firstPts:0, blinkPts:0 };
-  const seen = new Map(), dayRp = new Map(); let lockUntil = 0;
+  const seen = new Map(), dayRp = new Map(), dayRaw = new Map(); let lockUntil = 0; // dayRaw: the day without Double RP bonus, so the bonus can't cause a lock
   for (const s of ss){
     if (s.t < lockUntil){ r.locked++; continue; } // locked out of ranked: nothing counts for 24h
     const ext = typeof s.vapor === 'number' && vaporName(s.vapor) === 'Extreme' ? 1 : 0;
     const day = new Date(s.t).toDateString(), first = !seen.has(day), nth = (seen.get(day) || 0);
     const bl = (s.hits || []).filter(h => h >= blinkOf(s)).length;
     const tax = typeof s.run === 'number' && s.run >= RANK_TAX_SECS ? s.tax || 0 : 0; // set when preheat finished, from the tier you were in then
-    const gain = (s.sc > RANK_DIRTY ? -1 : first ? 3 + ext : 1 + ext) + bl * (5 + ext) - tax, dr = dayRp.get(day) || 0;
-    if (dr + gain > RANK_DAY_MAX){ lockUntil = r.lockedUntil = s.t + RANK_LOCK_MS; r.locked++; continue; } // over 1000 RP in a day: this session doesn't count and ranked locks
-    dayRp.set(day, dr + gain); seen.set(day, nth + 1);
+    const dr = dayRp.get(day) || 0, g = x => (s.sc > RANK_DIRTY ? -1 : (first ? 3 + ext : 1 + ext) * x) + bl * (5 + ext) * x - tax;
+    let x2 = s.sc > RANK_DIRTY || !dblAt(s.t) ? 1 : 2; if (x2 === 2 && dr + g(2) > RANK_DAY_MAX) x2 = 1; // the bonus never trips the daily lock
+    const raw = dayRaw.get(day) || 0;
+    if (raw + g(1) <= RANK_DAY_MAX && dr + g(x2) > RANK_DAY_MAX){ dayRaw.set(day, raw + g(1)); seen.set(day, nth + 1); r.sessions++; continue; } // bonus already filled today: this one earns nothing, no lock
+    const gain = g(x2);
+    if (raw + g(1) > RANK_DAY_MAX){ lockUntil = r.lockedUntil = s.t + RANK_LOCK_MS; r.locked++; continue; } // over 1000 RP in a day: this session doesn't count and ranked locks
+    dayRp.set(day, dr + gain); dayRaw.set(day, raw + g(1)); seen.set(day, nth + 1);
     if (s.sc > RANK_DIRTY){ r.dirty++; r.rp -= 1; }
-    else if (first){ r.firsts++; r.firstPts += 3 + ext; r.rp += 3 + ext; r.extreme += ext; }
-    else if (nth <= RANK_DAY_SESS){ r.sessions++; r.sessPts += 1 + ext; r.rp += 1 + ext; r.extreme += ext; }
+    else if (first){ r.firsts++; r.firstPts += (3 + ext) * x2; r.rp += (3 + ext) * x2; r.extreme += ext; r.bonus = (r.bonus || 0) + (3 + ext) * (x2 - 1); }
+    else if (nth <= RANK_DAY_SESS){ r.sessions++; r.sessPts += (1 + ext) * x2; r.rp += (1 + ext) * x2; r.extreme += ext; r.bonus = (r.bonus || 0) + (1 + ext) * (x2 - 1); }
     else r.sessions++; // past the daily cap: no session points, blinkers still count
     if (tax){ r.tax += tax; r.taxed++; r.rp -= tax; }
-    r.blinkers += bl; r.blinkPts += bl * (5 + ext); r.rp += bl * (5 + ext); r.extreme += bl * ext;
+    r.blinkers += bl; r.blinkPts += bl * (5 + ext) * x2; r.rp += bl * (5 + ext) * x2; r.extreme += bl * ext; if (x2 > 1) r.bonus = (r.bonus || 0) + bl * (5 + ext);
   }
   r.rp = Math.max(0, r.rp);
   r.tier = RANK_TIERS.slice().reverse().find(t => r.rp >= t.min);
@@ -4926,6 +4937,7 @@ function drawRankInner(){
   el.style.setProperty('--tc', t.c);
   el.innerHTML = `
     <div class="row between"><span class="label">Rank this month</span><span class="muted" style="font-size:12px">Resets ${r.reset.toLocaleDateString([], { month:'short', day:'numeric' })}</span></div>
+    ${dblNow() ? `<div class="dbl-rp" data-dbl role="button"><b>🔥 2x RP</b><span>${esc(dblNow().n)} · sessions and blinkers count double until ${new Date(dblNow().to).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })}${r.bonus ? ` · +${r.bonus} bonus so far` : ''}</span></div>` : ''}
     <div class="rank-top"><div class="rank-medal" data-bv="${bvKeyNow(rbTierIdx(t.n))}">${rankBadge(new Date().getMonth(), rbTierIdx(t.n), 84)}</div>
       <div><div class="rank-name">${t.n}</div><div class="rank-rp"><b>${r.rp}</b> RP</div></div></div>
     <div class="rank-bar"><i style="width:${pct}%"></i></div>
@@ -8287,7 +8299,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${Object.keys(DFX_FX).map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${Object.keys(DFX_FX).map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -8497,6 +8509,7 @@ $('#testTools').addEventListener('click', e => {
   if (k === 'micchk'){ vcMicCheck(); return; }
   if (k === 'premme'){ store.testPrem = !store.testPrem; save(); b.textContent = store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'; drawPremCard(); try { drawSocial(); drawLeaderboard(); } catch(e){} toast(store.testPrem ? 'Premium on (this phone only, not saved to the server)' : 'Premium off'); return; }
   if (k === 'preminfo'){ premInfo(); return; }
+  if (k === 'dblpop'){ dblPop(true); return; }
   if (k === 'dfxpv'){ store.dfxPv = !store.dfxPv; save(); b.textContent = '1v1 effects while heating: ' + (store.dfxPv ? 'preview channel' : 'live heat light'); return; }
   if (k === 'dcap'){ store.duelCapSeen = ''; duelCapPop(); return; }
   if (k === 'dcapfill'){ const full = duelDayNet() >= DUEL_DAY_MAX; store.duelDay = { d: dayKey(), id: acctId() || 'local', net: full ? 0 : DUEL_DAY_MAX }; store.duelCapSeen = ''; save(); toast(full ? 'Today’s 1v1 limit reset' : 'Today’s 1v1 limit filled (no RP added)'); return; }
@@ -8740,6 +8753,24 @@ function whatsNew(force){
   el.querySelector('#wnGo').addEventListener('click', () => { if (Date.now() - opened < 500) return; shut(); });
   el.querySelector('#wnPlay').addEventListener('click', () => { if (Date.now() - opened < 500) return; shut(); show('social'); setTimeout(() => duelSheet({ queue:false }), 350); });
 }
+// Double RP: a popup once per event, after the other popups
+function dblPop(force){
+  const e = dblNow(); if (!e && !force) return; const ev = e || DOUBLE_RP[0];
+  if (!force && (store.dblSeen === ev.id || document.querySelector('.egg'))) return;
+  store.dblSeen = ev.id; save();
+  const el = document.createElement('div'); el.className = 'egg'; el.style.zIndex = 240;
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Double RP" style="gap:12px">
+    <div class="dbl-big">2x</div><h2 style="margin:0">${esc(ev.n)}</h2>
+    <p class="muted" style="margin:0;font-size:14px">Every session and every blinker counts <b style="color:#ff9900">double RP</b> until ${new Date(ev.to).toLocaleString([], { weekday:'long', hour:'numeric', minute:'2-digit' })}. Climb the leaderboard while it lasts.</p>
+    <p class="muted" style="margin:0;font-size:12px">1v1 bets stay the same. The 1000 RP a day limit still applies.</p>
+    <button class="btn primary" id="dblGo" style="width:100%">Let’s go</button></div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now(); el.querySelector('#dblGo').addEventListener('click', () => { if (Date.now() - opened < 400) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); });
+}
+(function dblWait(n){ if (!dblNow() || n > 60) return; const busy = greetOpen || document.getElementById('spl') || document.querySelector('.egg') || [...document.querySelectorAll('.welcome, #welcome')].some(w => !w.hidden && getComputedStyle(w).display !== 'none' && w.childElementCount > 0);
+  if (busy || store.wnSeen !== WN_VER) setTimeout(() => dblWait(n + 1), 1500); else dblPop(); })(0);
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('[data-dbl]')) dblPop(true); });
+setInterval(() => { if (DOUBLE_RP.some(e => Math.abs(Date.now() - e.to) < 61000 || Math.abs(Date.now() - e.from) < 61000)) try { drawRank(); } catch(_){} }, 60000); // the banner comes and goes on time
 // wait until the welcome and any other popup are gone, then show it
 (function wnWait(n){ if (store.wnSeen === WN_VER || n > 40) return; const busy = greetOpen || document.getElementById('spl') || document.querySelector('.egg') || [...document.querySelectorAll('.welcome, #welcome')].some(w => !w.hidden && getComputedStyle(w).display !== 'none' && w.childElementCount > 0); // fixed popups have no offsetParent, so check display instead
   if (busy) setTimeout(() => wnWait(n + 1), 1000); else setTimeout(() => { const still = greetOpen || document.getElementById('spl') || [...document.querySelectorAll('.welcome, #welcome')].some(w => !w.hidden && getComputedStyle(w).display !== 'none' && w.childElementCount > 0); if (!still) whatsNew(); else wnWait(n + 1); }, 2500); })(0);
