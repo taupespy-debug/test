@@ -6588,7 +6588,7 @@ function lbStart(){ // called when Stats opens: load now, refresh every 30s whil
   if (lbUsesPuffco() && !LB.me){ lbRestore(); } else if (lbStore().joined && !LB.me) lbCall({ action:'me' }).then(r => { LB.me = r.player; if (r.player){ lbStore().dev = !!r.player.dev; if (r.player.username) lbStore().username = r.player.username; lbStore().meCache = r.player; save(); } drawLeaderboard(); try { drawRank(); drawSocial(); } catch(e){} }).catch(() => {});
   lbPush(); lbLoad();
   clearInterval(LB.timer);
-  LB.timer = setInterval(() => { if (view !== 'stats' && view !== 'social'){ clearInterval(LB.timer); return; } if (!document.hidden) lbLoad(); }, 30000);
+  LB.timer = setInterval(() => { if (view !== 'stats' && view !== 'social'){ clearInterval(LB.timer); return; } if (!document.hidden) lbLoad(); }, 180000); // every 3 min: each reload downloads every player, which used up the Supabase free data allowance at 30s
 }
 
 function drawStats(){
