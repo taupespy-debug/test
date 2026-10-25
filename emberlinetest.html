@@ -5081,20 +5081,38 @@ async function lbLoad(){
     LB.rows = await sbRows(`/rest/v1/players?select=*&month=eq.${lbMonth()}&banned=not.is.true&order=rp.desc,updated_at.asc&limit=1000`); // banned players don't show
     lbMarkSeen(LB.rows);
     LB.err = '';
+    setTimeout(avShrink, 4000);
   } catch(e){ LB.err = 'Couldn’t load the leaderboard. Check your connection.'; }
   drawLeaderboard();
 }
 function lbTierColor(n){ const t = RANK_TIERS.find(x => x.n === n); return t ? t.c : '#888'; }
+const AV_PX = 160; // profile pictures: 160px (shown at 84px at most), about a quarter of the old 320px size
+// once per account: an old big profile picture gets shrunk and saved again, so everyone downloads less
+let avTried = false;
+function avShrink(){
+  const me = LB.me; if (avTried || !me || !me.avatar_url || !lbUsesPuffco() || (store.avSmall || {})[me.id]) return;
+  const img = new Image(); img.crossOrigin = 'anonymous';
+  img.onload = async () => {
+    try {
+      const mark = () => { store.avSmall = Object.assign({}, store.avSmall, { [me.id]: true }); save(); };
+      if (img.naturalWidth <= AV_PX){ mark(); return; }
+      const c = document.createElement('canvas'); c.width = c.height = AV_PX; const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
+      const s = Math.min(img.naturalWidth, img.naturalHeight); g.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, AV_PX, AV_PX);
+      const r = await lbCall({ avatar: c.toDataURL('image/jpeg', .8) }); if (r && r.player){ LB.me = r.player; lbStore().meCache = r.player; } mark();
+    } catch(e){}
+  };
+  avTried = true; img.src = me.avatar_url;
+}
 function lbAvatar(url, name, size){
   const ok = typeof url === 'string' && url.startsWith(SB_URL + '/storage/');
-  return ok ? `<img class="lb-av" src="${esc(url)}" alt="" style="width:${size}px;height:${size}px">`
+  return ok ? `<img class="lb-av" src="${esc(url)}" alt="" loading="lazy" decoding="async" style="width:${size}px;height:${size}px">` // lazy: only pictures you scroll to download (Supabase bandwidth)
             : `<span class="lb-av lb-ini" style="width:${size}px;height:${size}px">${esc((name || '?').slice(0, 1).toUpperCase())}</span>`;
 }
 function lbResize(file){
   return new Promise((resolve, reject) => {
     const img = new Image(), url = URL.createObjectURL(file);
-    img.onload = () => { const s = Math.min(img.width, img.height), c = document.createElement('canvas'); c.width = c.height = 256;
-      c.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, 256, 256); URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', .82)); };
+    img.onload = () => { const s = Math.min(img.width, img.height), c = document.createElement('canvas'); c.width = c.height = AV_PX;
+      c.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, AV_PX, AV_PX); URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', .82)); };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That picture couldn’t be opened.')); };
     img.src = url;
   });
@@ -5333,10 +5351,10 @@ async function cropAvatar(file){
       const c = ev.target.closest('[data-c]'); if (!c) return;
       if (c.dataset.c === 'cancel') return done(null);
       clampIn();
-      const sc = base * z, out = document.createElement('canvas'); out.width = out.height = 320;
+      const sc = base * z, out = document.createElement('canvas'); out.width = out.height = AV_PX;
       const o = out.getContext('2d'); o.imageSmoothingQuality = 'high';
-      o.drawImage(src, (offX - x) / sc, (offY - y) / sc, ring / sc, ring / sc, 0, 0, 320, 320);
-      done(out.toDataURL('image/jpeg', .86));
+      o.drawImage(src, (offX - x) / sc, (offY - y) / sc, ring / sc, ring / sc, 0, 0, AV_PX, AV_PX);
+      done(out.toDataURL('image/jpeg', .8));
     });
   });
 }
