@@ -5125,7 +5125,10 @@ const PREM_BANNERS = {
   galaxy: ['Galaxy', 'radial-gradient(circle at 20% 30%,#ff00d4 0,transparent 38%),radial-gradient(circle at 80% 65%,#00e5ff 0,transparent 38%),linear-gradient(120deg,#0b0420,#2a0b5c)'],
   mono:   ['Mono',   'linear-gradient(120deg,#111,#555 50%,#eee)']
 };
-const isPremRow = r => !!r && ((Array.isArray(r.awards) && r.awards.includes('premium')) || (IS_TEST && store.testPrem && LB.me && r.id === LB.me.id));
+// awards: 'premium' (no end) or 'premium:YYYY-MM-DD' (Premium through that day)
+const premAward = aw => Array.isArray(aw) && aw.some(a => a === 'premium' || (/^premium:\d{4}-\d{2}-\d{2}$/.test(a) && a.slice(8) >= new Date().toISOString().slice(0, 10)));
+const premEnds = r => { const a = r && Array.isArray(r.awards) ? r.awards.filter(x => /^premium:\d{4}-\d{2}-\d{2}$/.test(x)).sort().pop() : null; return a && !r.awards.includes('premium') ? a.slice(8) : null; };
+const isPremRow = r => !!r && (premAward(r.awards) || (IS_TEST && store.testPrem && LB.me && r.id === LB.me.id));
 const isPremium = () => isPremRow(LB.me || lbStore().meCache);
 const bnrIsImg = b => typeof b === 'string' && (b.startsWith(SB_URL + '/storage/') || /^data:image\/(jpeg|gif);base64,/.test(b)); // an uploaded picture or GIF
 const premBannerOf = r => isPremRow(r) ? (PREM_BANNERS[r.banner] || bnrIsImg(r.banner) ? r.banner : 'aurora') : null;
@@ -5157,7 +5160,7 @@ function premInfo(){
   if (document.querySelector('.egg.prem')) return;
   const me = isPremium(), el = document.createElement('div'); el.className = 'egg prem'; el.style.zIndex = 240;
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Emberline Premium" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
-    <div style="display:grid;justify-items:center;gap:6px"><h2 style="margin:0;text-align:center">Emberline Premium ${premStar(26)}</h2>${me ? '<span class="label" style="color:#ffd23f">You’re Premium. Thank you!</span>' : '<span class="muted" style="font-size:13px">Here’s how your profile would look</span>'}</div>
+    <div style="display:grid;justify-items:center;gap:6px"><h2 style="margin:0;text-align:center">Emberline Premium ${premStar(26)}</h2>${me ? `<span class="label" style="color:#ffd23f">You’re Premium. Thank you!${premEnds(LB.me || lbStore().meCache) ? ' · until ' + new Date(premEnds(LB.me || lbStore().meCache) + 'T12:00').toLocaleDateString([], { month:'short', day:'numeric' }) : ''}</span>` : '<span class="muted" style="font-size:13px">Here’s how your profile would look</span>'}</div>
     ${premPreview()}
     <p style="margin:0;font-size:14px"><b>Not required.</b> Emberline stays free for everyone. Premium is a way to say thanks, and it helps pay for the servers that run the leaderboard, profiles and 1v1s.</p>
     <div style="display:grid;gap:8px">
@@ -5677,13 +5680,14 @@ function spbStatus(){
   out.bughunter = { got: aw.includes('bughunter') };
   out.squad = { got: aw.includes('squad'), prog: me && me.username ? `${Math.min(me.invites || 0, 3)} / 3 friends joined` : 'Make a ranked profile to get your invite link' };
   out.secret = { got: ss.some(x => { const d = new Date(x.t); return (d.getHours() % 12) === 4 && d.getMinutes() === 20; }) };
-  aw.forEach(id => { out[id] = Object.assign({}, out[id], { got: true }); }); // badges given by hand in Supabase (players.awards) always count
+  aw.forEach(id => { if (!id.startsWith('premium')) out[id] = Object.assign({}, out[id], { got: true }); }); // badges given by hand in Supabase (players.awards) always count
+  out.premium = { got: premAward(aw) }; // Premium can end, so it isn't kept forever below
   // once earned, a badge stays earned (deleting a zone, trimming old sessions or a slow leaderboard load can't take it back)
   if (!demo){
     const key = acctId() || 'local', all = store.spbKeep = store.spbKeep || {}, keep = all[key] = all[key] || {};
     let changed = false;
-    SPB_ALL.forEach(b => { if (out[b.id] && out[b.id].got && !keep[b.id]){ keep[b.id] = Date.now(); changed = true; } });
-    Object.keys(keep).forEach(id => { out[id] = Object.assign({}, out[id], { got: true }); });
+    SPB_ALL.forEach(b => { if (b.id !== 'premium' && out[b.id] && out[b.id].got && !keep[b.id]){ keep[b.id] = Date.now(); changed = true; } });
+    Object.keys(keep).forEach(id => { if (id !== 'premium') out[id] = Object.assign({}, out[id], { got: true }); });
     if (changed) save();
   }
   return out;
