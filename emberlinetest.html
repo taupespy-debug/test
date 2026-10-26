@@ -5191,7 +5191,7 @@ function avShrink(){
       if (img.naturalWidth <= AV_PX){ mark(); return; }
       const c = document.createElement('canvas'); c.width = c.height = AV_PX; const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
       const s = Math.min(img.naturalWidth, img.naturalHeight); g.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, AV_PX, AV_PX);
-      const r = await lbCall({ avatar: c.toDataURL('image/jpeg', .8) }); if (r && r.player){ LB.me = r.player; lbStore().meCache = r.player; } mark();
+      const r = await lbCall(Object.assign({ avatar: c.toDataURL('image/jpeg', .8) }, lbPayload())); // with the month and RP: a picture-only save made the server reset the tier to Ember if (r && r.player){ LB.me = r.player; lbStore().meCache = r.player; } mark();
     } catch(e){}
   };
   avTried = true; img.src = me.avatar_url;
