@@ -5127,12 +5127,18 @@ const PREM_BANNERS = {
 };
 const isPremRow = r => !!r && ((Array.isArray(r.awards) && r.awards.includes('premium')) || (IS_TEST && store.testPrem && LB.me && r.id === LB.me.id));
 const isPremium = () => isPremRow(LB.me || lbStore().meCache);
-const bnrIsImg = b => typeof b === 'string' && (b.startsWith(SB_URL + '/storage/') || b.startsWith('data:image/jpeg;base64,')); // an uploaded picture
+const bnrIsImg = b => typeof b === 'string' && (b.startsWith(SB_URL + '/storage/') || /^data:image\/(jpeg|gif);base64,/.test(b)); // an uploaded picture or GIF
 const premBannerOf = r => isPremRow(r) ? (PREM_BANNERS[r.banner] || bnrIsImg(r.banner) ? r.banner : 'aurora') : null;
 const premBannerCss = id => bnrIsImg(id) ? `center/cover no-repeat url("${id}")` : PREM_BANNERS[id][1];
 const premBannerHtml = id => bnrIsImg(id) ? `<span class="bnr bnr-img" aria-hidden="true"><img src="${esc(id)}" alt="" loading="lazy"></span>` : `<span class="bnr" aria-hidden="true" style="background:${PREM_BANNERS[id][1]}"></span>`;
-// a picture for your banner: center crop to 720x220, small JPEG (about 40 KB)
+// a picture for your banner: center crop to 720x220, small JPEG (about 40 KB). A GIF goes up as it is
+// (redrawing it would freeze it), and the banner crops it on screen instead
+const BNR_GIF_MAX = 1.5e6;
 function bannerResize(file){
+  if (file.type === 'image/gif') return new Promise((resolve, reject) => {
+    if (file.size > BNR_GIF_MAX) return reject(new Error(`That GIF is ${(file.size / 1e6).toFixed(1)} MB. Banners can be up to 1.5 MB, try a shorter or smaller one`));
+    const fr = new FileReader(); fr.onload = () => resolve(String(fr.result).replace(/^data:[^;]*;/, 'data:image/gif;')); fr.onerror = () => reject(new Error('Couldn’t read that GIF')); fr.readAsDataURL(file);
+  });
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file), img = new Image();
     img.onload = () => { const W = 720, H = 220, sc = Math.max(W / img.width, H / img.height), w = W / sc, h = H / sc, c = document.createElement('canvas'); c.width = W; c.height = H;
@@ -5194,7 +5200,7 @@ function premBannerPicker(){
   return `<div style="display:grid;gap:6px"><span class="label">Profile banner ${premStar(14)}</span><div class="prem-bnrs">
     <label class="prem-bnr prem-up${pic && cur === pic ? ' on' : ''}" ${pic ? `data-bnr="${esc(pic)}" style="background:${premBannerCss(pic)}"` : ''}><input type="file" id="premBnrFile" accept="image/*" hidden><span>${pic ? 'Your picture' : '＋ Upload'}</span></label>
     ${Object.entries(PREM_BANNERS).map(([k, [n, css]]) => `<button type="button" class="prem-bnr${k === cur ? ' on' : ''}" data-bnr="${k}" style="background:${css}" aria-label="${n} banner"><span>${n}</span></button>`).join('')}</div>
-    <span class="muted" style="font-size:12px">Upload any picture. It’s cropped to a wide strip.</span></div>`;
+    <span class="muted" style="font-size:12px">Upload any picture or GIF (up to 1.5 MB). It’s cropped to a wide strip.</span></div>`;
 }
 document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-bnr]'); if (!b || e.target.closest('input')) return; if (b.classList.contains('prem-up') && !b.dataset.bnr) return; // the upload tile opens the file picker
   const v = b.dataset.bnr; if (bnrIsImg(v)){ LB.bannerDraft = null; if (v.startsWith('data:')) LB.bannerImg = v; } else { LB.bannerDraft = v; LB.bannerImg = null; }
@@ -5202,8 +5208,8 @@ document.addEventListener('click', e => { const b = e.target.closest && e.target
 document.addEventListener('change', async e => {
   if (e.target.id !== 'premBnrFile' || !e.target.files || !e.target.files[0]) return;
   try { const d = await bannerResize(e.target.files[0]); LB.bannerImg = d; LB.bannerDraft = null;
-    const t = e.target.closest('.prem-up'); t.dataset.bnr = d; t.style.background = premBannerCss(d); t.querySelector('span').textContent = 'Your picture';
-    document.querySelectorAll('.prem-bnr').forEach(x => x.classList.toggle('on', x === t)); toast('Banner picture ready. Tap Save profile');
+    const t = e.target.closest('.prem-up'); t.dataset.bnr = d; t.style.background = premBannerCss(d); t.querySelector('span').textContent = d.startsWith('data:image/gif') ? 'Your GIF' : 'Your picture';
+    document.querySelectorAll('.prem-bnr').forEach(x => x.classList.toggle('on', x === t)); toast(d.startsWith('data:image/gif') ? 'GIF banner ready. Tap Save profile' : 'Banner picture ready. Tap Save profile');
   } catch(err){ toast(err.message || 'Couldn’t use that picture'); }
   e.target.value = '';
 });
@@ -5238,7 +5244,7 @@ function lbResize(file){
     img.src = url;
   });
 }
-const LB_ERRS = { name_cooldown:'You can only change your username once every 3 days.', banned:'This account is banned from ranked and social. Ask in the Emberline Discord if you think this is a mistake.', puffco_required:'Sign in to Puffco in Settings to join ranked.', username_invalid:'Usernames are 3 to 20 letters, numbers, _ or .', username_taken:'That username is taken.', username_required:'Pick a username first.', avatar_too_big:'That picture is too big.', puffco_auth:'Your Puffco sign-in expired. Sign in again in Settings.', auth:'Couldn’t sign you in. Try again.' };
+const LB_ERRS = { banner_too_big:'That banner is too big. Pictures up to 150 KB after cropping, GIFs up to 1.5 MB.', banner_not_gif:'That file isn’t a real GIF.', banner_upload:'Couldn’t save the banner. Try again.', name_cooldown:'You can only change your username once every 3 days.', banned:'This account is banned from ranked and social. Ask in the Emberline Discord if you think this is a mistake.', puffco_required:'Sign in to Puffco in Settings to join ranked.', username_invalid:'Usernames are 3 to 20 letters, numbers, _ or .', username_taken:'That username is taken.', username_required:'Pick a username first.', avatar_too_big:'That picture is too big.', puffco_auth:'Your Puffco sign-in expired. Sign in again in Settings.', auth:'Couldn’t sign you in. Try again.' };
 
 /* ---- badge showcase: up to 3 badges on your profile ---- */
 function showBadge(key, size, row){
