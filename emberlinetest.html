@@ -320,6 +320,7 @@ section.view>*{min-width:0}
 .prem-prev-b{display:grid;justify-items:center;margin-top:4px}.prem-prev-b small{font-size:11px;color:var(--muted)}
 .prem-prev-n{position:absolute;top:8px;right:10px;z-index:1;font:700 11px var(--f-round,system-ui);color:#fff;text-shadow:0 1px 4px #000c;background:#0005;padding:2px 8px;border-radius:999px}
 .prem-pvbs{display:flex;gap:6px;justify-content:center;flex-wrap:wrap}.prem-pvbs button{width:28px;height:28px;border-radius:50%;border:0;cursor:pointer;box-shadow:inset 0 0 0 1px #fff3}.prem-pvbs button.on{box-shadow:0 0 0 2px var(--fg)}
+.prem-up{display:block;background:repeating-linear-gradient(45deg,#ffffff10 0 8px,#ffffff06 8px 16px);text-align:center}.prem-up span{left:0;right:0;bottom:auto;top:50%;transform:translateY(-50%)}
 .prem-bnrs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.prem-bnr{height:44px;border:0;border-radius:10px;position:relative;cursor:pointer;box-shadow:inset 0 0 0 1px #fff2}.prem-bnr span{position:absolute;left:6px;bottom:3px;font:700 11px var(--f-round,system-ui);color:#fff;text-shadow:0 1px 4px #000c}.prem-bnr.on{box-shadow:0 0 0 2px var(--fg),inset 0 0 0 1px #fff4}
 .dbl-big{font:900 64px/1 var(--f-round,system-ui);background:linear-gradient(120deg,#ff2200,#ff9900,#ffd23f);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 4px 18px #ff990088)}
 .dbl-note{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top) + 8px);z-index:300;display:flex;gap:10px;align-items:center;padding:12px 14px;border-radius:18px;background:linear-gradient(120deg,#ff2200,#ff9900 60%,#ffd23f);color:#1d0a00;box-shadow:0 10px 30px #0008;transform:translateY(-140%);transition:transform .45s cubic-bezier(.2,.9,.3,1.2);cursor:pointer;max-width:520px;margin:0 auto}
@@ -5126,8 +5127,21 @@ const PREM_BANNERS = {
 };
 const isPremRow = r => !!r && ((Array.isArray(r.awards) && r.awards.includes('premium')) || (IS_TEST && store.testPrem && LB.me && r.id === LB.me.id));
 const isPremium = () => isPremRow(LB.me || lbStore().meCache);
-const premBannerOf = r => isPremRow(r) ? (PREM_BANNERS[r.banner] ? r.banner : 'aurora') : null;
-const premBannerHtml = id => `<span class="bnr" aria-hidden="true" style="background:${PREM_BANNERS[id][1]}"></span>`;
+const bnrIsImg = b => typeof b === 'string' && (b.startsWith(SB_URL + '/storage/') || b.startsWith('data:image/jpeg;base64,')); // an uploaded picture
+const premBannerOf = r => isPremRow(r) ? (PREM_BANNERS[r.banner] || bnrIsImg(r.banner) ? r.banner : 'aurora') : null;
+const premBannerCss = id => bnrIsImg(id) ? `center/cover no-repeat url("${id}")` : PREM_BANNERS[id][1];
+const premBannerHtml = id => bnrIsImg(id) ? `<span class="bnr bnr-img" aria-hidden="true"><img src="${esc(id)}" alt="" loading="lazy"></span>` : `<span class="bnr" aria-hidden="true" style="background:${PREM_BANNERS[id][1]}"></span>`;
+// a picture for your banner: center crop to 720x220, small JPEG (about 40 KB)
+function bannerResize(file){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => { const W = 720, H = 220, sc = Math.max(W / img.width, H / img.height), w = W / sc, h = H / sc, c = document.createElement('canvas'); c.width = W; c.height = H;
+      const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, (img.width - w) / 2, (img.height - h) / 2, w, h, 0, 0, W, H); URL.revokeObjectURL(url);
+      let q = .8, d = c.toDataURL('image/jpeg', q); while (d.length > 110000 && q > .4){ q -= .1; d = c.toDataURL('image/jpeg', q); } resolve(d); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Couldn’t read that picture')); };
+    img.src = url;
+  });
+}
 let premUid = 0;
 function premStar(size){ // tap it: what Premium is
   const id = 'pst' + (premUid++);
@@ -5160,7 +5174,7 @@ function premInfo(){
 }
 // your own profile card, dressed up as Premium (the real one only changes once Premium is turned on)
 function premPreview(){
-  const me = LB.me || lbStore().meCache || {}, name = me.username || store.name || 'You', k = premBannerOf(me) || 'aurora';
+  const me = LB.me || lbStore().meCache || {}, name = me.username || store.name || 'You', k0 = premBannerOf(me) || 'aurora', k = bnrIsImg(k0) ? 'aurora' : k0; // an uploaded picture: the preview shows the styles
   let tier = 'Ember', rp = 0; try { const r = myRank(); tier = r.tier.n; rp = r.rp; } catch(e){}
   return `<div class="prem-prev has-bnr" data-k="${k}"><span class="bnr" aria-hidden="true" style="background:${PREM_BANNERS[k][1]}"></span>
       <div class="prem-prev-in">${lbAvatar(me.avatar_url, name, 64)}<b>${esc(name)}${premStar(20)}</b><span class="muted" style="font-size:13px"><span style="color:${lbTierColor(tier)};font-weight:700">${esc(tier)}</span> · ${rp} RP</span>
@@ -5175,10 +5189,23 @@ document.addEventListener('click', e => { const s = e.target.closest && e.target
 // banner picker in Edit profile (Premium only)
 function premBannerPicker(){
   if (!isPremium()) return '';
-  const cur = LB.bannerDraft || premBannerOf(LB.me || lbStore().meCache);
-  return `<div style="display:grid;gap:6px"><span class="label">Profile banner ${premStar(14)}</span><div class="prem-bnrs">${Object.entries(PREM_BANNERS).map(([k, [n, css]]) => `<button type="button" class="prem-bnr${k === cur ? ' on' : ''}" data-bnr="${k}" style="background:${css}" aria-label="${n} banner"><span>${n}</span></button>`).join('')}</div></div>`;
+  const cur = LB.bannerImg || LB.bannerDraft || premBannerOf(LB.me || lbStore().meCache), pic = LB.bannerImg || (bnrIsImg(cur) ? cur : null);
+  return `<div style="display:grid;gap:6px"><span class="label">Profile banner ${premStar(14)}</span><div class="prem-bnrs">
+    <label class="prem-bnr prem-up${pic && cur === pic ? ' on' : ''}" ${pic ? `data-bnr="${esc(pic)}" style="background:${premBannerCss(pic)}"` : ''}><input type="file" id="premBnrFile" accept="image/*" hidden><span>${pic ? 'Your picture' : '＋ Upload'}</span></label>
+    ${Object.entries(PREM_BANNERS).map(([k, [n, css]]) => `<button type="button" class="prem-bnr${k === cur ? ' on' : ''}" data-bnr="${k}" style="background:${css}" aria-label="${n} banner"><span>${n}</span></button>`).join('')}</div>
+    <span class="muted" style="font-size:12px">Upload any picture. It’s cropped to a wide strip.</span></div>`;
 }
-document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-bnr]'); if (!b) return; LB.bannerDraft = b.dataset.bnr; document.querySelectorAll('[data-bnr]').forEach(x => x.classList.toggle('on', x === b)); });
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-bnr]'); if (!b || e.target.closest('input')) return; if (b.classList.contains('prem-up') && !b.dataset.bnr) return; // the upload tile opens the file picker
+  const v = b.dataset.bnr; if (bnrIsImg(v)){ LB.bannerDraft = null; if (v.startsWith('data:')) LB.bannerImg = v; } else { LB.bannerDraft = v; LB.bannerImg = null; }
+  document.querySelectorAll('.prem-bnr').forEach(x => x.classList.toggle('on', x === b)); });
+document.addEventListener('change', async e => {
+  if (e.target.id !== 'premBnrFile' || !e.target.files || !e.target.files[0]) return;
+  try { const d = await bannerResize(e.target.files[0]); LB.bannerImg = d; LB.bannerDraft = null;
+    const t = e.target.closest('.prem-up'); t.dataset.bnr = d; t.style.background = premBannerCss(d); t.querySelector('span').textContent = 'Your picture';
+    document.querySelectorAll('.prem-bnr').forEach(x => x.classList.toggle('on', x === t)); toast('Banner picture ready. Tap Save profile');
+  } catch(err){ toast(err.message || 'Couldn’t use that picture'); }
+  e.target.value = '';
+});
 const AV_PX = 160; // profile pictures: 160px (shown at 84px at most), about a quarter of the old 320px size
 // once per account: an old big profile picture gets shrunk and saved again, so everyone downloads less
 let avTried = false;
@@ -6641,12 +6668,12 @@ async function lbSave(){
   LB.busy = true; LB.err = ''; drawLeaderboard();
   const wasJoined = !!L.joined;
   try {
-    const body = Object.assign({ username: name, bio: (($('#lbBio') && $('#lbBio').value) || '').slice(0, 160) }, lbPayload()); if (LB.avatar) body.avatar = LB.avatar; if (LB.bannerDraft && isPremium()) body.banner = LB.bannerDraft; if (LB.pick) body.showcase = LB.pick.slice(0, 3);
+    const body = Object.assign({ username: name, bio: (($('#lbBio') && $('#lbBio').value) || '').slice(0, 160) }, lbPayload()); if (LB.avatar) body.avatar = LB.avatar; if (isPremium()){ if (LB.bannerImg) body.bannerImg = LB.bannerImg; else if (LB.bannerDraft) body.banner = LB.bannerDraft; } if (LB.pick) body.showcase = LB.pick.slice(0, 3);
     const r = await lbCall(body);
     // the server drops badges it doesn't know; if that happened, say why instead of failing silently
     const sent = body.showcase || [], kept = (r.player && r.player.showcase) || [], lost = sent.filter(k => !kept.includes(k));
     const bioLost = body.bio && r.player && r.player.bio == null;
-    LB.me = r.player; lbStore().meCache = r.player; LB.pick = null; LB.bioDraft = null; try { drawRank(); drawSocial(); } catch(_){} L.joined = true; L.username = name; LB.avatar = null; LB.edit = false; save();
+    LB.me = r.player; lbStore().meCache = r.player; LB.pick = null; LB.bioDraft = null; try { drawRank(); drawSocial(); } catch(_){} L.joined = true; L.username = name; LB.avatar = null; LB.bannerImg = null; LB.bannerDraft = null; LB.edit = false; save();
     if (lost.length || bioLost){
       LB.err = (lost.some(k => k.startsWith('sp:')) || bioLost)
         ? 'Saved, but the server didn’t keep ' + (lost.length ? 'your new badges' : 'your bio') + '. Update the player function in Supabase (paste the newest player-function.ts and Deploy), and run add-social.sql.'
@@ -6664,7 +6691,7 @@ document.addEventListener('click', e => {
   if (id === 'lbJoin'){ lbSave(); }
   if (id === 'lbGoSign'){ show('set'); setTimeout(() => { const c = $('#acctCard'); if (c) c.scrollIntoView({ block:'center' }); }, 300); }
   if (id === 'lbEdit'){ LB.edit = true; LB.err = ''; drawLeaderboard(); }
-  if (id === 'lbCancel'){ LB.edit = false; LB.avatar = null; LB.pick = null; LB.err = ''; drawLeaderboard(); }
+  if (id === 'lbCancel'){ LB.edit = false; LB.avatar = null; LB.bannerImg = null; LB.bannerDraft = null; LB.pick = null; LB.err = ''; drawLeaderboard(); }
   const keepName = () => { const v = $('#lbName') && $('#lbName').value; drawLeaderboard(); if (v != null && $('#lbName')) $('#lbName').value = v; };
   const rm = e.target.closest('[data-scrm]'); if (rm){ LB.pick.splice(+rm.dataset.scrm, 1); keepName(); return; }
   const pk = e.target.closest('[data-sck]'); if (pk && !pk.disabled){ const k = pk.dataset.sck, i = LB.pick.indexOf(k); if (i >= 0) LB.pick.splice(i, 1); else if (LB.pick.length < 3) LB.pick.push(k); keepName(); return; }
