@@ -5193,6 +5193,7 @@ function premInfo(){
     <p style="margin:0;font-size:14px"><b>Not required.</b> Emberline stays free for everyone. Premium is a way to say thanks, and it helps pay for the servers that run the leaderboard, profiles and 1v1s.</p>
     <div style="display:grid;gap:8px">
       <div><b>⭐ Premium star</b><br><span class="muted" style="font-size:14px">Next to your name everywhere. Tap it to see what it means.</span></div>
+      <div><b>🎆 Premium moods</b><br><span class="muted" style="font-size:14px">Exclusive lights for your Peak: Rich Plasma, Rich Flourish, Gold Rush and Aurora Drift.</span></div>
       <div><b>🎨 Custom banner</b><br><span class="muted" style="font-size:14px">Pick a banner for the top of your profile (Edit profile).</span></div>
       <div><b>🚀 Early access</b><br><span class="muted" style="font-size:14px">Try new features before everyone else, like the VR panel.</span></div>
       <div><b>🏅 Premium badge</b><br><span class="muted" style="font-size:14px">A legendary badge you can show off in your showcase.</span></div>
@@ -7243,6 +7244,11 @@ function updateCluster(){
 
 /* ================= mood lights (official format) ================= */
 const MOODS = JSON.parse(document.getElementById('moodData').textContent);
+/* ---- Premium moods: exclusive light patterns for supporters (Peak and Peak Pro). Rich Plasma and Rich Flourish are Plasma's and Flourish's own
+   animations recolored in Rich's purple and white; Gold Rush and Aurora Drift recolor Candle Flicker's and Hologram's ---- */
+const PREM_MOODS = [{"id":"prem-rich-plasma","name":"Rich Plasma","desc":"Plasma\u2019s own animation in Rich\u2019s purple and white. Premium only.","prem":true,"colors":["#ffffff","#ebd8ff","#a23bff","#8f0dff","#6200b5","#380067"],"lamp":{"name":"pikaled2","param":{"anim":1,"color":["#ffffff","#ebd8ff","#a23bff","#8f0dff","#6200b5","#380067","#1d0036","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#ebd8ff","#a23bff","#ab4fff","#d2a8ff","#b76dff","#a542ff","#3a006b","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019"],"plNum":0,"speed":32,"bright":255,"diFrac":1,"offset":[2214608896,2214610944,2214610944,2214604800,2214600704,2214600704,2214596608,2216691712,2216692736,2214596608,2214592512,2214593536,2214595584,2214595584,2214593536,2214592512,0,0,0,0],"plDenom":0,"colorLen":32,"speedDi0":14,"speedDi1":64}}},{"id":"prem-rich-flourish","name":"Rich Flourish","desc":"Flourish\u2019s growth animation in Rich\u2019s purple and white. Premium only.","prem":true,"colors":["#4b008a","#9d2fff","#250045","#961dff","#ecdbff"],"lamp":{"name":"pikaled2","param":{"anim":1,"color":["#480084","#480084","#500094","#7200d3","#9923ff","#b05bff","#a94cff","#8b02ff","#6200b4","#4a0088","#480084","#480084","#b260ff","#b260ff","#a745ff","#7400d6","#380067","#240044","#28004b","#460082","#8700f9","#ae57ff","#b260ff","#b260ff","#ffffff","#e1c5ff","#b971ff","#9e30ff","#9212ff","#9e30ff","#b971ff","#e1c5ff"],"plNum":0,"speed":18,"bright":255,"diFrac":0,"offset":[1929388032,1929383936,1929383936,1929388032,1929392128,1929392128,0,3211264,3670016,0,1930960896,1930960896,0,0,1125679104,1125679104,0,0,0,0],"plDenom":0,"colorLen":0,"speedDi0":3.6,"speedDi1":36}}},{"id":"prem-gold-rush","name":"Gold Rush","desc":"A warm flicker in molten gold. Premium only.","prem":true,"colors":["#ffdc68","#6e4300","#a56e00"],"lamp":{"name":"pikaled2","param":{"anim":1,"color":["#ffe99b","#ffe897","#ffde71","#ffd241","#f2c130","#eab627","#ebb828","#f6c634","#ffd64f","#ffe280","#ffde6e","#ffdb65","#e9b526","#b07600","#b97d00","#ffe899","#ffe280","#ffe17b","#f6c635","#f6c635","#c18400","#ffe99b","#ffdc6a","#cf9207","#996500","#bc8000","#fdcf3d","#ffe99e","#ffe58d","#ffe076","#ffdf72","#ffe386"],"plNum":0,"speed":9,"bright":255,"diFrac":0,"offset":[42035200,42055680,41953280,41973760,41994240,42014720,42035200,764725248,18159616,41973760,764725248,764725248,764725248,1033160704,1435875328,1435875328,0,0,0,0],"plDenom":0,"colorLen":0,"speedDi0":1.8,"speedDi1":18}}},{"id":"prem-aurora","name":"Aurora Drift","desc":"Hologram\u2019s shimmer in aurora cyan, violet and pink. Premium only.","prem":true,"colors":["#ff00d4","#7a00ff","#00e5ff"],"lamp":{"name":"pikaled2","param":{"anim":1,"color":["#00e5ff","#12c3ff","#24a1ff","#367fff","#514cff","#7508ff","#a600f1","#ce00e4","#e100de","#ff00d4","#eb00da","#d800e1","#c400e7","#ba00ea","#b000ed","#9c00f4","#8900fa","#9300f7","#7f00fd","#6c19ff","#632aff","#485dff","#367fff","#2d90ff","#1bb2ff","#09d4ff","#00e5ff","#5a3bff","#f500d7","#ba00ea","#9300f7","#3f6eff"],"plNum":0,"speed":65,"bright":255,"diFrac":0,"offset":[968189952,968210432,968108032,968128512,968148992,968169472,109144064,109113344,109113344,109082624,109057024,109169664,109057024,109169664,109169664,109164544,0,0,0,0],"plDenom":0,"colorLen":0,"speedDi0":13,"speedDi1":130}}}];
+const exclGet = id => MOODS.excl.find(x => x.id === id) || PREM_MOODS.find(x => x.id === id);
+const premMoodsHere = () => isProxy() ? [] : PREM_MOODS.map(x => ({ kind:'excl', id:x.id, name:x.name }));
 const PROXY_EDITIONS = { 0:'Onyx', 1:'Haze', 2:'Pine' }; // from the Puffco web app's product list
 const EDITIONS = { 0:'OG', 21:'OG', 1:'Opal', 22:'Opal', 2:'Indiglow', 4:'Guardian', 12:'Pearl', 13:'Onyx', 15:'Desert', 17:'Flourish', 19:'Storm', 23:'Daybreak', 25:'Plasma', 26:'Glacier' };
 /* ---- Emberline native effects: built for the Peak's own light engine, so they save to the device and run smooth without the app ---- */
@@ -7316,7 +7322,7 @@ const EDITION_MOODS = [{"id":"ed-plasma","name":"Plasma","proxy":false,"speed":3
 function findMood(ref){
   if (!ref) return null;
   if (ref.kind === 'ed') return edMood(ref) ? ref : null;
-  if (ref.kind === 'excl') return MOODS.excl.find(x => x.id === ref.id) ? ref : null;
+  if (ref.kind === 'excl'){ const x = exclGet(ref.id); return x && (!x.prem || isPremium()) ? ref : null; }
   return ref;
 }
 /* ---- zones: official Peak LED regions (labels from Puffco's own app) ---- */
@@ -7527,7 +7533,7 @@ function connectIntro(){
 
 function moodLamp(ref){
   if (ref.tag === ZONE_TAG) return zoneLamp(ref.meta || zoneDefaults());
-  if (ref.kind === 'excl'){ const x = MOODS.excl.find(e => e.id === ref.id); return x && MoodEngine.lampFromExclusive(x, ledVariant()); }
+  if (ref.kind === 'excl'){ const x = exclGet(ref.id); return x && MoodEngine.lampFromExclusive(x, ledVariant()); }
   const tpl = MOODS.tpl[ref.tag]; if (!tpl) return null;
   if (tpl.fx) return fxLamp(tpl.fx, ref.meta || {});
   return MoodEngine.compile(tpl, ref.meta || {}, ledVariant()).lamp;
@@ -7535,7 +7541,7 @@ function moodLamp(ref){
 function moodColors(ref){
   if (ref.tag === ZONE_TAG) return zoneStillColors(ref.meta || zoneDefaults()).filter(c => c !== '#000000');
   if (ref.kind === 'ed'){ const x = edMood(ref); return x ? x.colors : []; }
-  if (ref.kind === 'excl'){ const x = MOODS.excl.find(e => e.id === ref.id); return x ? x.lamp.param.color : []; }
+  if (ref.kind === 'excl'){ const x = exclGet(ref.id); return x ? x.lamp.param.color : []; }
   const l = moodLamp(ref); const c = l ? MoodEngine.previewColors(l) : [];
   return c.length ? c : (ref.meta && ref.meta.userColors) || [];
 }
@@ -7543,7 +7549,7 @@ function moodPayload(ref){
   if (ref.kind === 'ed'){ const x = edMood(ref); if (!x || isProxy()) throw new Error('Edition mood not available here'); return new Uint8Array(x.blob.match(/../g).map(b => parseInt(b, 16))); }
   const lamp = moodLamp(ref); if (!lamp) throw new Error('Unknown mood');
   const meta = { version: 1, moodName: String(ref.name || 'Mood').slice(0, 24) };
-  const m = ref.kind === 'excl' ? { userColors: (MOODS.excl.find(e => e.id === ref.id) || {}).colors } : (ref.meta || {});
+  const m = ref.kind === 'excl' ? { userColors: (exclGet(ref.id) || {}).colors } : (ref.meta || {});
   if (m.userColors) meta.userColors = m.userColors.map(h => MoodEngine.packRgb([h]));
   for (const k of ['tempoFrac','density','dynamicInhale']) if (typeof m[k] === 'number') meta[k] = m[k];
   if (isProxy()){ const mm = Object.assign({}, meta); if (m.userColors) mm.userColors = m.userColors.slice(); return lampBlob(lamp, mm); }
@@ -7603,7 +7609,7 @@ async function applyMood(ref){
 }
 function moodTile(ref, idx, group){
   const on = LT.on && LT.pending ? sameMood(LT.pending, ref) : phIdx(moodTarget) >= 0 ? sameMood(phMood(phIdx(moodTarget)), ref) : moodTarget === 'lantern' ? store.lanternMood && sameMood(store.lanternMood, ref) : S.profiles[moodTarget ?? S.active].mood && sameMood(S.profiles[moodTarget ?? S.active].mood, ref);
-  const tplName = ref.kind === 'ed' ? 'Edition' : ref.kind === 'excl' ? 'Exclusive' : ref.tag === ZONE_TAG ? 'Zones' : (MOODS.tpl[ref.tag] || {}).name || '';
+  const tplName = ref.kind === 'excl' && (exclGet(ref.id) || {}).prem ? (isPremium() ? '⭐ Premium' : '🔒 Premium') : ref.kind === 'ed' ? 'Edition' : ref.kind === 'excl' ? 'Exclusive' : ref.tag === ZONE_TAG ? 'Zones' : (MOODS.tpl[ref.tag] || {}).name || '';
   return `<button class="mood" data-mg="${group}" data-mi="${idx}" aria-pressed="${!!on}"><i class="mood-sw" style="${swatchStyle(ref)}"></i>${group === 'm' ? '<span class="medit">Edit</span>' : ''}<b>${esc(ref.name)}</b><span>${esc(tplName)}</span></button>`;
 }
 function sameMood(a, b){ return a && b && a.kind === b.kind && (a.kind === 'excl' ? a.id === b.id : (a.id && a.id === b.id) || (a.tag === b.tag && JSON.stringify(a.meta) === JSON.stringify(b.meta))); }
@@ -7671,7 +7677,7 @@ function rndWire(){
 function shufCfg(i){ store.shuffle = store.shuffle || {}; return store.shuffle[i] || (store.shuffle[i] = { on:false, ids:[] }); }
 const moodKey = m => m.kind === 'excl' ? 'x:' + m.id : m.kind === 'ed' ? 'e:' + m.id : m.id || (m.tag + ':' + JSON.stringify(m.meta || {}));
 // everything a profile can shuffle through: your saved moods plus the Puffco exclusives
-function shufAll(){ return allMine().map(m => Object.assign({ kind:'tpl' }, m)).concat(edMoodsHere().map(x => ({ kind:'ed', id:x.id, name:x.name })), MOODS.excl.filter(x => !isProxy() || x.toad).map(x => ({ kind:'excl', id:x.id, name:x.name }))); }
+function shufAll(){ return allMine().map(m => Object.assign({ kind:'tpl' }, m)).concat(edMoodsHere().map(x => ({ kind:'ed', id:x.id, name:x.name })), MOODS.excl.filter(x => !isProxy() || x.toad).map(x => ({ kind:'excl', id:x.id, name:x.name })), isPremium() ? premMoodsHere() : []); }
 function shufPool(i){ const ids = shufCfg(i).ids; return shufAll().filter(m => ids.includes(moodKey(m))); }
 async function shuffleNext(i, why){
   const c = shufCfg(i); if (!c.on) return;
@@ -7720,6 +7726,7 @@ function drawMoods(){
   const mine = allMine().map(m => Object.assign({ kind:'tpl' }, m));
   const edm = edMoodsHere().map(x => ({ kind:'ed', id:x.id, name:x.name }));
   box.innerHTML = shufCard() + rndCard() + (edm.length ? `<div class="sgroup"><div class="label">${esc(S.edition)} edition</div><div class="moods">${edm.map((r, i) => moodTile(r, i, 'e')).join('')}</div></div>` : '') +
+    (premMoodsHere().length ? `<div class="sgroup"><div class="label">Premium moods ${premStar(14)}</div><div class="moods">${premMoodsHere().map((r, i) => moodTile(r, i, 'p')).join('')}</div>${isPremium() ? '' : '<p class="muted" style="margin:6px 0 0;font-size:12px">For Premium supporters. Tap one to see Premium</p>'}</div>` : '') +
     `<div class="sgroup"><div class="label">Puffco exclusives</div><div class="moods">${excl.map((r, i) => moodTile(r, i, 'x')).join('')}</div></div>` +
     `<div class="sgroup"><div class="row between"><span class="label">Your moods</span><span class="row" style="gap:6px"><button class="btn small" id="bNewMood">New mood</button></span></div><div class="moods">${mine.map((r, i) => moodTile(r, i, 'm')).join('') || '<p class="muted">No saved moods yet.</p>'}</div></div>`;
   $('#bNewMood').onclick = () => openMoodEditor();
@@ -7731,6 +7738,7 @@ function drawMoods(){
 function moodFromTile(g, i){
   if (g === 'e'){ const x = edMoodsHere()[i]; return { kind:'ed', id:x.id, name:x.name }; }
   if (g === 'x'){ const x = MOODS.excl.filter(x => !isProxy() || x.toad)[i]; return { kind:'excl', id:x.id, name:x.name }; }
+  if (g === 'p') return premMoodsHere()[i];
   return Object.assign({ kind:'tpl' }, allMine()[i]);
 }
 
@@ -8406,7 +8414,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="pathnotiftry">Notifications test (details)</button><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="seshnote">Group sesh Premium notification</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${(() => { try { return Object.keys(DFX_FX); } catch(e){ return []; } })().map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="pathnotiftry">Notifications test (details)</button><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="premmoods">Premium moods (Lights tab)</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="seshnote">Group sesh Premium notification</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${(() => { try { return Object.keys(DFX_FX); } catch(e){ return []; } })().map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -8615,6 +8623,7 @@ $('#testTools').addEventListener('click', e => {
   if (k === 'dfxstop'){ dfxStop(); toast('Effect stopped'); return; }
   if (k === 'micchk'){ vcMicCheck(); return; }
   if (k === 'sesh'){ seshSheet(); return; }
+  if (k === 'premmoods'){ show('lights'); setTimeout(() => { const g = [...document.querySelectorAll('#moodLib .label')].find(x => /Premium moods/.test(x.textContent)); if (g) g.scrollIntoView({ block:'center' }); }, 300); return; }
   if (k === 'seshnote'){ seshPremNote(true); return; }
   if (k === 'seshdemo'){ seshStart(null, true); seshSheet(); return; }
   if (k === 'pathnotif'){ pathNotifTry(); return; }
@@ -8682,6 +8691,7 @@ $('#moodTarget').addEventListener('click', e => { const b = e.target.closest('[d
 $('#moodLib').addEventListener('click', e => {
   const ed2 = e.target.closest('.medit');
   const t = e.target.closest('[data-mg]'); if (!t) return;
+  if (t.dataset.mg === 'p' && !isPremium()){ premInfo(); return; } // Premium moods: a peek at Premium instead
   const ref = moodFromTile(t.dataset.mg, +t.dataset.mi);
   if (ed2){ const li = store.myMoods.findIndex(m => m.id === ref.id); openMoodEditor(Object.assign({}, ref, { localIdx: li >= 0 ? li : null, name: li >= 0 ? ref.name : ref.name + ' copy' })); return; }
   if (phIdx(moodTarget) >= 0){ if (LT.on) ltShowRef(ref); writeMoodTo(moodTarget, ref); drawMoods(); return; } // preheat pick: no save bar, it lives in the app
