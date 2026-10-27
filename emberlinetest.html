@@ -3352,6 +3352,7 @@ const HIT_DELAY = -250; // the sensor lags the real pull a little, so start the 
 const HIT_MERGE = 700; // a dip shorter than this is the same hit
 const hitMerge = () => HIT.mode === 'heat' ? 1600 : HIT_MERGE; // older Peaks time hits from the heater, which dips mid-pull
 const HIT_IDLE = .03; // typical sensor value with nobody pulling
+const HIT_STUCK = 120000; // no real pull lasts 2 minutes (a session ends first)
 function hitReset(){ HIT.lastSt = -1; HIT.armed = false; HIT.quiet = 0; HIT.endAt = 0; HIT.lastStart = 0; HIT.pbase = null; HIT.diaAt = 0; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.ends = []; HIT.base = HIT_IDLE; HIT.live = 0; }
 function hitSample(v, now){
   // some firmware freezes the inhale reading on its last value (e.g. a mood with reactive light off). A real pull
@@ -3363,7 +3364,11 @@ function hitSample(v, now){
     if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); (HIT.ends = HIT.ends || []).push(Date.now()); if (cur) cur.hits = HIT.hits.slice(); }
     render(); return;
   }
-  if (HIT.on && now - HIT.start > 30000){ HIT.on = false; HIT.endAt = 0; HIT.live = 0; HIT.base = Math.min(.6, v); render(); return; } // nobody pulls for 30s: stuck reading, drop it and treat this level as resting
+  // a pull longer than a whole session means a stuck reading: close it, but keep the hit (up to when the reading last moved).
+  // This used to drop anything past 30s, so long hits (and long hits with short dips merged in) were lost
+  if (HIT.on && now - HIT.start > HIT_STUCK){ HIT.on = false; HIT.endAt = 0; HIT.live = 0; const secs = Math.min((HIT.sameAt || now) - HIT.start, HIT_STUCK) / 1000;
+    if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); (HIT.ends = HIT.ends || []).push(Date.now()); if (cur) cur.hits = HIT.hits.slice(); }
+    HIT.base = Math.min(.6, v); render(); return; }
   // v = inhale strength (0..1). Hysteresis so a shaky draw counts as one hit.
   // learn the resting level only from quiet samples, so a pull that's already going when Ready hits still counts
   if (!HIT.on){ const b = HIT.base || HIT_IDLE; if (v < b + .05) HIT.base = Math.min(.08, b * .9 + v * .1); }
