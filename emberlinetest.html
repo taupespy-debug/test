@@ -10345,7 +10345,7 @@ function notesOpen(){
   if (NOTE.unread){ NOTE.unread = 0; notesBell(); lbCall({ action:'notes', read:true }).then(() => { NOTE.list.forEach(n => n.read = true); }).catch(() => {}); }
 }
 // one tap, right in Emberline: works when the browser (Path) does standard notifications. The helper app is only the backup
-const b64u = x => { const p = '='.repeat((4 - x.length % 4) % 4), b = atob((x + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); };
+function b64u(x){ const p = '='.repeat((4 - x.length % 4) % 4), b = atob((x + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); } // a function, so it's ready even if something above breaks while loading
 async function pushInApp(){
   if (typeof Notification !== 'function') throw new Error('This browser has no notifications');
   const perm = await Notification.requestPermission();
@@ -10359,7 +10359,7 @@ async function pushInApp(){
 }
 /* Path (iPhone) has real web push on window.pushManager, no service worker needed. iPhone only asks from a tap, so
    subscribe has to be the very first thing the tap does: the key is loaded ahead of time */
-const pushKeyLoad = () => store.pushKey ? Promise.resolve(store.pushKey) : sbJSON('/functions/v1/player', { method:'POST', body: JSON.stringify({ action:'push_key' }) }).then(r => { if (r && r.key){ store.pushKey = r.key; save(); } return store.pushKey; });
+function pushKeyLoad(){ return store.pushKey ? Promise.resolve(store.pushKey) : sbJSON('/functions/v1/player', { method:'POST', body: JSON.stringify({ action:'push_key' }) }).then(r => { if (r && r.key){ store.pushKey = r.key; save(); } return store.pushKey; }); }
 function subJSON(sub){
   let j = null; try { j = typeof sub.toJSON === 'function' ? sub.toJSON() : null; } catch(e){}
   if (j && j.endpoint) return j;
@@ -10371,7 +10371,7 @@ function pathPushOn(){ // call straight from a tap, before any await
   if (!PM) return Promise.reject(new Error('This browser has no push. Open Emberline in Path'));
   if (!store.pushKey){ pushKeyLoad().catch(() => {}); return Promise.reject(new Error('One sec, still loading. Tap again')); }
   let p; try { p = PM.subscribe({ userVisibleOnly:true, applicationServerKey: b64u(store.pushKey) }); } catch(e){ return Promise.reject(e); }
-  return Promise.resolve(p).then(sub => lbCall({ action:'push_sub', sub: subJSON(sub) })).then(r => { NOTE.phones = Math.max(1, NOTE.phones); store.pathPush = Date.now(); save(); return r; })
+  return Promise.resolve(p).then(sub => lbCall({ action:'push_sub', sub: subJSON(sub) })).then(r => { try { NOTE.phones = Math.max(1, NOTE.phones); } catch(e){} store.pathPush = Date.now(); save(); return r; })
     .catch(e => { throw new Error(e && e.name === 'NotAllowedError' && !/gesture/.test(e.message || '') ? 'Notifications are blocked. Allow them for Path in iPhone Settings, then try again' : (e && e.message) || String(e)); });
 }
 // Settings > Phone alerts: a 6-letter code connects the Emberline Alerts app (Safari, Home Screen) to your profile
