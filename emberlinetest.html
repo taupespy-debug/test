@@ -1867,6 +1867,7 @@ body.vr-on .toast{z-index:300;top:16px}
 .sx-p{display:flex;align-items:center;gap:8px;padding:10px;border-radius:16px;background:var(--fill-2);border-left:4px solid var(--pc,#888);min-width:0}
 .sx-p.you{outline:2px solid var(--pc,#888);outline-offset:-2px}.sx-p.hit{animation:sxHit 1s ease-in-out infinite}
 @keyframes sxHit{50%{box-shadow:0 0 18px var(--pc,#fff)}}
+.sx-fi{flex:none;padding:6px 10px;font-size:12px}
 .sx-pn{display:grid;min-width:0}.sx-pn b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.sx-pn small{color:var(--muted);font-size:12px}
 #fpills{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 100px);z-index:85;display:flex;gap:6px}
 .fpill{border:0;border-radius:99px;padding:6px 12px;font:700 13px var(--f-body,system-ui);background:#2d2d3c;color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.3);white-space:nowrap;cursor:pointer}
@@ -6293,7 +6294,7 @@ function socDrawFriends(){
   let mine = { rp: me.rp || 0, tier: me.tier }; try { const r = myRank(); mine = { rp: r.rp, tier: r.tier.n }; } catch(e){}
   const rows = fr.map(r => Object.assign({}, r, r.month === m ? {} : { rp: 0, tier: 'Ember' })).concat([Object.assign({}, me, mine)]).sort((a, b) => (b.rp || 0) - (a.rp || 0));
   const place = rows.findIndex(r => r.id === me.id) + 1;
-  const row = (r, i) => `<div class="lb-row${r.id === me.id ? ' me' : ''}" data-soc="${r.id}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}${isPremRow(r) ? premStar(18) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier || 'Ember')}</small></span><b>${r.rp || 0}<small> RP</small></b></div>`;
+  const row = (r, i) => `<div class="lb-row${r.id === me.id ? ' me' : ''}" data-soc="${r.id}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}${isPremRow(r) ? premStar(18) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier || 'Ember')}</small></span>${r.id !== me.id ? `<button class="btn small sx-fi" data-sxi="${esc(String(r.id))}" data-n="${esc(r.username)}">${SESH.on && SESH.invited && SESH.invited.has(String(r.id)) ? 'Invited' : '🔥 Sesh'}</button>` : ''}<b>${r.rp || 0}<small> RP</small></b></div>`;
   el.hidden = false;
   el.innerHTML = `<details class="bb-all fr-lb"${store.frOpen ? ' open' : ''}><summary><span>Friends leaderboard</span><span class="muted">${fr.length ? `#${place} of ${rows.length}` : 'No friends yet'}</span><svg class="mt-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
     <div class="lb-list" style="margin-top:8px">${fr.length ? rows.map(row).join('') : '<p class="muted" style="margin:0;font-size:14px">Friends are people you follow who follow you back. Follow some players to fill this in.</p>'}</div></details>`;
@@ -6364,6 +6365,8 @@ document.addEventListener('click', e => {
   const f = e.target.closest('[data-follow]');
   if (f && e.target.closest('#v-social')){ e.stopPropagation(); const id = f.dataset.follow;
     const r = (SOC.results || []).concat(SOC.followingRows, LB.rows || []).find(x => x.id === id); if (r) socToggleFollow(r); return; }
+  const sxi = e.target.closest('[data-sxi]');
+  if (sxi){ e.stopPropagation(); seshInviteFrom(sxi.dataset.sxi, sxi.dataset.n); return; } // friends list: invite to a group sesh
   const row = e.target.closest('[data-soc]');
   if (row){ const id = row.dataset.soc; const r = (SOC.results || []).concat(SOC.followingRows, LB.rows || [], LB.me ? [LB.me] : []).find(x => x.id === id); if (r) openPlayer(r); return; }
   if (e.target.closest('#socEdit') || e.target.closest('#socCreate')){ LB.edit = true; LB.err = ''; drawLeaderboard(); setTimeout(() => { const c = $('#lbCard'); if (c) c.scrollIntoView({ behavior:'smooth', block:'start' }); }, 60); }
@@ -10168,7 +10171,7 @@ function lobbyOn(){
     .on('inv:no', m => { if (lobbyMe(m) && SESH.on && m.code === SESH.code){ const n = ((SOC.followingRows || []).find(r => String(r.id) === String(m.id)) || {}).username || 'Your friend'; toast(m.busy ? `${n} is busy right now` : `${n} said not now`); return; } if (lobbyMe(m) && DUEL.on && DUEL.inviting && m.code === DUEL.code){ const n = DUEL.inviting.n; duelEnd(true); toast(m.busy ? `${n} is busy right now` : `${n} said not now`); duelSheet({ queue:false }); } })
     .on('inv:x', m => { if (lobbyMe(m) && LOBBY.inv && LOBBY.inv.code === m.code) duelInvClose(); })
     .on('on:ping', m => { if (!m.id || String(m.id) === lobbyId()) return; setTimeout(() => LOBBY.rt && LOBBY.rt.send('on:pong', { id: lobbyId(), to: m.id, busy: !!DUEL.on || SESH.on }), Math.random() * 1500); })
-    .on('on:pong', m => { if (lobbyMe(m)){ LOBBY.online.set(String(m.id), { at: Date.now(), busy: !!m.busy }); duelMenuPaint(); } })
+    .on('on:pong', m => { if (lobbyMe(m)){ LOBBY.online.set(String(m.id), { at: Date.now(), busy: !!m.busy }); duelMenuPaint(); seshFriends(); } })
     .on('open', () => { if (LOBBY.q) lobbySendQ(); lobbyPing(true); duelMenuPaint(); })
     .on('down', duelMenuPaint);
   LOBBY.rt.connect();
@@ -10388,7 +10391,7 @@ const seshPeers = () => [...(SESH.peers || new Map()).values()].filter(p => Date
 const seshLeader = () => [SESH.id, ...seshPeers().map(p => p.id)].sort()[0] === SESH.id; // calls the countdown, so every phone gets the same one
 function seshMe(){ // what this phone tells the others
   const live = S.mode === 'live', m = SESH.mine || [];
-  return { id: SESH.id, n: duelName(), a: duelAv(), c: duelColor(), live, dev: live ? devWord() : '', st: live ? S.state : 0, tc: live ? Math.round(S.tempC || 0) : 0,
+  return { id: SESH.id, u: lobbyId(), n: duelName(), a: duelAv(), c: duelColor(), live, dev: live ? devWord() : '', st: live ? S.state : 0, tc: live ? Math.round(S.tempC || 0) : 0,
     hit: !!(live && HIT.on), hs: live && HIT.on ? Math.round((performance.now() - HIT.start) / 100) / 10 : 0, h: m.length, b: m.length ? Math.max(...m) : 0, tot: Math.round(m.reduce((a, x) => a + x, 0) * 10) / 10, ph: SESH.ph };
 }
 const seshParts = () => SESH.on ? [Object.assign(seshMe(), { me:true }), ...seshPeers()] : [];
@@ -10421,7 +10424,7 @@ function seshSee(m){
   if (!SESH.on || !m || !m.id || m.id === SESH.id) return null;
   let p = SESH.peers.get(m.id);
   if (!p){ if (seshPeers().length >= SESH_MAX - 1) return null; p = { id: m.id, h:0, b:0, tot:0 }; SESH.peers.set(m.id, p); buzz(20); toast(`${String(m.n || 'Someone').slice(0, 20)} is in the sesh`); }
-  p.at = Date.now(); if (m.n) p.n = String(m.n).slice(0, 20); if (m.c) p.c = okColor(m.c);
+  p.at = Date.now(); if (m.n) p.n = String(m.n).slice(0, 20); if (m.c) p.c = okColor(m.c); if (m.u) p.u = String(m.u).slice(0, 40);
   if (typeof m.a === 'string' && m.a.startsWith(SB_URL + '/storage/')) p.a = m.a.slice(0, 400);
   return p;
 }
@@ -10481,6 +10484,12 @@ function seshBonus(){
   if (IS_TEST){ save(); toast(`+${SESH_BONUS} RP sesh bonus (test build: not counted)`); return; }
   duelRpAdd(SESH_BONUS); toast(`+${SESH_BONUS} RP group sesh bonus 🔥`); try { drawRank(); } catch(e){} try { lbPush(true); } catch(e){}
 }
+// a friend's Sesh button (Social friends list, or the list in the sesh menu): start a sesh if you're not in one, then invite
+function seshInviteFrom(id, name){
+  if (DUEL.on) return toast('Finish your 1v1 first');
+  if (!SESH.on || SESH.demo) seshStart();
+  seshInvite(id, name); seshSheet(); try { socDrawFriends(); } catch(e){}
+}
 function seshInvite(id, name){
   if (!SESH.on || SESH.demo) return; const me = LB.me || lbStore().meCache; if (!me || !me.id) return toast('Make a ranked profile in Social to invite friends');
   lobbyOn(); lobbyTimer();
@@ -10513,6 +10522,7 @@ function seshSheet(){
     el.addEventListener('click', seshClick);
   }
   el.dataset.sph = ''; if (SESH.on) SESH.pingAt = 0; seshDraw(); drawPills();
+  if (lobbyWanted()){ lobbyOn(); setTimeout(() => LOBBY.rt && LOBBY.rt.open && LOBBY.rt.send('on:ping', { id: lobbyId() }), 800); } // who's online, for the invite list
 }
 function seshHide(){ const el = $('.egg.sesh'); if (!el) return; el.classList.remove('on'); setTimeout(() => { el.remove(); drawPills(); }, 260); }
 function seshSt(p){
@@ -10524,26 +10534,27 @@ function seshSt(p){
 function seshDraw(){
   const el = $('.egg.sesh'); if (!el) return; const card = el.firstElementChild, X = SESH;
   if (!X.on){
-    if (el.dataset.sph === 'menu') return; // don't wipe the code they're typing
+    if (el.dataset.sph === 'menu') return seshFriends(); // don't wipe the code they're typing
     el.dataset.sph = 'menu'; card._h = null;
     card.innerHTML = `<span class="label" style="text-align:center">Group sesh <span class="beta-tag">BETA</span></span><h2 style="margin:0;text-align:center">Dab together, anywhere</h2>
       <p class="muted" style="margin:0;font-size:14px;text-align:center">Up to ${SESH_MAX} friends. Everyone’s Puffco heats up on one tap, then you all hit it on the same 3-2-1.</p>
       ${seshBonusOn() ? `<p style="margin:0;font-size:13px;text-align:center;color:#ffd23f;font-weight:700">Beta week: +${SESH_BONUS} RP for every sesh with a friend (${SESH_BONUS_DAY} a day, until Nov 2)</p>` : ''}
-      <button class="btn primary" data-s="new" style="width:100%">Start a sesh</button>
-      <div class="row" style="gap:8px"><input type="text" id="sxCode" placeholder="Friend’s code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" style="flex:1;min-width:0;background:var(--fill);border:0;border-radius:14px;padding:12px 14px;color:var(--fg);font:inherit;font-size:16px;text-transform:uppercase;letter-spacing:.1em"><button class="btn" data-s="join">Join</button></div>
+      <div style="display:grid;gap:8px"><span class="label">Invite friends</span><div id="sxFr" class="dfr-list"></div></div>
+      <button class="btn" data-s="new" style="width:100%">Start a sesh</button>
+      <details class="dhow"><summary>Have a code?</summary><div class="row" style="gap:8px;margin-top:8px"><input type="text" id="sxCode" placeholder="Friend’s code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" style="flex:1;min-width:0;background:var(--fill);border:0;border-radius:14px;padding:12px 14px;color:var(--fg);font:inherit;font-size:16px;text-transform:uppercase;letter-spacing:.1em"><button class="btn" data-s="join">Join</button></div></details>
       <details class="dhow"><summary>How it works</summary><div class="dhow-b">
-        <div><b>1. Get everyone in</b><span>Start a sesh, then invite friends or send them the code. Pairs great with a FaceTime call.</span></div>
+        <div><b>1. Get everyone in</b><span>Tap Invite next to a friend (here, or 🔥 Sesh in your Friends list in Social). They get a popup to join. You can also share the code. Pairs great with a FaceTime call.</span></div>
         <div><b>2. Heat together</b><span>Anyone taps Heat together and every Puffco in the sesh starts heating. Everyone uses their own heat settings.</span></div>
         <div><b>3. Hit it</b><span>When everyone is Ready, every phone counts 3-2-1 at the same time. Then hit it together and watch everyone’s hits live.</span></div>
         <div><b>4. After</b><span>See who took the biggest hit, then go again. Your hits count like any other session.${seshBonusOn() ? ` During beta week, a sesh where you and at least one friend both take a hit gives +${SESH_BONUS} RP, up to ${SESH_BONUS_DAY} a day.` : ''}</span></div></div></details>
       <button class="btn" data-s="x" style="width:100%">Close</button>`;
-    return;
+    seshFriends(); return;
   }
   if (el.dataset.sph !== 'on'){
     el.dataset.sph = 'on';
     card.innerHTML = `<div class="row between"><span class="label">Group sesh${X.demo ? ' · demo' : ''} <span class="beta-tag">BETA</span></span><button class="btn small ghost" data-s="x">Hide</button></div>
       <div id="sxTop" style="display:grid;gap:8px"></div><div id="sxGrid" class="sx-grid"></div><div id="sxAct" style="display:grid;gap:8px"></div>
-      ${X.demo ? '' : '<details class="dhow" id="sxInv"><summary>Invite friends</summary><div id="sxFr" class="dfr-list" style="margin-top:8px"></div></details>'}
+      ${X.demo ? '' : '<div style="display:grid;gap:8px"><span class="label">Invite friends</span><div id="sxFr" class="dfr-list"></div></div>'}
       <button class="btn" data-s="leave" style="width:100%">Leave sesh</button>`;
     seshFriends();
   }
@@ -10563,13 +10574,13 @@ function seshDraw(){
   seshFriends();
 }
 function seshFriends(){
-  const fr = $('#sxFr'); if (!fr || !SESH.on) return; const me = LB.me || lbStore().meCache, now = Date.now();
+  const fr = $('#sxFr'); if (!fr) return; const me = LB.me || lbStore().meCache, now = Date.now(), here = new Set(seshPeers().map(p => p.u));
   if (!me || !me.username) return setHTML(fr, '<p class="muted" style="margin:0;font-size:13px">Make a ranked profile in Social to invite friends. Anyone can still join with the code.</p>');
   if (!SOC.loaded){ if (!seshFriends.loading){ seshFriends.loading = true; socLoad().catch(() => {}).finally(() => { seshFriends.loading = false; seshFriends(); }); } return setHTML(fr, '<p class="muted" style="margin:0;font-size:13px">Loading your friends…</p>'); }
   const fs = SOC.followerSet || new Set(), on = id => { const o = LOBBY.online.get(String(id)); return o && now - o.at < 60000 ? o : null; };
   const rows = (SOC.followingRows || []).filter(r => !r.banned && r.id !== me.id && fs.has(r.id)).sort((a, b) => (!!on(b.id) - !!on(a.id)) || String(a.username).localeCompare(String(b.username)));
-  setHTML(fr, rows.length ? rows.slice(0, 30).map(r => { const o = on(r.id), sent = SESH.invited.has(String(r.id));
-    return `<div class="dfr-row">${lbAvatar(r.avatar_url, r.username, 36)}<span class="dfr-name"><b>${esc(r.username)}</b><small><i class="dfr-dot${o ? o.busy ? ' busy' : ' on' : ''}"></i>${o ? o.busy ? 'Busy' : 'Online' : 'Offline'}</small></span><button class="btn small${o && !o.busy && !sent ? ' primary' : ''}" data-s="inv" data-id="${esc(String(r.id))}" data-n="${esc(r.username)}">${sent ? 'Invited' : 'Invite'}</button></div>`; }).join('')
+  setHTML(fr, rows.length ? rows.slice(0, 30).map(r => { const o = on(r.id), sent = !!(SESH.on && SESH.invited && SESH.invited.has(String(r.id))), inIt = here.has(String(r.id));
+    return `<div class="dfr-row">${lbAvatar(r.avatar_url, r.username, 36)}<span class="dfr-name"><b>${esc(r.username)}</b><small><i class="dfr-dot${inIt || (o && !o.busy) ? ' on' : o ? ' busy' : ''}"></i>${inIt ? 'In the sesh' : o ? o.busy ? 'Busy' : 'Online' : 'Offline'}</small></span>${inIt ? '' : `<button class="btn small${o && !o.busy && !sent ? ' primary' : ''}" data-s="inv" data-id="${esc(String(r.id))}" data-n="${esc(r.username)}">${sent ? 'Invited' : 'Invite'}</button>`}</div>`; }).join('')
     : '<p class="muted" style="margin:0;font-size:13px">No friends yet. Friends are people you follow who follow you back. Anyone can join with the code.</p>');
 }
 async function seshClick(e){
@@ -10582,7 +10593,7 @@ async function seshClick(e){
   if (k === 'heat') return seshHeat();
   if (k === 'stop'){ try { await modeCmd(8); } catch(_){} return; }
   if (k === 'leave') return seshEnd();
-  if (k === 'inv') return seshInvite(b.dataset.id, b.dataset.n);
+  if (k === 'inv') return seshInviteFrom(b.dataset.id, b.dataset.n);
 }
 /* ---- test tools: a sesh with three fake friends, to try it alone ---- */
 const SESH_FAKE = [['Kingo', '#2bd9ff', 'Peak Pro'], ['ooobabyatriple', '#ff5ec8', 'Peak Pro'], ['Tokin’ Stoner Friend', '#ffd23f', 'Proxy']];
