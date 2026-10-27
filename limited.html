@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Colorway Hunt</title>
-<meta name="description" content="Own a Storm or Glacier Peak Pro? Share its lights with Emberline and get the Bug Hunter badge.">
+<title>Limited Edition Testing</title>
+<meta name="description" content="Own a limited edition Peak Pro? Help test it with Emberline and get the Bug Hunter badge.">
 <style>
 :root{--bg:#0d0a12;--panel:#1a1522;--panel2:#231c2e;--fg:#f3eefa;--muted:#a99fb8;--line:#2f2740;--accent:#b46cff;--ink:#140b1f;--ok:#4cd68a;--bad:#ff6b6b;--gold:#ffd23f;color-scheme:dark}
 *{box-sizing:border-box}
@@ -37,9 +37,9 @@ ol{margin:0;padding-left:20px;display:grid;gap:4px;color:var(--muted)}
 </style></head><body>
 <div class="wrap">
   <div class="hero">
-    <div class="ic">🌩️ ❄️</div>
-    <h1>Colorway <span>Hunt</span></h1>
-    <p>Own one of these Peak Pros? Share its lights so we can bring its colorway to Emberline, and get the <b>🐛 Bug Hunter</b> badge.</p>
+    <div class="ic">🧪</div>
+    <h1>Limited Edition <span>Testing</span></h1>
+    <p>Own one of these limited edition Peak Pros? Help us test it with Emberline and get the <b>🐛 Bug Hunter</b> badge.</p>
     <div class="eds" id="eds"></div>
   </div>
 
@@ -56,7 +56,7 @@ ol{margin:0;padding-left:20px;display:grid;gap:4px;color:var(--muted)}
   </div>
 
   <div class="card off" id="c2">
-    <h2><span class="n">2</span>Share the lights</h2>
+    <h2><span class="n">2</span>Run the test</h2>
     <div class="st" id="s2">Waiting for step 1</div>
     <div class="bar"><i id="bar"></i></div>
     <div class="slots" id="slots"></div>
@@ -282,12 +282,12 @@ $('bConnect').onclick = async () => {
     st('s1', 'Pick your Peak Pro…'); await ble.request(false);
     st('s1', 'Connecting…'); await ble.attach(x => st('s1', { gatt:'Connecting…', service:'Connecting…', auth:'Unlocking…' }[x] || 'Connecting…'));
     let api = null; try { api = await ble.u32('/p/sys/fw/api'); } catch(e){}
-    if (api != null && (api >>> 16) === 1){ st('s1', 'That’s a Proxy. This hunt is for Peak Pros right now.', 'bad'); ble.disconnect(true); $('bConnect').disabled = false; return; }
+    if (api != null && (api >>> 16) === 1){ st('s1', 'That’s a Proxy. This test is for Peak Pros right now.', 'bad'); ble.disconnect(true); $('bConnect').disabled = false; return; }
     let mc = null; try { mc = await ble.u32('/p/sys/hw/mdcd'); } catch(e){}
     D.edition = EDITIONS[mc] || null;
     try { const r = await ble.read('/p/sys/fw/ver', 4); D.fw = revStr(r[0]); } catch(e){}
     if (!D.edition || !WANTED.includes(D.edition)){
-      st('s1', D.edition ? `This is a ${D.edition} Peak Pro. We already have that one or don’t need it right now. Thank you anyway!` : 'Couldn’t tell which edition this is. Try again, or ask in the Discord.', 'bad');
+      st('s1', D.edition ? `This is a ${D.edition} Peak Pro. It isn’t part of this test right now. Thank you anyway!` : 'Couldn’t tell which edition this is. Try again, or ask in the Discord.', 'bad');
       ble.disconnect(true); $('bConnect').disabled = false; return;
     }
     st('s1', `${ED_ICON[D.edition] || '✨'} Found a ${D.edition} Peak Pro`, 'ok'); card('c1', 'done'); $('bConnect').textContent = 'Connected';
@@ -299,14 +299,14 @@ $('bConnect').onclick = async () => {
 };
 
 async function share(){
-  card('c2', 'on'); st('s2', 'Reading your lights…');
+  card('c2', 'on'); st('s2', 'Testing…');
   const files = {}; let i = 0;
   for (const p of PATHS){
     try { const r = await ble.readAll(p); if (r && r.length) files[p] = toHex(r).slice(0, 8000); } catch(e){}
     $('bar').style.width = Math.round(++i / PATHS.length * 100) + '%';
   }
   ble.disconnect(true);
-  if (!Object.keys(files).length){ st('s2', 'Couldn’t read the lights. Reload the page and try again.', 'bad'); return; }
+  if (!Object.keys(files).length){ st('s2', 'The test couldn’t finish. Reload the page and try again.', 'bad'); return; }
   $('slots').innerHTML = Object.keys(SLOT).filter(p => files[p]).map(p => { const x = lightInfo(files[p]);
     return `<div class="slot"><small>${SLOT[p]}</small><b>${x.name.replace(/[<>&]/g, '')}</b>${x.cols.length ? `<div class="sws">${x.cols.map(c => `<i style="background:${/^#[0-9a-f]{6}$/i.test(c) ? c : '#444'}"></i>`).join('')}</div>` : ''}</div>`; }).join('');
   D.hash = toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(D.edition + JSON.stringify(files)))));
@@ -328,10 +328,10 @@ $('bClaim').onclick = async () => {
     const j = await r.json().catch(() => ({}));
     if (r.ok && j.ok){
       try { localStorage.setItem('cwUser', u); } catch(e){}
-      $('c3').innerHTML = `<h2><span class="n">✓</span>All done</h2><div class="badge"><i>🐛</i><div><b>${j.had ? 'You already had Bug Hunter' : 'Bug Hunter is yours'}, ${String(j.username || u).replace(/[<>&]/g, '')}!</b><p>It shows on your profile next time you open Emberline. Thanks for helping bring the ${D.edition} colorway to Emberline.</p></div></div>`;
+      $('c3').innerHTML = `<h2><span class="n">✓</span>All done</h2><div class="badge"><i>🐛</i><div><b>${j.had ? 'You already had Bug Hunter' : 'Bug Hunter is yours'}, ${String(j.username || u).replace(/[<>&]/g, '')}!</b><p>It shows on your profile next time you open Emberline. Thanks for helping test the ${D.edition} with Emberline.</p></div></div>`;
       card('c3', 'done'); return;
     }
-    const why = { no_player:'No Emberline profile with that username. Check the spelling (it’s the name on your Social profile).', already_claimed:`This Peak’s lights already got a badge${j.username ? ' for ' + j.username : ''}.`, not_wanted:'That edition isn’t part of the hunt.', bad_request:'Something was missing. Reload and try again.' }[j.error];
+    const why = { no_player:'No Emberline profile with that username. Check the spelling (it’s the name on your Social profile).', already_claimed:`This Peak already got a badge${j.username ? ' for ' + j.username : ''}.`, not_wanted:'That edition isn’t part of this test.', bad_request:'Something was missing. Reload and try again.' }[j.error];
     st('s3', why || 'Couldn’t give the badge: ' + (j.error || r.status), 'bad');
   } catch(e){ st('s3', 'Couldn’t reach Emberline: ' + (e.message || e), 'bad'); }
   $('bClaim').disabled = false;
