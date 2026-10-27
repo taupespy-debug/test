@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Emberline Alerts</title>
+<meta name="description" content="Phone notifications for Emberline: 1v1 invites and new followers.">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Ember Alerts"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#120f18">
+<link rel="manifest" href="alerts.webmanifest"><link rel="apple-touch-icon" href="alerts-icon.png">
+<style>
+:root{--bg:#120f18;--panel:#1c1824;--fg:#efeaf6;--muted:#a59db3;--line:#2e2838;--accent:#b46cff;--ink:#140b1f;--ok:#4cd68a;--bad:#ff6b6b;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(120% 70% at 50% 0%,#2a1144,var(--bg) 60%);color:var(--fg);font:16px/1.5 -apple-system,system-ui,sans-serif;min-height:100vh;padding:max(24px,env(safe-area-inset-top)) 16px 40px}
+.wrap{max-width:520px;margin:0 auto;display:grid;gap:14px}
+.logo{display:flex;align-items:center;gap:12px}.logo img{width:56px;height:56px;border-radius:14px}
+h1{margin:0;font-size:26px}p{margin:0;color:var(--muted)}b{color:var(--fg)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;display:grid;gap:12px}
+ol{margin:0;padding-left:22px;display:grid;gap:8px;color:var(--muted)}
+button{border:0;border-radius:12px;padding:14px;font:700 16px system-ui;background:var(--accent);color:var(--ink);width:100%}
+button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+input{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);background:#0b0910;color:var(--fg);font:700 24px ui-monospace,Menlo,monospace;letter-spacing:6px;text-align:center;text-transform:uppercase}
+.ok{color:var(--ok)}.bad{color:var(--bad)}
+.share{display:inline-block;padding:0 6px;border:1px solid var(--line);border-radius:6px}
+[hidden]{display:none!important}
+</style></head><body>
+<div class="wrap">
+  <div class="logo"><img src="alerts-icon.png" alt=""><div><h1>Emberline Alerts</h1><p>1v1 invites and new followers on your lock screen</p></div></div>
+
+  <div class="card" id="install" hidden>
+    <b>Add this to your Home Screen first</b>
+    <p>iPhone only lets a page send notifications once it's on your Home Screen (iOS 16.4 or newer). Do it in <b>Safari</b>:</p>
+    <ol><li>Tap the <span class="share">Share ⬆︎</span> button at the bottom.</li><li>Tap <b>Add to Home Screen</b>, then <b>Add</b>.</li><li>Open <b>Ember Alerts</b> from your Home Screen and come back to this screen.</li></ol>
+    <p style="font-size:13px">Not in Safari? Copy this page's link and open it in Safari. Path can't show notifications itself.</p>
+  </div>
+
+  <div class="card" id="nopush" hidden>
+    <b class="bad">This phone can't do notifications here</b>
+    <p>You need iOS 16.4 or newer, and this page opened from your Home Screen (or Chrome on Android).</p>
+  </div>
+
+  <div class="card" id="pair" hidden>
+    <b>Connect your Emberline profile</b>
+    <ol><li>In Emberline (in Path), open <b>Settings &gt; Phone alerts</b> and tap <b>Get a code</b>.</li><li>Type the 6 letters here and tap <b>Turn on alerts</b>. Allow notifications when asked.</li></ol>
+    <input id="code" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="ABC123">
+    <button id="go">Turn on alerts</button>
+    <p id="msg" style="font-size:14px"></p>
+  </div>
+
+  <div class="card" id="done" hidden>
+    <b class="ok" id="doneTxt">Alerts are on</b>
+    <p>You'll get a notification when a friend invites you to a 1v1 or someone follows you. Tap it, then open Emberline in Path to play.</p>
+    <button id="test">Send a test notification</button>
+    <button class="ghost" id="again">Connect a different profile</button>
+    <p id="msg2" style="font-size:14px"></p>
+  </div>
+
+  <div class="card" id="opened" hidden>
+    <b>Open Emberline to play</b>
+    <p>Open <b>Path</b> and go to Emberline. Invites wait there for 15 minutes under the 🔔 in Social.</p>
+  </div>
+</div>
+<script>
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1d3phYndpa2xvb2J6dmdjZGFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4ODExOTUsImV4cCI6MjEwNjQ1NzE5NX0.dESN5nYqgX087fzd27txEXf6fEKraF4D0RW8MaUuv6w';
+const SB_URL = 'https://auwzabwikloobzvgcdaa.supabase.co';
+const $ = id => document.getElementById(id);
+const show = (...ids) => ['install', 'nopush', 'pair', 'done'].forEach(k => $(k).hidden = !ids.includes(k));
+const standalone = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const canPush = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const store = { get(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }, set(k, v){ try { localStorage.setItem(k, v); } catch(e){} } };
+async function call(body){
+  const r = await fetch(SB_URL + '/functions/v1/player', { method:'POST', headers:{ apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  let j = null; try { j = await r.json(); } catch(e){}
+  if (!r.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
+  return j;
+}
+const b64u = s => { const p = '='.repeat((4 - s.length % 4) % 4), b = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); };
+async function reg(){ const r = await navigator.serviceWorker.register('alerts-sw.js'); await navigator.serviceWorker.ready; return r; }
+async function start(){
+  if (new URLSearchParams(location.search).has('open')) $('opened').hidden = false;
+  if (ios && !standalone){ show('install'); return; }
+  if (!canPush){ show('nopush'); return; }
+  try { const r = await reg(), sub = await r.pushManager.getSubscription(), who = store.get('alertsUser');
+    if (sub && who && Notification.permission === 'granted'){ $('doneTxt').textContent = 'Alerts are on for ' + who; show('done'); return; } } catch(e){}
+  show('pair');
+}
+$('code').addEventListener('input', e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6); });
+$('go').onclick = async () => {
+  const code = $('code').value; if (code.length !== 6){ $('msg').innerHTML = '<span class="bad">Type the 6 letters from Emberline</span>'; return; }
+  $('go').disabled = true; $('msg').textContent = 'Turning on…';
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') throw new Error('Notifications are blocked. Turn them on in iPhone Settings > Notifications > Ember Alerts');
+    const r = await reg(); const { key } = await call({ action:'push_key' });
+    let sub = await r.pushManager.getSubscription(); if (!sub) sub = await r.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: b64u(key) });
+    const j = await call({ action:'push_pair', code, sub: sub.toJSON() });
+    store.set('alertsUser', j.username || 'your profile'); store.set('alertsEp', sub.endpoint);
+    $('doneTxt').textContent = 'Alerts are on for ' + (j.username || 'your profile'); show('done');
+  } catch(e){ $('msg').innerHTML = '<span class="bad">' + (e.message === 'bad_code' ? 'That code didn’t work or expired. Get a new one in Emberline.' : e.message) + '</span>'; }
+  $('go').disabled = false;
+};
+$('test').onclick = async () => {
+  $('msg2').textContent = 'Sending…';
+  try { const r = await reg(), sub = await r.pushManager.getSubscription(); if (!sub) throw new Error('not_paired');
+    await call({ action:'push_test', endpoint: sub.endpoint }); $('msg2').innerHTML = '<span class="ok">Sent. It should pop up in a few seconds.</span>'; }
+  catch(e){ $('msg2').innerHTML = '<span class="bad">' + (e.message === 'not_paired' ? 'This phone isn’t connected anymore. Connect again.' : e.message) + '</span>'; }
+};
+$('again').onclick = () => { $('code').value = ''; $('msg').textContent = ''; show('pair'); };
+start();
+</script></body></html>

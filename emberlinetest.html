@@ -313,6 +313,9 @@ section.view>*{min-width:0}
 /* profile banners */
 .bnr{position:absolute;left:0;right:0;top:0;height:112px;z-index:0;pointer-events:none;overflow:hidden;-webkit-mask:linear-gradient(#000 45%,#0000);mask:linear-gradient(#000 45%,#0000)}
 .bnr svg{width:100%;height:100%;display:block}
+.note-bell{position:relative;margin-left:10px;vertical-align:middle;border:0;background:var(--fill-2,rgba(255,255,255,.08));border-radius:50%;width:38px;height:38px;font-size:18px;cursor:pointer}.note-bell i{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#ff3b4a;color:#fff;font:800 11px/18px system-ui;font-style:normal}
+.note-row{display:grid;gap:4px;padding:10px 12px;border-radius:14px;background:var(--fill-2,rgba(255,255,255,.06))}.note-row.new{box-shadow:inset 3px 0 0 #ff3b4a}.note-row small{color:var(--muted)}
+.alert-code{font:800 34px/1.2 ui-monospace,Menlo,monospace;letter-spacing:8px;text-align:center;padding:10px;border-radius:14px;background:var(--fill-2,rgba(255,255,255,.06))}
 .prem-star{display:inline-block;vertical-align:middle;flex:none;cursor:pointer;filter:drop-shadow(0 0 4px #ffd23f88)}
 .prem-prev{position:relative;overflow:hidden;border-radius:18px;background:var(--fill-2,rgba(255,255,255,.06));padding:56px 12px 14px;box-shadow:inset 0 0 0 1px #fff1}
 .prem-prev .bnr{transition:background .6s}.prem-prev-in{position:relative;z-index:1;display:grid;justify-items:center;gap:4px;text-align:center}
@@ -2176,6 +2179,7 @@ body.vr-on #dvFrame{display:none}
       <div class="row" style="gap:6px;flex-wrap:wrap"><span class="muted" style="font-size:13px;width:100%">Proxy brightness test: tap each, tell Claude how bright it looks</span><button class="btn small" data-pbr="16">16</button><button class="btn small" data-pbr="64">64</button><button class="btn small" data-pbr="128">128</button><button class="btn small" data-pbr="256">256</button><button class="btn small" data-pbr="1024">1024</button><button class="btn small" data-pbr="16384">16384</button><button class="btn small" data-pbr="65280">65280</button></div>
       <div class="row" style="gap:6px"><span class="muted" style="font-size:13px;width:100%">Light test: tap each, tell Claude which turned the light red</span><button class="btn small" data-lt="a">A: new format</button><button class="btn small" data-lt="b">B: old format</button><button class="btn small" data-lt="c">C: clear</button><button class="btn small" data-lt="d">D: own light red</button><button class="btn small" data-lt="e">E: other clear</button></div>
     </div>
+    <div class="card" id="alertsCard" role="button" tabindex="0" style="display:flex;gap:12px;align-items:center;cursor:pointer"><span style="font-size:26px">🔔</span><div class="grow" style="display:grid;gap:2px"><b>Phone alerts <span class="beta-tag">TEST</span></b><span class="muted" style="font-size:13px">1v1 invites and new followers on your lock screen</span></div><span class="muted" style="font-size:20px">›</span></div>
     <div class="card prem-card" id="premCard" role="button" tabindex="0" style="display:flex;gap:12px;align-items:center;cursor:pointer">
       <span id="premCardStar"></span><div class="grow" style="display:grid;gap:2px"><b>Emberline Premium</b><span class="muted" style="font-size:13px" id="premCardTxt">Not required, but it helps keep the servers running. Get a star, a banner, early features and a Discord role.</span></div><span class="muted" style="font-size:20px">›</span>
     </div>
@@ -5200,6 +5204,7 @@ function premPreview(){
     <div class="prem-pvbs">${Object.entries(PREM_BANNERS).map(([id, [n, css]]) => `<button type="button" data-pvb="${id}" class="${id === k ? 'on' : ''}" style="background:${css}" aria-label="${n}"></button>`).join('')}</div>`;
 }
 function drawPremCard(){ const s = $('#premCardStar'); if (s) s.innerHTML = premStar(34); const t = $('#premCardTxt'); if (t && isPremium()) t.textContent = 'You’re Premium. Thank you for keeping Emberline running!'; }
+setTimeout(() => { const ac = $('#alertsCard'); if (ac) ac.onclick = alertsSetup; }, 0);
 setTimeout(() => { drawPremCard(); const c = $('#premCard'); if (c) c.onclick = () => { drawPremCard(); premInfo(); }; }, 0);
 // a tap on any Premium star opens the popup (and doesn't open the row it sits in)
 document.addEventListener('click', e => { const s = e.target.closest && e.target.closest('[data-prem]'); if (!s || s.closest('.egg.prem')) return; e.stopPropagation(); e.preventDefault(); premInfo(); }, true);
@@ -6748,7 +6753,7 @@ function lbRestore(){
 }
 function lbStart(){ // called when Stats opens: load now, refresh every 30s while open
   if (lbUsesPuffco() && !LB.me){ lbRestore(); } else if (lbStore().joined && !LB.me) lbCall({ action:'me' }).then(r => { LB.me = r.player; if (r.player){ lbStore().dev = !!r.player.dev; if (r.player.username) lbStore().username = r.player.username; lbStore().meCache = r.player; save(); } drawLeaderboard(); try { drawRank(); drawSocial(); } catch(e){} }).catch(() => {});
-  lbPush(); lbLoad();
+  lbPush(); lbLoad(); notesLoad(); notesBell();
   clearInterval(LB.timer);
   LB.timer = setInterval(() => { if (view !== 'stats' && view !== 'social'){ clearInterval(LB.timer); return; } if (!document.hidden) lbLoad(true); }, 180000); // every 3 min: each reload downloads every player, which used up the Supabase free data allowance at 30s
 }
@@ -8372,7 +8377,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${Object.keys(DFX_FX).map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="pathnotif">Path notifications check</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${Object.keys(DFX_FX).map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -8580,6 +8585,9 @@ $('#testTools').addEventListener('click', e => {
   if (k.startsWith('dfx:')){ const fx = DFX_FX[k.slice(4)]; if (S.mode !== 'live') return toast(`Connect your ${devWord()} first`); if (store.dfx === false) return toast('Turn Puffco effects on first (1v1 screen)'); toast(`${fx.n}: ${fx.why}`); dfx(k.slice(4), true); return; }
   if (k === 'dfxstop'){ dfxStop(); toast('Effect stopped'); return; }
   if (k === 'micchk'){ vcMicCheck(); return; }
+  if (k === 'pathnotif'){ pathNotifCheck(); return; }
+  if (k === 'notesnow'){ notesLoad(true).then(() => toast(`${NOTE.list.length} notifications, ${NOTE.unread} unread, ${NOTE.phones} phones`)); return; }
+  if (k === 'notesfake'){ NOTE.list.unshift({ id: 'f' + Date.now(), kind:'invite', from_id:'', from_name:'Test Friend', data:{ code:'ABC123', bet:10 }, read:false, created_at: new Date().toISOString() }); NOTE.unread++; notesBell(); notesOpen(); return; }
   if (k === 'premme'){ store.testPrem = !store.testPrem; save(); b.textContent = store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'; drawPremCard(); try { drawSocial(); drawLeaderboard(); } catch(e){} toast(store.testPrem ? 'Premium on (this phone only, not saved to the server)' : 'Premium off'); return; }
   if (k === 'preminfo'){ premInfo(); return; }
   if (k === 'dblpop'){ dblPop(true); return; }
@@ -10226,8 +10234,86 @@ function duelInvite(id, name){
   const code = rtCode(); duelStart('host', code, duelRules());
   DUEL.inviting = { to: String(id), n: String(name || 'your friend').slice(0, 20), at: Date.now() };
   LOBBY.rt.send('inv', { id: lobbyId(), to: String(id), n: duelName(), c: duelColor(), code, r: DUEL.rules });
+  if (lbUsesPuffco()) lbCall({ action:'invite', target: String(id), code, bet: DUEL.rules.bet || 0, rules: DUEL.rules }).then(r => { if (r && r.pushed && DUEL.inviting) DUEL.inviting.pushed = true; }).catch(() => {}); // inbox + phone alert
   duelDraw();
 }
+/* ---- notifications (test build): an inbox for 1v1 invites and new followers, and phone alerts through the Emberline Alerts app ---- */
+const ALERTS_URL = 'https://taupespy-debug.github.io/test/alerts.html';
+const NOTE = { list:[], unread:0, at:0, phones:0, busy:false };
+async function notesLoad(force){
+  if (!lbUsesPuffco() || !lbStore().joined || NOTE.busy) return;
+  if (!force && Date.now() - NOTE.at < 60000) return; // every request is a Supabase log line
+  NOTE.busy = true; NOTE.at = Date.now();
+  try { const r = await lbCall({ action:'notes' }); NOTE.list = r.notes || []; NOTE.unread = r.unread || 0; NOTE.phones = r.phones || 0; } catch(e){}
+  NOTE.busy = false; notesBell(); notesFresh();
+}
+function notesBell(){
+  const h = document.querySelector('#v-social .largetitle'); if (!h) return;
+  let b = $('#noteBell'); if (!b){ h.insertAdjacentHTML('beforeend', '<button id="noteBell" class="note-bell" aria-label="Notifications">🔔<i></i></button>'); b = $('#noteBell'); b.onclick = notesOpen; }
+  const i = b.querySelector('i'); i.textContent = NOTE.unread > 9 ? '9+' : NOTE.unread || ''; i.hidden = !NOTE.unread;
+}
+const noteAgo = t => { const m = Math.round((Date.now() - new Date(t).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : Math.round(m / 1440) + 'd ago'; };
+const noteLive = n => n.kind === 'invite' && Date.now() - new Date(n.created_at).getTime() < 15 * 60000; // the friend may still be waiting
+// an invite that came in while the app was closed: offer it right away when you open the app
+function notesFresh(){
+  const n = NOTE.list.find(x => noteLive(x) && !x.read && !(store.noteSeen || {})[x.id]); if (!n || DUEL.on || LOBBY.inv || document.querySelector('.egg')) return;
+  store.noteSeen = Object.assign({}, store.noteSeen, { [n.id]: 1 }); save(); notesOpen();
+}
+function notesOpen(){
+  document.querySelectorAll('.egg.notes').forEach(e => e.remove());
+  const el = document.createElement('div'); el.className = 'egg notes'; el.style.zIndex = 230;
+  const row = n => { const who = esc(n.from_name || 'Someone');
+    if (n.kind === 'invite') return `<div class="note-row${n.read ? '' : ' new'}"><b>🔥 ${who} wants to 1v1</b><small>${noteAgo(n.created_at)}${n.data && n.data.bet ? ' · bet ' + (+n.data.bet) + ' RP' : ''}</small>
+      <div class="row" style="gap:6px">${noteLive(n) ? `<button class="btn small primary" data-nj="${n.id}">Join</button>` : ''}<button class="btn small" data-nb="${esc(n.from_id || '')}" data-nn="${who}">Invite back</button></div></div>`;
+    return `<div class="note-row${n.read ? '' : ' new'}"><b>👋 ${who} followed you</b><small>${noteAgo(n.created_at)}</small><div class="row"><button class="btn small" data-np="${esc(n.from_id || '')}">View profile</button></div></div>`; };
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Notifications" style="text-align:left;justify-items:stretch;gap:10px;max-height:86vh;overflow:auto">
+    <div class="row between"><h2 style="margin:0">Notifications</h2><button class="btn small ghost" data-nx>Close</button></div>
+    ${NOTE.list.length ? NOTE.list.map(row).join('') : '<p class="muted" style="margin:0">Nothing yet. 1v1 invites and new followers show up here.</p>'}
+    <p class="muted" style="margin:0;font-size:13px">${NOTE.phones ? `🔔 Phone alerts are on (${NOTE.phones} phone${NOTE.phones > 1 ? 's' : ''})` : 'Get these on your lock screen: Settings > Phone alerts'}</p></div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.addEventListener('click', e => {
+    if (e.target === el || e.target.closest('[data-nx]')) return shut();
+    const j = e.target.closest('[data-nj]'), bk = e.target.closest('[data-nb]'), pr = e.target.closest('[data-np]');
+    if (j){ const n = NOTE.list.find(x => String(x.id) === j.dataset.nj); if (!n || !n.data || !n.data.code) return; shut(); queueLeave(); duelStart('guest', rtClean(n.data.code), duelSan(n.data.rules || {})); duelSheet(); return; }
+    if (bk && bk.dataset.nb){ shut(); duelSheet({ queue:false }); setTimeout(() => duelInvite(bk.dataset.nb, bk.dataset.nn), 300); return; }
+    if (pr && pr.dataset.np){ shut(); sbRows(`/rest/v1/players?select=${SOC_COLS}&id=eq.${pr.dataset.np}`).then(r => { if (r && r[0]) openPlayer(r[0]); }).catch(() => {}); }
+  });
+  if (NOTE.unread){ NOTE.unread = 0; notesBell(); lbCall({ action:'notes', read:true }).then(() => { NOTE.list.forEach(n => n.read = true); }).catch(() => {}); }
+}
+// Settings > Phone alerts: a 6-letter code connects the Emberline Alerts app (Safari, Home Screen) to your profile
+async function alertsSetup(){
+  if (!lbUsesPuffco() || !lbStore().joined) return toast('Make your profile in Social first');
+  const el = document.createElement('div'); el.className = 'egg'; el.style.zIndex = 240;
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Phone alerts" style="text-align:left;justify-items:stretch;gap:12px">
+    <h2 style="margin:0">Phone alerts <span class="beta-tag">TEST</span></h2>
+    <p class="muted" style="margin:0;font-size:14px">Get 1v1 invites and new followers on your lock screen, even when Emberline is closed. Path can't show notifications, so a tiny helper app does it.</p>
+    <ol style="margin:0;padding-left:20px;display:grid;gap:4px;font-size:14px"><li>Open the link below in <b>Safari</b>.</li><li>Tap Share ⬆︎ then <b>Add to Home Screen</b>.</li><li>Open <b>Ember Alerts</b> from your Home Screen and type this code:</li></ol>
+    <div class="alert-code" id="alCode">······</div><p class="muted" style="margin:-6px 0 0;font-size:12px;text-align:center">Works for 15 minutes</p>
+    <button class="btn" id="alCopy">Copy the Alerts link</button>
+    <button class="btn" id="alTest">Send me a test notification</button>
+    <button class="btn ghost" id="alOff">Turn off alerts on all my phones</button>
+    <button class="btn primary" id="alX">Done</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.querySelector('#alX').onclick = shut;
+  el.querySelector('#alCopy').onclick = async () => { try { await navigator.clipboard.writeText(ALERTS_URL); toast('Link copied. Paste it in Safari'); } catch(e){ prompt('Copy this link and open it in Safari', ALERTS_URL); } };
+  el.querySelector('#alTest').onclick = async () => { try { const r = await lbCall({ action:'push_me' }); toast(r.sent ? 'Sent. Check your lock screen' : 'No phone connected yet. Finish the steps first'); } catch(e){ toast('Couldn’t send: ' + e.message); } };
+  el.querySelector('#alOff').onclick = async () => { try { await lbCall({ action:'push_off' }); NOTE.phones = 0; toast('Phone alerts are off'); } catch(e){ toast('Couldn’t turn off: ' + e.message); } };
+  try { const r = await lbCall({ action:'push_link' }); el.querySelector('#alCode').textContent = r.code; } catch(e){ el.querySelector('#alCode').textContent = 'Error'; toast('Couldn’t get a code: ' + e.message); }
+}
+// test tools: what notification features Path gives this page
+async function pathNotifCheck(){
+  const out = [], probe = (name, o) => { if (!o){ out.push(name + ': not here'); return; } let keys = []; try { for (const k in o) keys.push(k); keys = keys.concat(Object.getOwnPropertyNames(Object.getPrototypeOf(o) || {})); } catch(e){} out.push(name + ': ' + typeof o + ' ' + [...new Set(keys)].slice(0, 30).join(', ')); };
+  probe('window.notifications', window.notifications); probe('navigator.notifications', navigator.notifications);
+  out.push('Notification: ' + (typeof Notification === 'function' ? 'yes, permission ' + Notification.permission : 'no'));
+  out.push('serviceWorker: ' + ('serviceWorker' in navigator ? 'yes' : 'no') + ', PushManager: ' + ('PushManager' in window ? 'yes' : 'no'));
+  out.push('webkit handlers: ' + Object.keys((window.webkit && window.webkit.messageHandlers) || {}).join(', '));
+  out.push('UA: ' + navigator.userAgent);
+  alertBox('Path notifications check', esc(out.join('\n')).replace(/\n/g, '<br>'));
+}
+setTimeout(() => notesLoad(), 6000); // when the app opens: missed invites and follows
+document.addEventListener('visibilitychange', () => { if (!document.hidden) notesLoad(); });
 function lobbyInv(m){
   if (!lobbyMe(m) || !m.id || !duelAllowed()) return;
   const code = rtClean(m.code); if (code.length !== 6) return;
