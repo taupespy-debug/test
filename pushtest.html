@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Push Test</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;background:#120f18;color:#efeaf6;font:16px/1.5 -apple-system,system-ui,sans-serif;padding:max(20px,env(safe-area-inset-top)) 16px 40px}
+.w{max-width:520px;margin:0 auto;display:grid;gap:12px}
+h1{margin:0;font-size:24px}p{margin:0;color:#a59db3}
+button{border:0;border-radius:12px;padding:16px;font:700 16px system-ui;background:#b46cff;color:#140b1f;width:100%}
+button.g{background:#2a2433;color:#efeaf6}
+input{width:100%;box-sizing:border-box;background:#2a2433;border:1px solid #3a3346;border-radius:12px;padding:13px;color:#efeaf6;font:16px system-ui;text-transform:uppercase}
+pre{white-space:pre-wrap;word-break:break-all;background:#0b0910;border:1px solid #2e2838;border-radius:12px;padding:10px;font:12px/1.4 ui-monospace,Menlo,monospace;min-height:120px;margin:0}
+</style></head><body><div class="w">
+<h1>Push Test</h1>
+<p>A bare page to test notifications in Path. Tap the buttons in order and send the box at the bottom to Claude.</p>
+<button id="a" onclick="sub()">1. Allow notifications</button>
+<button id="b" class="g" onclick="ask()">2. If 1 failed: ask Path for permission, then tap 1 again</button>
+<p>3. To get a test notification: open Emberline test > Settings > Phone alerts > “Doesn’t work?” and type the 6-letter code here.</p>
+<input id="code" maxlength="6" placeholder="Code" autocomplete="off" autocapitalize="characters">
+<button id="c" class="g" onclick="pair()">Send me a test notification</button>
+<button id="d" class="g" onclick="copyOut()">Copy the box</button>
+<pre id="o"></pre>
+</div>
+<script>
+const SB_URL = 'https://auwzabwikloobzvgcdaa.supabase.co', SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1d3phYndpa2xvb2J6dmdjZGFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4ODExOTUsImV4cCI6MjEwNjQ1NzE5NX0.dESN5nYqgX087fzd27txEXf6fEKraF4D0RW8MaUuv6w';
+const o = document.getElementById('o'), log = t => { o.textContent += t + '\n'; };
+const show = v => { try { return typeof v === 'string' ? v : JSON.stringify(v); } catch(e){ return String(v); } };
+let KEY = null, SUB = null;
+function b64u(x){ const p = '='.repeat((4 - x.length % 4) % 4), b = atob((x + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); }
+const fn = (action, extra) => fetch(SB_URL + '/functions/v1/player', { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer ' + SB_KEY, 'Content-Type':'application/json' }, body: JSON.stringify(Object.assign({ action }, extra || {})) }).then(r => r.json());
+log('UA: ' + navigator.userAgent.slice(-30));
+log('window.pushManager: ' + (window.pushManager ? 'yes' : 'no') + ' · userActivation: ' + (navigator.userActivation ? 'yes' : 'no'));
+fn('push_key').then(r => { KEY = r.key; log('key: ' + (KEY ? 'ready' : 'MISSING ' + show(r))); }).catch(e => log('key ERROR ' + e.message));
+if (window.pushManager) window.pushManager.permissionState({ userVisibleOnly:true }).then(s => log('permission now: ' + s)).catch(e => log('permission ERROR ' + e.message));
+function subJSON(s){ let j = null; try { j = s.toJSON(); } catch(e){} if (j && j.endpoint) return j; const k = n => { try { const b = s.getKey(n); return b ? btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : null; } catch(e){ return null; } }; return { endpoint: s.endpoint, keys: { p256dh: k('p256dh'), auth: k('auth') } }; }
+function sub(){ // nothing before subscribe: it has to be inside the tap
+  if (!window.pushManager) return log('no window.pushManager here');
+  if (!KEY) return log('key not loaded yet, tap again in a second');
+  log('tap: activation ' + (navigator.userActivation ? navigator.userActivation.isActive : '?'));
+  let p; try { p = window.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: b64u(KEY) }); } catch(e){ return log('subscribe threw ' + e.name + ': ' + e.message); }
+  p.then(s => { SUB = subJSON(s); log('SUBSCRIBED ✅ ' + show(SUB).slice(0, 300)); }).catch(e => log('subscribe ERROR ' + e.name + ': ' + e.message));
+}
+function ask(){
+  if (!navigator.notifications){ log('no navigator.notifications'); return; }
+  log('asking Path (status)…');
+  Promise.race([Promise.resolve(navigator.notifications.status()), new Promise(r => setTimeout(() => r('no answer in 20s'), 20000))]).then(r => { log('Path status -> ' + show(r)); return window.pushManager && window.pushManager.permissionState({ userVisibleOnly:true }); }).then(s => s && log('permission now: ' + s)).catch(e => log('status ERROR ' + e.message));
+}
+function pair(){
+  const code = document.getElementById('code').value.trim().toUpperCase();
+  if (!SUB) return log('tap 1 first (no subscription yet)');
+  if (code.length !== 6) return log('type the 6-letter code');
+  fn('push_pair', { code, sub: SUB }).then(r => { log('pair -> ' + show(r)); return fn('push_test', { endpoint: SUB.endpoint }); }).then(r => log('test notification -> ' + show(r))).catch(e => log('pair ERROR ' + e.message));
+}
+function copyOut(){ navigator.clipboard.writeText(o.textContent).then(() => log('(copied)'), () => log('(couldn’t copy, select the box instead)')); }
+</script>
+</body></html>
