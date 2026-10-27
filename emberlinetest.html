@@ -10384,14 +10384,16 @@ async function pathNotifTry(){
   if (!N) return alertBox('Path notifications test', 'navigator.notifications is not here. Open this in Path.');
   const el = alertBox('Path notifications test', '<pre id="pnOut" style="margin:0;white-space:pre-wrap">Starting…</pre>', () => out.join('\n'));
   const show = v => { try { return typeof v === 'string' ? v : JSON.stringify(v); } catch(e){ return String(v); } };
-  const call = async (name, ...args) => { try { const r = await Promise.race([Promise.resolve(N[name](...args)), new Promise((_, no) => setTimeout(() => no(new Error('no answer in 10s')), 10000))]); log(name + '(' + args.map(show).join(', ') + ') -> ' + show(r)); return r; } catch(e){ log(name + ' ERROR ' + (e && e.message || e)); return null; } };
+  const call = async (name, ...args) => { log('… ' + name + '(' + args.map(show).join(', ') + ') waiting (up to 30s)'); try { const r = await Promise.race([Promise.resolve(N[name](...args)), new Promise((_, no) => setTimeout(() => no(new Error('no answer in 30s')), 30000))]); log(name + '(' + args.map(show).join(', ') + ') -> ' + show(r)); return r; } catch(e){ log(name + ' ERROR ' + (e && e.message || e)); return null; } };
+  // see Path's raw answers too, even ones that never finish a call
+  try { const rr = window.receiveNotifMessageResponse; if (typeof rr === 'function' && !rr._tap){ const w = function(...a){ log('RAW ' + a.map(x => show(x).slice(0, 400)).join(' | ')); return rr.apply(this, a); }; w._tap = true; window.receiveNotifMessageResponse = w; log('raw replies: watching'); } } catch(e){ log('raw watch ERROR ' + e.message); }
   try { N.onEvents(ev => log('EVENT ' + show(ev))); log('onEvents: listening'); } catch(e){ log('onEvents ERROR ' + e.message); }
   await call('isEnabled');
   await call('getDeviceId');
-  await call('status'); // may show the iPhone "allow notifications" prompt
-  await call('isEnabled');
-  await call('getToken');
-  await call('getToken', {});
+  await call('getToken'); // the phone's notification address
+  let key = ''; try { key = (await sbJSON('/functions/v1/player', { method:'POST', body: JSON.stringify({ action:'push_key' }) })).key; } catch(e){}
+  if (key) await call('getToken', { vapidKey: key }); // the way Firebase web asks, with our key
+  await call('status'); // asks permission. May never answer if it's already on
   log('done. Tap Copy and send it to Claude.');
 }
 // test tools: what notification features Path gives this page
