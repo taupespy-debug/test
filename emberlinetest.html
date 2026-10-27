@@ -8793,13 +8793,28 @@ async function edShareSend(){
   const hash = toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(S.edition + JSON.stringify(files)))));
   try { await sbJSON('/rest/v1/edition_lights', { method:'POST', headers:{ Prefer:'return=minimal' }, body: JSON.stringify({ hash, edition:S.edition, series:S.series || (isProxy() ? 'toad' : 'peak'), fw:S.fw || null, api:S.api || null, files }) }); }
   catch(e){ if (e.status !== 409) throw e; } // 409 = these exact lights are already saved
-  store.edShare = store.edShare || {}; store.edShare[S.edition] = { ok:true, at:Date.now() }; save();
-  return true;
+  store.edShare = store.edShare || {}; store.edShare[S.edition] = { ok:true, at:Date.now(), claimed: (store.edShare[S.edition] || {}).claimed };
+  if (await edClaim(hash)) store.edShare[S.edition].claimed = true;
+  save(); return true;
+}
+// sharing a limited edition's lights earns Bug Hunter, same as the Limited Edition Testing page. Automatic for anyone with a profile
+const edHasBug = () => { const me = LB.me || lbStore().meCache; return !!(me && Array.isArray(me.awards) && me.awards.includes('bughunter')); };
+async function edClaim(hash){
+  const me = LB.me || lbStore().meCache; if (!me || !me.username) return false;
+  if (edHasBug()) return true;
+  try {
+    const r = await sbJSON('/functions/v1/player', { method:'POST', body: JSON.stringify({ action:'edition_claim', hash, username: me.username }) });
+    if (!r || !r.ok) return false;
+    if (!r.had){ toast(`🐛 Bug Hunter unlocked for sharing your ${S.edition}’s lights`); buzz([30, 40, 30]); }
+    [LB.me, lbStore().meCache].forEach(x => { if (x && !(x.awards || []).includes('bughunter')) x.awards = [...(x.awards || []), 'bughunter']; });
+    try { drawSocial(); } catch(e){}
+    return true;
+  } catch(e){ return e.status === 409; } // 409: these lights already earned a badge
 }
 function edShareAsk(force){
   if (S.mode !== 'live' || !edIsLimited()) return;
   const st = (store.edShare || {})[S.edition];
-  if (!force && st && st.ok && Date.now() - st.at < 7 * 864e5) return; // shared recently
+  if (!force && st && st.ok && Date.now() - st.at < 7 * 864e5 && (st.claimed || edHasBug() || !(LB.me || lbStore().meCache || {}).username)) return; // shared recently (again if the badge is still waiting on a profile)
   edShareSend().then(ok => { if (force) toast(ok ? `${S.edition} lights shared` : 'Could not read the lights'); }).catch(e => { if (force) toast('Share failed: ' + (e.message || e)); });
 }
 // rank changes notice: once, on Stats, only for ranks the tax hits (Blaze and up)
