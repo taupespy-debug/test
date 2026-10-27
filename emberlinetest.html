@@ -10348,6 +10348,8 @@ async function pathNotifCheck(){
     out.push(name + ': ' + typeof o + ' [' + keys.join(', ') + ']');
     keys.forEach(k => { try { const v = o[k]; if (typeof v === 'function') out.push('  ' + k + '() = ' + String(v).replace(/\s+/g, ' ').slice(0, 220)); else if (v != null && typeof v !== 'object') out.push('  ' + k + ' = ' + String(v).slice(0, 80)); } catch(e){} }); };
   probe('window.notifications', window.notifications); probe('navigator.notifications', navigator.notifications);
+  probe('window.pushManager', window.pushManager); probe('window.native', window.native);
+  ['receiveNotifMessageResponse', 'sendNotificationEvent'].forEach(k => { try { if (typeof window[k] === 'function') out.push(k + '() = ' + String(window[k]).replace(/\s+/g, ' ').slice(0, 300)); } catch(e){} });
   out.push('Notification: ' + (typeof Notification === 'function' ? 'yes, permission ' + Notification.permission + ' · ' + String(Notification).replace(/\s+/g, ' ').slice(0, 120) : 'no'));
   if (typeof Notification === 'function' && Notification.requestPermission) out.push('  requestPermission() = ' + String(Notification.requestPermission).replace(/\s+/g, ' ').slice(0, 220));
   out.push('serviceWorker: ' + ('serviceWorker' in navigator ? 'yes' : 'no') + ', PushManager: ' + ('PushManager' in window ? 'yes' : 'no'));
