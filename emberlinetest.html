@@ -10368,6 +10368,7 @@ function subJSON(sub){
   return { endpoint: sub.endpoint, keys: { p256dh: k('p256dh'), auth: k('auth') } };
 }
 function pathPushOn(){ // call straight from a tap, before any await
+  if (/Path\//.test(navigator.userAgent) && !store.pathPushRisk) return Promise.reject(new Error('Path crashes when a page asks for push (tested Oct 2026), so this is off in Path')); // a real tap made Path's web view crash
   const PM = window.pushManager;
   if (!PM) return Promise.reject(new Error('This browser has no push. Open Emberline in Path'));
   if (!store.pushKey){ pushKeyLoad().catch(() => {}); return Promise.reject(new Error('One sec, still loading. Tap again')); }
