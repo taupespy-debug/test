@@ -10281,22 +10281,40 @@ function notesOpen(){
   });
   if (NOTE.unread){ NOTE.unread = 0; notesBell(); lbCall({ action:'notes', read:true }).then(() => { NOTE.list.forEach(n => n.read = true); }).catch(() => {}); }
 }
+// one tap, right in Emberline: works when the browser (Path) does standard notifications. The helper app is only the backup
+const b64u = x => { const p = '='.repeat((4 - x.length % 4) % 4), b = atob((x + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); };
+async function pushInApp(){
+  if (typeof Notification !== 'function') throw new Error('This browser has no notifications');
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error(perm === 'denied' ? 'Notifications are blocked for this site. Allow them in Path, then try again' : 'Notifications weren’t allowed');
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)){ try { new Notification('Emberline', { body:'Notifications work while Path is open' }); } catch(e){} throw new Error('Path shows notifications only while it’s open here (no push)'); }
+  const reg = await navigator.serviceWorker.register('alerts-sw.js'); await navigator.serviceWorker.ready;
+  const { key } = await sbJSON('/functions/v1/player', { method:'POST', body: JSON.stringify({ action:'push_key' }) });
+  const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: b64u(key) }));
+  const r = await lbCall({ action:'push_sub', sub: sub.toJSON() }); NOTE.phones = Math.max(1, NOTE.phones);
+  return r;
+}
 // Settings > Phone alerts: a 6-letter code connects the Emberline Alerts app (Safari, Home Screen) to your profile
 async function alertsSetup(){
   if (!lbUsesPuffco() || !lbStore().joined) return toast('Make your profile in Social first');
   const el = document.createElement('div'); el.className = 'egg'; el.style.zIndex = 240;
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Phone alerts" style="text-align:left;justify-items:stretch;gap:12px">
     <h2 style="margin:0">Phone alerts <span class="beta-tag">TEST</span></h2>
-    <p class="muted" style="margin:0;font-size:14px">Get 1v1 invites and new followers on your lock screen, even when Emberline is closed. Path can't show notifications, so a tiny helper app does it.</p>
+    <p class="muted" style="margin:0;font-size:14px">Get 1v1 invites and new followers on your lock screen, even when Emberline is closed.</p>
+    <button class="btn primary" id="alIn">Turn on notifications</button><p class="muted" id="alInMsg" style="margin:-4px 0 0;font-size:13px"></p>
+    <details class="dhow"><summary>Doesn’t work? Use the helper app</summary><div class="dhow-b" style="display:grid;gap:10px">
     <ol style="margin:0;padding-left:20px;display:grid;gap:4px;font-size:14px"><li>Open the link below in <b>Safari</b>.</li><li>Tap Share ⬆︎ then <b>Add to Home Screen</b>.</li><li>Open <b>Ember Alerts</b> from your Home Screen and type this code:</li></ol>
     <div class="alert-code" id="alCode">······</div><p class="muted" style="margin:-6px 0 0;font-size:12px;text-align:center">Works for 15 minutes</p>
-    <button class="btn" id="alCopy">Copy the Alerts link</button>
+    <button class="btn" id="alCopy">Copy the Alerts link</button></div></details>
     <button class="btn" id="alTest">Send me a test notification</button>
     <button class="btn ghost" id="alOff">Turn off alerts on all my phones</button>
     <button class="btn primary" id="alX">Done</button></div>`;
   document.body.appendChild(el); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
   const shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
   el.querySelector('#alX').onclick = shut;
+  el.querySelector('#alIn').onclick = async () => { const m = el.querySelector('#alInMsg'); m.textContent = 'Turning on…';
+    try { const r = await pushInApp(); m.innerHTML = `<span style="color:#4cd68a">On. ${r && r.sent ? 'A test notification is on its way.' : 'You’re set.'}</span>`; }
+    catch(e){ m.innerHTML = `<span style="color:#ff6b6b">${esc(e.message || String(e))}</span>`; } };
   el.querySelector('#alCopy').onclick = async () => { try { await navigator.clipboard.writeText(ALERTS_URL); toast('Link copied. Paste it in Safari'); } catch(e){ prompt('Copy this link and open it in Safari', ALERTS_URL); } };
   el.querySelector('#alTest').onclick = async () => { try { const r = await lbCall({ action:'push_me' }); toast(r.sent ? 'Sent. Check your lock screen' : 'No phone connected yet. Finish the steps first'); } catch(e){ toast('Couldn’t send: ' + e.message); } };
   el.querySelector('#alOff').onclick = async () => { try { await lbCall({ action:'push_off' }); NOTE.phones = 0; toast('Phone alerts are off'); } catch(e){ toast('Couldn’t turn off: ' + e.message); } };
@@ -10304,12 +10322,16 @@ async function alertsSetup(){
 }
 // test tools: what notification features Path gives this page
 async function pathNotifCheck(){
-  const out = [], probe = (name, o) => { if (!o){ out.push(name + ': not here'); return; } let keys = []; try { for (const k in o) keys.push(k); keys = keys.concat(Object.getOwnPropertyNames(Object.getPrototypeOf(o) || {})); } catch(e){} out.push(name + ': ' + typeof o + ' ' + [...new Set(keys)].slice(0, 30).join(', ')); };
+  const out = [], probe = (name, o) => { if (!o){ out.push(name + ': not here'); return; } let keys = []; try { for (const k in o) keys.push(k); keys = keys.concat(Object.getOwnPropertyNames(o), Object.getOwnPropertyNames(Object.getPrototypeOf(o) || {})); } catch(e){} keys = [...new Set(keys)].filter(k => k !== 'constructor').slice(0, 30);
+    out.push(name + ': ' + typeof o + ' [' + keys.join(', ') + ']');
+    keys.forEach(k => { try { const v = o[k]; if (typeof v === 'function') out.push('  ' + k + '() = ' + String(v).replace(/\s+/g, ' ').slice(0, 220)); else if (v != null && typeof v !== 'object') out.push('  ' + k + ' = ' + String(v).slice(0, 80)); } catch(e){} }); };
   probe('window.notifications', window.notifications); probe('navigator.notifications', navigator.notifications);
-  out.push('Notification: ' + (typeof Notification === 'function' ? 'yes, permission ' + Notification.permission : 'no'));
+  out.push('Notification: ' + (typeof Notification === 'function' ? 'yes, permission ' + Notification.permission + ' · ' + String(Notification).replace(/\s+/g, ' ').slice(0, 120) : 'no'));
+  if (typeof Notification === 'function' && Notification.requestPermission) out.push('  requestPermission() = ' + String(Notification.requestPermission).replace(/\s+/g, ' ').slice(0, 220));
   out.push('serviceWorker: ' + ('serviceWorker' in navigator ? 'yes' : 'no') + ', PushManager: ' + ('PushManager' in window ? 'yes' : 'no'));
   out.push('webkit handlers: ' + Object.keys((window.webkit && window.webkit.messageHandlers) || {}).join(', '));
   out.push('UA: ' + navigator.userAgent);
+  try { out.push('page globals with notif/push/path in the name: ' + Object.getOwnPropertyNames(window).filter(k => /notif|push|path|plug/i.test(k)).join(', ')); } catch(e){}
   alertBox('Path notifications check', esc(out.join('\n')).replace(/\n/g, '<br>'));
 }
 setTimeout(() => notesLoad(), 6000); // when the app opens: missed invites and follows
