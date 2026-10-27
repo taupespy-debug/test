@@ -10380,8 +10380,9 @@ async function alertsSetup(){
   try { const r = await lbCall({ action:'push_link' }); el.querySelector('#alCode').textContent = r.code; } catch(e){ el.querySelector('#alCode').textContent = 'Error'; toast('Couldn’t get a code: ' + e.message); }
 }
 // test tools: try Path's own notification feature (navigator.notifications) step by step and show what each call gives back
-async function pathNotifTry(){
-  const N = navigator.notifications, out = [], log = x => { out.push(x); const b = document.querySelector('#pnOut'); if (b) b.textContent = out.join('\n'); };
+async function pathNotifTry(){ try { await pathNotifTry2(); } catch(e){ const o = window.PN_OUT || [], b = document.querySelector('#pnOut'); o.push('CRASH ' + (e && (e.name || '') + ' ' + (e.message || e)) + ' @ ' + String(e && e.stack || '').split('\n')[0].slice(0, 120)); if (b) b.textContent = o.join('\n'); } } // never stop silently
+async function pathNotifTry2(){
+  const N = navigator.notifications, out = window.PN_OUT = [], log = x => { out.push(x); const b = document.querySelector('#pnOut'); if (b) b.textContent = out.join('\n'); };
   if (!N) return alertBox('Path notifications test', 'navigator.notifications is not here. Open this in Path.');
   const el = alertBox('Path notifications test', '<pre id="pnOut" style="margin:0;white-space:pre-wrap">Starting…</pre>', () => out.join('\n'));
   const show = v => { try { return typeof v === 'string' ? v : JSON.stringify(v); } catch(e){ return String(v); } };
@@ -10399,8 +10400,13 @@ async function pathNotifTry(){
     const pm = async (name, ...args) => { log('… pushManager.' + name + ' waiting (up to 30s)'); try { const r = await Promise.race([Promise.resolve(PM[name](...args)), new Promise((_, no) => setTimeout(() => no(new Error('no answer in 30s')), 30000))]); log('pushManager.' + name + ' -> ' + show(r)); return r; } catch(e){ log('pushManager.' + name + ' ERROR ' + (e && (e.name ? e.name + ': ' : '') + (e.message || e))); return null; } };
     await pm('permissionState', { userVisibleOnly:true });
     let sub = await pm('getSubscription');
-    if (!sub && key) sub = await pm('subscribe', { userVisibleOnly:true, applicationServerKey: b64u(key) });
-    if (!sub && key) sub = await pm('subscribe', { userVisibleOnly:true, applicationServerKey: key }); // as text, in case it wants that
+    log('key: ' + typeof key + ' ' + String(key).length + ' chars');
+    let kb = null; try { kb = b64u(String(key)); log('key bytes: ' + kb.length); } catch(e){ log('key bytes ERROR ' + (e.name || '') + ' ' + (e.message || e)); }
+    if (!sub && kb) sub = await pm('subscribe', { userVisibleOnly:true, applicationServerKey: kb });
+    if (!sub && kb) sub = await pm('subscribe', { userVisibleOnly:true, applicationServerKey: kb.buffer }); // as a plain buffer
+    if (!sub && key) sub = await pm('subscribe', { userVisibleOnly:true, applicationServerKey: String(key) }); // as text
+    if (!sub) sub = await pm('subscribe', { userVisibleOnly:true }); // no key at all
+    if (!sub) sub = await pm('subscribe'); // nothing
     if (sub){
       let j = null; try { j = typeof sub.toJSON === 'function' ? sub.toJSON() : null; } catch(e){}
       if (!j || !j.endpoint){ const k = n => { try { const b = sub.getKey && sub.getKey(n); return b ? btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : null; } catch(e){ return null; } }; j = { endpoint: sub.endpoint, keys: { p256dh: k('p256dh'), auth: k('auth') } }; }
