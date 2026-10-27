@@ -32,6 +32,7 @@ input{width:100%;background:var(--panel2);border:1px solid var(--line);border-ra
 .slot small{color:var(--muted);font-size:12px}.slot b{font-size:14px}
 .sws{display:flex;height:14px;border-radius:7px;overflow:hidden}.sws i{flex:1}
 ol{margin:0;padding-left:20px;display:grid;gap:4px;color:var(--muted)}
+.chk{display:flex;gap:10px;align-items:center;padding:12px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);font-weight:600;cursor:pointer}.chk input{width:22px;height:22px;flex:none;accent-color:var(--accent)}
 .foot{text-align:center;font-size:12px;color:var(--muted)}
 .foot a{color:var(--muted)}
 </style></head><body>
@@ -46,13 +47,14 @@ ol{margin:0;padding-left:20px;display:grid;gap:4px;color:var(--muted)}
   <div class="card on" id="c1">
     <h2><span class="n">1</span>Get ready</h2>
     <ol>
-      <li>In the Puffco app, put your edition’s mood on one of your heat profiles (if you have it).</li>
+      <li>Open the <b>Puffco app</b> and set your Peak to its <b>limited edition light</b> (the Storm or Glacier one that came with it). Put it on <b>Profile 1</b>.</li>
       <li><b>Fully close the Puffco app</b> (swipe it away). Only one app can talk to your Peak at a time.</li>
       <li>Open this page in <b>Path</b> (iPhone) or Chrome (Android or computer).</li>
     </ol>
+    <label class="chk"><input type="checkbox" id="cSet"> My Peak is on its limited edition light (Profile 1)</label>
     <p style="font-size:13px">This page only <b>reads</b> your lights. Nothing on your Peak is changed, and no serial number is read.</p>
     <div class="st" id="s1">Not connected</div>
-    <button id="bConnect">Connect my Peak Pro</button>
+    <button id="bConnect" disabled>Connect my Peak Pro</button>
   </div>
 
   <div class="card off" id="c2">
@@ -261,6 +263,7 @@ const revStr = v => { const L = 'ABCDEFGHJKMNPRTUVWXYZ'; if (!(v > 0)) return 'X
 const D = { edition:null, hash:null };
 $('eds').innerHTML = WANTED.map(e => `<span class="ed">${ED_ICON[e] || '✨'} ${e}</span>`).join('');
 try { const u = localStorage.getItem('cwUser'); if (u) $('uName').value = u; } catch(e){}
+$('cSet').onchange = () => { $('bConnect').disabled = !$('cSet').checked; };
 
 // what a light file shows: its mood name and colors
 function lightInfo(hex){
@@ -316,7 +319,8 @@ async function share(){
       body: JSON.stringify({ hash: D.hash, edition: D.edition, series:'peach', fw: D.fw || null, api: 3, files }) });
     if (!r.ok && r.status !== 409) throw new Error('error ' + r.status); // 409: these exact lights were already shared
   } catch(e){ st('s2', 'Couldn’t send: ' + (e.message || e) + '. Check your internet and try again.', 'bad'); return; }
-  st('s2', 'Shared. Thank you! 🙌', 'ok'); card('c2', 'done');
+  const p1 = files['/u/app/hc/0/colr'] ? lightInfo(files['/u/app/hc/0/colr']) : null;
+  st('s2', p1 && p1.cols.length <= 1 ? `Done, thank you! 🙌 Heads up: Profile 1 is a plain color. If your ${D.edition} has its own light in the Puffco app, put it on Profile 1 and run the test again.` : 'Done. Thank you! 🙌', 'ok'); card('c2', 'done');
   card('c3', 'on'); $('uName').disabled = false; $('bClaim').disabled = false; $('uName').focus();
 }
 
