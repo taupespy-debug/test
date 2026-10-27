@@ -5195,7 +5195,7 @@ function premInfo(){
     <div style="display:grid;gap:8px">
       <div><b>⭐ Premium star</b><br><span class="muted" style="font-size:14px">Next to your name everywhere. Tap it to see what it means.</span></div>
       <div><b>🎆 Premium moods</b><br><span class="muted" style="font-size:14px">Exclusive lights for your Peak: Rich Plasma, Rich Flourish, Gold Rush and Aurora Drift.</span></div>
-      <div><b>💎 Limited edition colorways</b><br><span class="muted" style="font-size:14px">Plasma’s and Glacier’s own factory lights on any Peak Pro, plus more as we find them.</span></div>
+      <div><b>💎 Limited edition colorways</b><br><span class="muted" style="font-size:14px">Puffco’s own special edition lights (Plasma, Glacier and Flourish) on any Peak Pro, plus more as we find them.</span></div>
       <div><b>🎨 Custom banner</b><br><span class="muted" style="font-size:14px">Pick a banner for the top of your profile (Edit profile).</span></div>
       <div><b>🚀 Early access</b><br><span class="muted" style="font-size:14px">Try new features before everyone else, like the VR panel.</span></div>
       <div><b>🏅 Premium badge</b><br><span class="muted" style="font-size:14px">A legendary badge you can show off in your showcase.</span></div>
@@ -7249,6 +7249,10 @@ const MOODS = JSON.parse(document.getElementById('moodData').textContent);
 /* ---- Premium moods: exclusive light patterns for supporters (Peak and Peak Pro). Rich Plasma and Rich Flourish are Plasma's and Flourish's own
    animations recolored in Rich's purple and white; Gold Rush and Aurora Drift recolor Candle Flicker's and Hologram's ---- */
 const PREM_MOODS = [{"id":"prem-rich-plasma","name":"Rich Plasma","desc":"Plasma\u2019s own animation in Rich\u2019s purple and white. Premium only.","prem":true,"colors":["#ffffff","#ebd8ff","#a23bff","#8f0dff","#6200b5","#380067"],"lamp":{"name":"pikaled2","param":{"anim":1,"color":["#ffffff","#ebd8ff","#a23bff","#8f0dff","#6200b5","#380067","#1d0036","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#ebd8ff","#a23bff","#ab4fff","#d2a8ff","#b76dff","#a542ff","#3a006b","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019"],"plNum":0,"speed":32,"bright":255,"diFrac":1,"offset":[2214608896,2214610944,2214610944,2214604800,2214600704,2214600704,2214596608,2216691712,2216692736,2214596608,2214592512,2214593536,2214595584,2214595584,2214593536,2214592512,0,0,0,0],"plDenom":0,"colorLen":32,"speedDi0":14,"speedDi1":64}}},{"id":"prem-rich-flourish","name":"Rich Flourish","desc":"Flourish\u2019s growth animation in Rich\u2019s purple and white. Premium only.","prem":true,"colors":["#4b008a","#9d2fff","#250045","#961dff","#ecdbff"],"lamp":{"name":"pikaled2","param":{"anim":1,"color":["#480084","#480084","#500094","#7200d3","#9923ff","#b05bff","#a94cff","#8b02ff","#6200b4","#4a0088","#480084","#480084","#b260ff","#b260ff","#a745ff","#7400d6","#380067","#240044","#28004b","#460082","#8700f9","#ae57ff","#b260ff","#b260ff","#ffffff","#e1c5ff","#b971ff","#9e30ff","#9212ff","#9e30ff","#b971ff","#e1c5ff"],"plNum":0,"speed":18,"bright":255,"diFrac":0,"offset":[1929388032,1929383936,1929383936,1929388032,1929392128,1929392128,0,3211264,3670016,0,1930960896,1930960896,0,0,1125679104,1125679104,0,0,0,0],"plDenom":0,"colorLen":0,"speedDi0":3.6,"speedDi1":36}}},{"id":"prem-gold-rush","name":"Gold Rush","desc":"A warm flicker in molten gold. Premium only.","prem":true,"colors":["#ffdc68","#6e4300","#a56e00"],"lamp":{"name":"pikaled2","param":{"anim":1,"color":["#ffe99b","#ffe897","#ffde71","#ffd241","#f2c130","#eab627","#ebb828","#f6c634","#ffd64f","#ffe280","#ffde6e","#ffdb65","#e9b526","#b07600","#b97d00","#ffe899","#ffe280","#ffe17b","#f6c635","#f6c635","#c18400","#ffe99b","#ffdc6a","#cf9207","#996500","#bc8000","#fdcf3d","#ffe99e","#ffe58d","#ffe076","#ffdf72","#ffe386"],"plNum":0,"speed":9,"bright":255,"diFrac":0,"offset":[42035200,42055680,41953280,41973760,41994240,42014720,42035200,764725248,18159616,41973760,764725248,764725248,764725248,1033160704,1435875328,1435875328,0,0,0,0],"plDenom":0,"colorLen":0,"speedDi0":1.8,"speedDi1":18}}},{"id":"prem-aurora","name":"Aurora Drift","desc":"Hologram\u2019s shimmer in aurora cyan, violet and pink. Premium only.","prem":true,"colors":["#ff00d4","#7a00ff","#00e5ff"],"lamp":{"name":"pikaled2","param":{"anim":1,"color":["#00e5ff","#12c3ff","#24a1ff","#367fff","#514cff","#7508ff","#a600f1","#ce00e4","#e100de","#ff00d4","#eb00da","#d800e1","#c400e7","#ba00ea","#b000ed","#9c00f4","#8900fa","#9300f7","#7f00fd","#6c19ff","#632aff","#485dff","#367fff","#2d90ff","#1bb2ff","#09d4ff","#00e5ff","#5a3bff","#f500d7","#ba00ea","#9300f7","#3f6eff"],"plNum":0,"speed":65,"bright":255,"diFrac":0,"offset":[968189952,968210432,968108032,968128512,968148992,968169472,109144064,109113344,109113344,109082624,109057024,109169664,109057024,109169664,109169664,109164544,0,0,0,0],"plDenom":0,"colorLen":0,"speedDi0":13,"speedDi1":130}}}];
+// Flourish is a special edition colorway: only Premium, Rich, Flourish owners, or a Puffco account that has it see it
+const FLOURISH_ID = '00018E59EDJC58Y3BHWPV797DQ';
+const exclOk = x => x.id !== FLOURISH_ID || isPremium() || isRich() || S.edition === 'Flourish' || (((acct() || {}).data || {}).excl || []).some(e => e.id === x.id);
+const exclHere = () => MOODS.excl.filter(x => (!isProxy() || x.toad) && exclOk(x));
 const exclGet = id => MOODS.excl.find(x => x.id === id) || PREM_MOODS.find(x => x.id === id);
 const premMoodsHere = () => isProxy() ? [] : PREM_MOODS.map(x => ({ kind:'excl', id:x.id, name:x.name }));
 const PROXY_EDITIONS = { 0:'Onyx', 1:'Haze', 2:'Pine' }; // from the Puffco web app's product list
@@ -7324,7 +7328,7 @@ const EDITION_MOODS = [{"id":"ed-plasma","name":"Plasma","proxy":false,"speed":3
 function findMood(ref){
   if (!ref) return null;
   if (ref.kind === 'ed') return edMood(ref) ? ref : null;
-  if (ref.kind === 'excl'){ const x = exclGet(ref.id); return x && (!x.prem || isPremium()) ? ref : null; }
+  if (ref.kind === 'excl'){ const x = exclGet(ref.id); return x && (!x.prem || isPremium()) && exclOk(x) ? ref : null; }
   return ref;
 }
 /* ---- zones: official Peak LED regions (labels from Puffco's own app) ---- */
@@ -7679,7 +7683,7 @@ function rndWire(){
 function shufCfg(i){ store.shuffle = store.shuffle || {}; return store.shuffle[i] || (store.shuffle[i] = { on:false, ids:[] }); }
 const moodKey = m => m.kind === 'excl' ? 'x:' + m.id : m.kind === 'ed' ? 'e:' + m.id : m.id || (m.tag + ':' + JSON.stringify(m.meta || {}));
 // everything a profile can shuffle through: your saved moods plus the Puffco exclusives
-function shufAll(){ return allMine().map(m => Object.assign({ kind:'tpl' }, m)).concat(edMoodsHere().map(x => ({ kind:'ed', id:x.id, name:x.name })), MOODS.excl.filter(x => !isProxy() || x.toad).map(x => ({ kind:'excl', id:x.id, name:x.name })), isPremium() ? premMoodsHere() : []); }
+function shufAll(){ return allMine().map(m => Object.assign({ kind:'tpl' }, m)).concat(edMoodsHere().map(x => ({ kind:'ed', id:x.id, name:x.name })), exclHere().map(x => ({ kind:'excl', id:x.id, name:x.name })), isPremium() ? premMoodsHere() : []); }
 function shufPool(i){ const ids = shufCfg(i).ids; return shufAll().filter(m => ids.includes(moodKey(m))); }
 async function shuffleNext(i, why){
   const c = shufCfg(i); if (!c.on) return;
@@ -7724,7 +7728,7 @@ function drawMoods(){
   const box = $('#moodLib'); if (!box) return;
   const tgt = moodTarget ?? S.active;
   $('#moodTarget').innerHTML = S.profiles.map((p, i) => `<button data-mt="${i}" aria-pressed="${tgt === i}">${esc(p.name.slice(0, 7))}</button>`).join('') + `<button data-mt="lantern" aria-pressed="${tgt === 'lantern'}">Lantern</button>`;
-  const excl = MOODS.excl.filter(x => !isProxy() || x.toad).map(x => ({ kind:'excl', id:x.id, name:x.name }));
+  const excl = exclHere().map(x => ({ kind:'excl', id:x.id, name:x.name }));
   const mine = allMine().map(m => Object.assign({ kind:'tpl' }, m));
   const edm = edMoodsHere().map(x => ({ kind:'ed', id:x.id, name:x.name }));
   box.innerHTML = shufCard() + rndCard() + (edm.length ? `<div class="sgroup"><div class="label">${esc(S.edition)} edition</div><div class="moods">${edm.map((r, i) => moodTile(r, i, 'e')).join('')}</div></div>` : '') +
@@ -7739,7 +7743,7 @@ function drawMoods(){
 }
 function moodFromTile(g, i){
   if (g === 'e'){ const x = edMoodsHere()[i]; return { kind:'ed', id:x.id, name:x.name }; }
-  if (g === 'x'){ const x = MOODS.excl.filter(x => !isProxy() || x.toad)[i]; return { kind:'excl', id:x.id, name:x.name }; }
+  if (g === 'x'){ const x = exclHere()[i]; return { kind:'excl', id:x.id, name:x.name }; }
   if (g === 'p') return premMoodsHere()[i];
   return Object.assign({ kind:'tpl' }, allMine()[i]);
 }
@@ -8931,17 +8935,17 @@ function seshPremNote(force){
   if (!busy && isPremium()) setTimeout(() => { if (!document.querySelector('.egg') && !greetOpen) seshPremNote(); else seshNoteWait(n + 1); }, 2000); else setTimeout(() => seshNoteWait(n + 1), 3000); })(0);
 // Premium: a one-time heads up that the special edition colorways are in their Lights. Tap it to see them
 function edPremNote(force){
-  if (document.getElementById('edNote') || (!force && store.edNoteSeen)) return;
+  if (document.getElementById('edNote') || (!force && store.edNoteSeen2)) return;
   const el = document.createElement('div'); el.id = 'edNote'; el.className = 'dbl-note ed'; el.setAttribute('role', 'status');
-  el.innerHTML = `<b>💎</b><span><b>Premium: special edition moods</b><small>We’re adding every special edition Puffco colorway for you. Plasma and Glacier are in your Lights now. Tap to see</small></span>`;
-  document.body.appendChild(el); buzz([30, 40, 30]); store.edNoteSeen = 1; save();
+  el.innerHTML = `<b>💎</b><span><b>Premium: special edition moods</b><small>Puffco’s own special edition colorways are yours: Plasma, Glacier and Flourish are in your Lights now, more coming. Tap to see</small></span>`;
+  document.body.appendChild(el); buzz([30, 40, 30]); store.edNoteSeen2 = 1; save();
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
   const hide = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 400); };
   el.onclick = () => { hide(); show('lights'); setTimeout(() => { const g = [...document.querySelectorAll('#moodLib .label')].find(x => /Puffco exclusives/i.test(x.textContent)); if (g) g.scrollIntoView({ block:'start', behavior:'smooth' }); }, 350); };
   setTimeout(hide, 9000);
 }
 // waits for the profile (to know you're Premium) and for other banners and popups, the Group sesh one included
-(function edNoteWait(n){ if (store.edNoteSeen || n > 80) return;
+(function edNoteWait(n){ if (store.edNoteSeen2 || n > 80) return;
   const busy = greetOpen || document.getElementById('spl') || document.getElementById('dblNote') || document.getElementById('sxNote') || document.querySelector('.egg') || store.wnSeen !== WN_VER || (isPremium() && !store.seshNoteSeen);
   if (!busy && isPremium()) setTimeout(() => { if (!document.querySelector('.egg') && !greetOpen && !document.getElementById('sxNote')) edPremNote(); else edNoteWait(n + 1); }, 2500); else setTimeout(() => edNoteWait(n + 1), 3000); })(0);
 function dblNote(){
