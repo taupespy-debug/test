@@ -10390,8 +10390,27 @@ async function pathNotifTry(){
   try { N.onEvents(ev => log('EVENT ' + show(ev))); log('onEvents: listening'); } catch(e){ log('onEvents ERROR ' + e.message); }
   await call('isEnabled');
   await call('getDeviceId');
-  await call('getToken'); // the phone's notification address
   let key = ''; try { key = (await sbJSON('/functions/v1/player', { method:'POST', body: JSON.stringify({ action:'push_key' }) })).key; } catch(e){}
+  log('push key: ' + (key ? 'got it' : 'MISSING'));
+  // Path's window.pushManager: looks like standard web push, which our server already sends
+  const PM = window.pushManager;
+  if (PM){
+    const pm = async (name, ...args) => { log('… pushManager.' + name + ' waiting (up to 30s)'); try { const r = await Promise.race([Promise.resolve(PM[name](...args)), new Promise((_, no) => setTimeout(() => no(new Error('no answer in 30s')), 30000))]); log('pushManager.' + name + ' -> ' + show(r)); return r; } catch(e){ log('pushManager.' + name + ' ERROR ' + (e && (e.name ? e.name + ': ' : '') + (e.message || e))); return null; } };
+    await pm('permissionState', { userVisibleOnly:true });
+    let sub = await pm('getSubscription');
+    if (!sub && key) sub = await pm('subscribe', { userVisibleOnly:true, applicationServerKey: b64u(key) });
+    if (!sub && key) sub = await pm('subscribe', { userVisibleOnly:true, applicationServerKey: key }); // as text, in case it wants that
+    if (sub){
+      let j = null; try { j = typeof sub.toJSON === 'function' ? sub.toJSON() : null; } catch(e){}
+      if (!j || !j.endpoint){ const k = n => { try { const b = sub.getKey && sub.getKey(n); return b ? btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : null; } catch(e){ return null; } }; j = { endpoint: sub.endpoint, keys: { p256dh: k('p256dh'), auth: k('auth') } }; }
+      log('subscription: ' + show(j).slice(0, 600));
+      if (j && j.endpoint){
+        try { const r = await lbCall({ action:'push_sub', sub: j }); log('saved on the server. Test notification sent: ' + (r.sent ? 'YES, check your lock screen' : 'no (' + show(r) + ')')); }
+        catch(e){ log('saving it ERROR ' + (e.message || e) + (lbUsesPuffco() ? '' : ' (sign in to Social first)')); }
+      }
+    }
+  } else log('window.pushManager: not here');
+  await call('getToken'); // Path's other way: the phone's notification address
   if (key) await call('getToken', { vapidKey: key }); // the way Firebase web asks, with our key
   await call('status'); // asks permission. May never answer if it's already on
   log('done. Tap Copy and send it to Claude.');
