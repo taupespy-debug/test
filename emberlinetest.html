@@ -8773,7 +8773,8 @@ setTimeout(() => { if (lbUsesPuffco()) lbRestore(); }, 1500); // bring back your
 let startView = 'home';
 try { startView = sessionStorage.getItem('emberline.view') || 'home'; } catch(e){}
 view = startView;
-show(ORDER.includes(startView) ? startView : 'home');
+show('home'); // the tab you were on opens once everything has loaded: Settings and Social use parts that load further down (opening them here broke the rest of the load)
+if (ORDER.includes(startView) && startView !== 'home') setTimeout(() => show(startView), 0);
 requestAnimationFrame(gaugeLoop);
 setTimeout(ignite, 350);
 // first time using the app: ask to sign in to Puffco and sync, otherwise the usual greeting
