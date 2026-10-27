@@ -1858,6 +1858,16 @@ body.vr-on .toast{z-index:300;top:16px}
 .duel-big{font:900 56px/1.1 var(--f-round,system-ui);text-align:center;font-variant-numeric:tabular-nums}
 .duel-big.win{color:#3ddc84}.duel-big.lose{color:#ff3b4a}
 .duel-entry{background:linear-gradient(110deg,#e0313a,#ff8a2b)!important}
+.sesh-entry{background:linear-gradient(110deg,#0fa37f,#2bd9ff)!important}
+.sx-code-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-radius:16px;background:var(--fill-2)}
+.sx-code-row small{display:block;font-size:12px}.sx-code{font:800 28px/1 ui-monospace,Menlo,monospace;letter-spacing:.15em;-webkit-user-select:all;user-select:all}
+.sx-ban{display:grid;gap:2px;text-align:center;padding:12px;border-radius:16px;background:var(--fill-2)}.sx-ban b{font:800 20px var(--f-round,system-ui)}.sx-ban small{color:var(--muted);font-size:13px}
+.sx-ban.heat{background:linear-gradient(110deg,rgba(255,138,43,.25),rgba(224,49,58,.2))}.sx-ban.sesh,.sx-ban.count{background:linear-gradient(110deg,rgba(61,220,132,.25),rgba(43,217,255,.2))}
+.sx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.sx-p{display:flex;align-items:center;gap:8px;padding:10px;border-radius:16px;background:var(--fill-2);border-left:4px solid var(--pc,#888);min-width:0}
+.sx-p.you{outline:2px solid var(--pc,#888);outline-offset:-2px}.sx-p.hit{animation:sxHit 1s ease-in-out infinite}
+@keyframes sxHit{50%{box-shadow:0 0 18px var(--pc,#fff)}}
+.sx-pn{display:grid;min-width:0}.sx-pn b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.sx-pn small{color:var(--muted);font-size:12px}
 #fpills{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 100px);z-index:85;display:flex;gap:6px}
 .fpill{border:0;border-radius:99px;padding:6px 12px;font:700 13px var(--f-body,system-ui);background:#2d2d3c;color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.3);white-space:nowrap;cursor:pointer}
 .fpill.duel{background:#d8333c}
@@ -2145,6 +2155,7 @@ body.vr-on #dvFrame{display:none}
     <div class="card soc-me" id="socMe"></div>
     <button class="card ish-entry" id="ishOpen">ITEM SHOP<small>Shop · Ember Pass · Locker</small></button>
     <button class="card ish-entry duel-entry" id="duelOpen">1V1 <span class="beta-tag">BETA</span><small>2-minute matches · every second scores</small></button>
+    <button class="card ish-entry sesh-entry" id="seshOpen">GROUP SESH <span class="beta-tag">TEST</span><small>Heat up with friends and hit it together</small></button>
     <div class="card soc-find"><span class="label">Find people</span>
       <div class="soc-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" id="socQ" placeholder="Search usernames" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
       <div class="soc-list" id="socResults"></div></div>
@@ -3351,6 +3362,7 @@ function previewProfile(i){
   previewTimer = setTimeout(() => ledJob(previewClear), 5000);
 }
 /* hit timer */
+const SESH = { on:false }; // group sesh (test build), see Group sesh below
 const HIT = { on:false, start:0, last:null, hits:[], supported:null, base:0, peak:0, loop:null, inflight:false, live:0 };
 const HIT_DELAY = -250; // the sensor lags the real pull a little, so start the clock a touch early
 const HIT_MERGE = 700; // a dip shorter than this is the same hit
@@ -8377,7 +8389,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="pathnotif">Path notifications check</button><button class="btn small" data-tt="pathnotiftry">Path notifications test (asks permission)</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${Object.keys(DFX_FX).map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="pathnotif">Path notifications check</button><button class="btn small" data-tt="pathnotiftry">Path notifications test (asks permission)</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${Object.keys(DFX_FX).map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -8585,6 +8597,8 @@ $('#testTools').addEventListener('click', e => {
   if (k.startsWith('dfx:')){ const fx = DFX_FX[k.slice(4)]; if (S.mode !== 'live') return toast(`Connect your ${devWord()} first`); if (store.dfx === false) return toast('Turn Puffco effects on first (1v1 screen)'); toast(`${fx.n}: ${fx.why}`); dfx(k.slice(4), true); return; }
   if (k === 'dfxstop'){ dfxStop(); toast('Effect stopped'); return; }
   if (k === 'micchk'){ vcMicCheck(); return; }
+  if (k === 'sesh'){ seshSheet(); return; }
+  if (k === 'seshdemo'){ seshStart(null, true); seshSheet(); return; }
   if (k === 'pathnotif'){ pathNotifCheck(); return; }
   if (k === 'pathnotiftry'){ pathNotifTry(); return; }
   if (k === 'notesnow'){ notesLoad(true).then(() => toast(`${NOTE.list.length} notifications, ${NOTE.unread} unread, ${NOTE.phones} phones`)); return; }
@@ -8910,12 +8924,12 @@ class Relay {
 // keep the phone screen on while it's the bridge for a VR panel or in a 1v1 (iOS drops Bluetooth when the screen locks)
 const WAKE = { lock:null };
 async function wakeOn(){ try { if (navigator.wakeLock && !WAKE.lock && !document.hidden){ WAKE.lock = await navigator.wakeLock.request('screen'); WAKE.lock.addEventListener('release', () => { WAKE.lock = null; }); } } catch(e){} }
-function wakeOff(){ if (VRH.code || DUEL.on) return; try { WAKE.lock && WAKE.lock.release(); } catch(e){} WAKE.lock = null; }
+function wakeOff(){ if (VRH.code || DUEL.on || SESH.on) return; try { WAKE.lock && WAKE.lock.release(); } catch(e){} WAKE.lock = null; }
 document.addEventListener('visibilitychange', () => {
   if (document.hidden){ clearTimeout(LOBBY.idle); LOBBY.idle = setTimeout(() => { if (document.hidden && LOBBY.rt && !LOBBY.q && !DUEL.on){ LOBBY.rt.close(); LOBBY.rt = null; } }, 60000); return; } // in the background a minute: let the lobby go
   clearTimeout(LOBBY.idle); if (!LOBBY.rt && lobbyWanted()) lobbyOn();
-  if (VRH.code || DUEL.on) wakeOn();
-  [VRH.rt, VRP.rt, DUEL.rt, LOBBY.rt].forEach(r => r && r.wake());
+  if (VRH.code || DUEL.on || SESH.on) wakeOn();
+  [VRH.rt, VRP.rt, DUEL.rt, LOBBY.rt, SESH.rt].forEach(r => r && r.wake());
 });
 const vrMS = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 const vrDeg = (c, u) => u === 'C' ? Math.round(c) + '°C' : Math.round(c2f(c)) + '°F';
@@ -9022,11 +9036,12 @@ function vrDrawLinkUI(){
   } else setHTML(el, `<div class="row" style="gap:8px"><input type="text" id="vrCodeIn" maxlength="6" placeholder="Code from the panel" autocomplete="off" autocapitalize="characters" spellcheck="false" style="flex:1;min-width:0;text-transform:uppercase;letter-spacing:.1em"><button class="btn small primary" id="vrLinkGo">Link</button></div>`);
 }
 document.addEventListener('click', e => {
-  const t = e.target.closest && e.target.closest('#vrLinkGo, #vrUnlink, #vrOpenHere, #duelOpen'); if (!t) return;
+  const t = e.target.closest && e.target.closest('#vrLinkGo, #vrUnlink, #vrOpenHere, #duelOpen, #seshOpen'); if (!t) return;
   if (t.id === 'vrLinkGo') vrLink(($('#vrCodeIn') || {}).value);
   if (t.id === 'vrUnlink') vrUnlink();
   if (t.id === 'vrOpenHere') vrOpen();
   if (t.id === 'duelOpen') duelSheet();
+  if (t.id === 'seshOpen') seshSheet();
 });
 document.addEventListener('change', e => { if (e.target && e.target.id === 'tVrHeat'){ store.vrHeat = e.target.checked; save(); } });
 
@@ -9917,10 +9932,11 @@ function drawPills(){
   const items = [];
   if (DUEL.on && !$('.egg.duel')){ const D = DUEL, lv = D.ph === 'live', low = lv && !D.me.out && duelLeft() < 30;
     items.push(`<button class="fpill duel${low ? ' low' : ''}" data-pill="duel" style="background:linear-gradient(90deg,${duelPal().slice(0, 2).join(',')},#1a1622 45%,#1a1622 55%,${((D.op && D.op.p) || [okColor(D.op && D.op.c)]).slice(0, 2).reverse().join(',')})">${lv ? `<i>${duelPts(D.me)}</i><em>VS</em><i>${duelPts(D.op)}</i><span>${D.me.out ? 'out' : vrMS(duelTimed(D.rules) ? Math.max(0, (capAtOf(D) - Date.now()) / 1000) : duelLeft())}</span>` : D.ph === 'done' ? '1v1 · Done' : D.ph === 'count' ? '1v1 · Heating up' : '1v1 · Lobby'}</button>`); }
+  if (SESH.on && !$('.egg.sesh')) items.push(`<button class="fpill" data-pill="sesh" style="background:linear-gradient(90deg,#0fa37f,#2bd9ff)">Sesh · ${({ lobby:'Lobby', heat:'Heating up', count:'Get ready', sesh:'Hit it 🔥', done:'Done' })[SESH.ph] || ''} · ${seshParts().length}</button>`);
   if (VRH.code) items.push(`<button class="fpill" data-pill="vr">VR ${VRH.panelAt && Date.now() - VRH.panelAt < 30000 ? 'linked' : 'waiting'}</button>`);
   if (!items.length){ if (el) el.remove(); return; }
   if (!el){ el = document.createElement('div'); el.id = 'fpills'; document.body.appendChild(el);
-    el.addEventListener('click', e => { const b = e.target.closest('[data-pill]'); if (!b) return; if (b.dataset.pill === 'duel') duelSheet(); else { show('set'); setTimeout(() => { const c = $('#vrCard'); c && c.scrollIntoView({ block:'center' }); }, 300); } }); }
+    el.addEventListener('click', e => { const b = e.target.closest('[data-pill]'); if (!b) return; if (b.dataset.pill === 'duel') duelSheet(); else if (b.dataset.pill === 'sesh') seshSheet(); else { show('set'); setTimeout(() => { const c = $('#vrCard'); c && c.scrollIntoView({ block:'center' }); }, 300); } }); }
   const h = items.join(''); if (el.innerHTML !== h) el.innerHTML = h;
 }
 // the friend-game settings you picked last time
@@ -10149,9 +10165,9 @@ function lobbyOn(){
     .on('q:match', lobbyQMatch).on('q:ok', lobbyQOk)
     .on('q:no', m => { const q = LOBBY.q; if (qMe(m) && q && q.pend && q.pend.to === String(m.id)){ q.skip.set(q.pend.to, Date.now() + 15000); q.pend = null; } })
     .on('inv', lobbyInv)
-    .on('inv:no', m => { if (lobbyMe(m) && DUEL.on && DUEL.inviting && m.code === DUEL.code){ const n = DUEL.inviting.n; duelEnd(true); toast(m.busy ? `${n} is busy right now` : `${n} said not now`); duelSheet({ queue:false }); } })
+    .on('inv:no', m => { if (lobbyMe(m) && SESH.on && m.code === SESH.code){ const n = ((SOC.followingRows || []).find(r => String(r.id) === String(m.id)) || {}).username || 'Your friend'; toast(m.busy ? `${n} is busy right now` : `${n} said not now`); return; } if (lobbyMe(m) && DUEL.on && DUEL.inviting && m.code === DUEL.code){ const n = DUEL.inviting.n; duelEnd(true); toast(m.busy ? `${n} is busy right now` : `${n} said not now`); duelSheet({ queue:false }); } })
     .on('inv:x', m => { if (lobbyMe(m) && LOBBY.inv && LOBBY.inv.code === m.code) duelInvClose(); })
-    .on('on:ping', m => { if (!m.id || String(m.id) === lobbyId()) return; setTimeout(() => LOBBY.rt && LOBBY.rt.send('on:pong', { id: lobbyId(), to: m.id, busy: !!DUEL.on }), Math.random() * 1500); })
+    .on('on:ping', m => { if (!m.id || String(m.id) === lobbyId()) return; setTimeout(() => LOBBY.rt && LOBBY.rt.send('on:pong', { id: lobbyId(), to: m.id, busy: !!DUEL.on || SESH.on }), Math.random() * 1500); })
     .on('on:pong', m => { if (lobbyMe(m)){ LOBBY.online.set(String(m.id), { at: Date.now(), busy: !!m.busy }); duelMenuPaint(); } })
     .on('open', () => { if (LOBBY.q) lobbySendQ(); lobbyPing(true); duelMenuPaint(); })
     .on('down', duelMenuPaint);
@@ -10269,6 +10285,7 @@ function notesOpen(){
   document.querySelectorAll('.egg.notes').forEach(e => e.remove());
   const el = document.createElement('div'); el.className = 'egg notes'; el.style.zIndex = 230;
   const row = n => { const who = esc(n.from_name || 'Someone');
+    if (n.kind === 'invite' && seshNote(n)) return `<div class="note-row${n.read ? '' : ' new'}"><b>🔥 ${who} started a group sesh</b><small>${noteAgo(n.created_at)}</small>${noteLive(n) ? `<div class="row"><button class="btn small primary" data-nj="${n.id}">Join</button></div>` : ''}</div>`;
     if (n.kind === 'invite') return `<div class="note-row${n.read ? '' : ' new'}"><b>🔥 ${who} wants to 1v1</b><small>${noteAgo(n.created_at)}${n.data && n.data.bet ? ' · bet ' + (+n.data.bet) + ' RP' : ''}</small>
       <div class="row" style="gap:6px">${noteLive(n) ? `<button class="btn small primary" data-nj="${n.id}">Join</button>` : ''}<button class="btn small" data-nb="${esc(n.from_id || '')}" data-nn="${who}">Invite back</button></div></div>`;
     return `<div class="note-row${n.read ? '' : ' new'}"><b>👋 ${who} followed you</b><small>${noteAgo(n.created_at)}</small><div class="row"><button class="btn small" data-np="${esc(n.from_id || '')}">View profile</button></div></div>`; };
@@ -10281,7 +10298,7 @@ function notesOpen(){
   el.addEventListener('click', e => {
     if (e.target === el || e.target.closest('[data-nx]')) return shut();
     const j = e.target.closest('[data-nj]'), bk = e.target.closest('[data-nb]'), pr = e.target.closest('[data-np]');
-    if (j){ const n = NOTE.list.find(x => String(x.id) === j.dataset.nj); if (!n || !n.data || !n.data.code) return; shut(); queueLeave(); duelStart('guest', rtClean(n.data.code), duelSan(n.data.rules || {})); duelSheet(); return; }
+    if (j){ const n = NOTE.list.find(x => String(x.id) === j.dataset.nj); if (!n || !n.data || !n.data.code) return; shut(); if (seshNote(n)){ seshStart(rtClean(n.data.code)); seshSheet(); return; } queueLeave(); duelStart('guest', rtClean(n.data.code), duelSan(n.data.rules || {})); duelSheet(); return; }
     if (bk && bk.dataset.nb){ shut(); duelSheet({ queue:false }); setTimeout(() => duelInvite(bk.dataset.nb, bk.dataset.nn), 300); return; }
     if (pr && pr.dataset.np){ shut(); sbRows(`/rest/v1/players?select=${SOC_COLS}&id=eq.${pr.dataset.np}`).then(r => { if (r && r[0]) openPlayer(r[0]); }).catch(() => {}); }
   });
@@ -10360,10 +10377,219 @@ async function pathNotifCheck(){
 }
 setTimeout(() => notesLoad(), 6000); // when the app opens: missed invites and follows
 document.addEventListener('visibilitychange', () => { if (!document.hidden) notesLoad(); });
+/* ===== Group sesh (test build): friends anywhere heat up together =====
+   One code, up to 8 people, over the same relay as 1v1s (nothing saved on the server).
+   Anyone taps Heat together and every Puffco in the sesh starts heating on its own profile.
+   When everyone is Ready, all phones count 3-2-1 together and you hit at the same time.
+   Nothing here touches RP: hits count like any other session */
+const SESH_MAX = 8, SESH_WAIT = 75000; // a Puffco that won't get Ready holds the countdown up 75s at most
+const seshNote = n => !!(n && n.data && (n.data.sesh || (n.data.rules && n.data.rules.sesh)));
+const seshPeers = () => [...(SESH.peers || new Map()).values()].filter(p => Date.now() - p.at < 12000);
+const seshLeader = () => [SESH.id, ...seshPeers().map(p => p.id)].sort()[0] === SESH.id; // calls the countdown, so every phone gets the same one
+function seshMe(){ // what this phone tells the others
+  const live = S.mode === 'live', m = SESH.mine || [];
+  return { id: SESH.id, n: duelName(), a: duelAv(), c: duelColor(), live, dev: live ? devWord() : '', st: live ? S.state : 0, tc: live ? Math.round(S.tempC || 0) : 0,
+    hit: !!(live && HIT.on), hs: live && HIT.on ? Math.round((performance.now() - HIT.start) / 100) / 10 : 0, h: m.length, b: m.length ? Math.max(...m) : 0, tot: Math.round(m.reduce((a, x) => a + x, 0) * 10) / 10, ph: SESH.ph };
+}
+const seshParts = () => SESH.on ? [Object.assign(seshMe(), { me:true }), ...seshPeers()] : [];
+function seshSend(ev, p){ if (SESH.rt) SESH.rt.send(ev, Object.assign({ id: SESH.id }, p)); }
+function seshStart(code, demo){
+  if (DUEL.on) return toast('Finish your 1v1 first');
+  seshEnd(true);
+  Object.assign(SESH, { on:true, demo: !!demo, code: code || rtCode(), id: rtCode(8), ph:'lobby', peers: new Map(), mine:[], lastEnd: Date.now(), sentAt:0, sentKey:'', invited: new Set(), rt:null, pingAt:0 });
+  if (demo) seshDemoAdd();
+  else {
+    SESH.rt = new Relay('ember-sesh-' + SESH.code)
+      .on('s:hi', m => { seshOnSt(m); SESH.sentAt = 0; }) // someone new: tell them about us on the next tick
+      .on('s:st', seshOnSt)
+      .on('s:heat', m => { const p = seshSee(m); if (p) seshHeat(p.n || 'A friend'); })
+      .on('s:hit', m => { if (seshSee(m)) seshCount(); })
+      .on('s:bye', m => { const p = SESH.peers.get(m.id); if (p){ SESH.peers.delete(m.id); toast(`${p.n || 'Someone'} left the sesh`); seshDraw(); } })
+      .on('open', () => { seshSend('s:hi', seshMe()); seshDraw(); })
+      .on('down', seshDraw);
+    SESH.rt.connect();
+  }
+  clearInterval(SESH.timer); SESH.timer = setInterval(seshTick, 500);
+  wakeOn(); seshDraw(); drawPills();
+}
+function seshEnd(quiet){
+  if (SESH.rt){ const r = SESH.rt; r.send('s:bye', { id: SESH.id }); setTimeout(() => r.close(), 400); }
+  clearInterval(SESH.timer); Object.keys(SESH).forEach(k => delete SESH[k]); SESH.on = false;
+  wakeOff(); drawPills(); if (!quiet) seshDraw();
+}
+function seshSee(m){
+  if (!SESH.on || !m || !m.id || m.id === SESH.id) return null;
+  let p = SESH.peers.get(m.id);
+  if (!p){ if (seshPeers().length >= SESH_MAX - 1) return null; p = { id: m.id, h:0, b:0, tot:0 }; SESH.peers.set(m.id, p); buzz(20); toast(`${String(m.n || 'Someone').slice(0, 20)} is in the sesh`); }
+  p.at = Date.now(); if (m.n) p.n = String(m.n).slice(0, 20); if (m.c) p.c = okColor(m.c);
+  if (typeof m.a === 'string' && m.a.startsWith(SB_URL + '/storage/')) p.a = m.a.slice(0, 400);
+  return p;
+}
+function seshOnSt(m){
+  const p = seshSee(m); if (!p) return; const was = p.hit;
+  p.live = !!m.live; p.dev = String(m.dev || '').slice(0, 20); p.st = +m.st || 0; p.tc = +m.tc || 0; p.hit = !!m.hit; p.hs = +m.hs || 0;
+  if (p.hit && !was) p.hitT0 = Date.now() - p.hs * 1000;
+  p.h = Math.max(0, +m.h || 0); p.b = Math.max(0, +m.b || 0); p.tot = Math.max(0, +m.tot || 0);
+  seshDraw();
+}
+// start every Puffco in the sesh (remote: the name of whoever tapped it)
+async function seshHeat(remote){
+  const X = SESH; if (!X.on || !(X.ph === 'lobby' || X.ph === 'done')) return;
+  Object.assign(X, { ph:'heat', heatAt: Date.now(), mine:[], lastEnd: Date.now(), sentAt:0 }); X.peers.forEach(p => { p.h = 0; p.b = 0; p.tot = 0; });
+  if (!remote) seshSend('s:heat', {});
+  if (X.demo) seshDemoHeat();
+  buzz(30); seshDraw(); drawPills();
+  if (S.mode !== 'live'){ toast(`Connect your ${devWord()} to heat with everyone`); return; }
+  if (S.state >= 7 && S.state <= 9) return; // already going
+  try { BOOST.temp = 0; BOOST.time = 0; try { await ble.write('/p/app/hcs', new Uint8Array([S.active])); } catch(e){} await modeCmd(7); toast(remote ? `${remote} started the heat` : 'Heating up with everyone'); }
+  catch(e){ toast('Couldn’t start heating. Press the button on your ' + devWord()); }
+}
+function seshCount(){
+  const X = SESH; if (X.ph !== 'heat') return;
+  X.ph = 'count'; X.countAt = Date.now(); seshDraw(); drawPills();
+  [3, 2, 1].forEach((n, i) => setTimeout(() => { if (SESH.ph === 'count'){ duelSplash(String(n), 'Hit together', '#3ddc84'); buzz(40); } }, i * 1000));
+  setTimeout(() => { if (SESH.ph !== 'count') return; SESH.ph = 'sesh'; SESH.hitAt = Date.now(); duelSplash('HIT IT 🔥', 'Everyone together', '#ff8a2b'); buzz([60, 40, 60]); try { dfx('fight', true); } catch(e){} seshDraw(); drawPills(); }, 3000);
+}
+function seshTick(){
+  const X = SESH; if (!X.on) return; const now = Date.now();
+  const ends = HIT.ends || [], hs = HIT.hits || [];
+  ends.forEach((t, i) => { if (t > X.lastEnd){ if (X.ph !== 'lobby' && X.ph !== 'done' && hs[i] != null) X.mine.push(hs[i]); X.lastEnd = t; } }); // my hits this round
+  if (X.demo) seshDemoTick(now);
+  X.peers.forEach((p, k) => { if (now - p.at > 30000) X.peers.delete(k); }); // gone quiet
+  const live = seshParts().filter(p => p.live);
+  if (X.ph === 'heat'){
+    const all = live.length && live.every(p => p.st === 8), late = now - X.heatAt > SESH_WAIT;
+    if (seshLeader() && (all || (late && live.some(p => p.st === 8)))){ seshSend('s:hit', {}); seshCount(); }
+    else if (now - X.heatAt > SESH_WAIT + 10000) seshCount(); // whoever should call it is gone
+  } else if (X.ph === 'sesh'){
+    const busy = live.some(p => p.st >= 7 && p.st <= 9);
+    if ((!busy && now - X.hitAt > 8000) || now - X.hitAt > 6 * 60000){ X.ph = 'done'; buzz(20); }
+  }
+  const me = seshMe(), key = [me.live, me.st, me.hit, me.h, X.ph].join();
+  if (key !== X.sentKey || now - X.sentAt > (me.hit ? 1000 : 2500)){ X.sentKey = key; X.sentAt = now; seshSend('s:st', me); }
+  if ($('.egg.sesh') && !X.demo && lobbyWanted() && now - (X.pingAt || 0) > 20000){ X.pingAt = now; lobbyOn(); setTimeout(() => LOBBY.rt && LOBBY.rt.open && LOBBY.rt.send('on:ping', { id: lobbyId() }), 800); } // who's online, for the invite list
+  seshDraw(); drawPills();
+}
+function seshInvite(id, name){
+  if (!SESH.on || SESH.demo) return; const me = LB.me || lbStore().meCache; if (!me || !me.id) return toast('Make a ranked profile in Social to invite friends');
+  lobbyOn(); lobbyTimer();
+  LOBBY.rt.send('inv', { id: lobbyId(), to: String(id), n: duelName(), c: duelColor(), code: SESH.code, r: { sesh:1 } });
+  if (lbUsesPuffco()) lbCall({ action:'invite', kind:'sesh', target: String(id), code: SESH.code, bet:0, rules: { sesh:1 } }).catch(() => {}); // inbox + phone alert
+  SESH.invited.add(String(id)); toast(`Invited ${name || 'your friend'}`); seshFriends();
+}
+function seshInvPop(m, code){
+  if (SESH.on && SESH.code === code) return;
+  if (DUEL.on || SESH.on || LOBBY.inv){ LOBBY.rt.send('inv:no', { id: lobbyId(), to: m.id, code, busy:true }); return; }
+  LOBBY.inv = { from: String(m.id), n: String(m.n || 'Someone').slice(0, 20), code, r: m.r, at: Date.now() }; lobbyTimer();
+  const el = document.createElement('div'); el.className = 'egg dinv';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Group sesh invite" style="gap:12px"><span class="label">Group sesh</span><h2 style="margin:0">${esc(LOBBY.inv.n)} started a group sesh</h2>
+    <p>Heat up together and hit it on the same 3-2-1. You use your own heat settings.</p>
+    <div class="row" style="gap:8px;width:100%"><button class="btn" data-i="no" style="flex:1">Not now</button><button class="btn primary" data-i="ok" style="flex:1">Join</button></div></div>`;
+  document.body.appendChild(el); applyHaptics(); buzz([40, 60, 40]); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  el.addEventListener('click', e => {
+    const b = e.target.closest('[data-i]'); if (!b) return; const inv = LOBBY.inv; if (!inv) return duelInvClose();
+    if (b.dataset.i === 'no'){ LOBBY.rt.send('inv:no', { id: lobbyId(), to: inv.from, code: inv.code }); duelInvClose(); return; }
+    duelInvClose(); seshStart(inv.code); seshSheet();
+  });
+}
+/* ---- the sheet ---- */
+function seshSheet(){
+  let el = $('.egg.sesh');
+  if (!el){
+    el = document.createElement('div'); el.className = 'egg sesh';
+    el.innerHTML = '<div class="egg-card" role="dialog" aria-label="Group sesh" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto"></div>';
+    document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+    el.addEventListener('click', seshClick);
+  }
+  el.dataset.sph = ''; if (SESH.on) SESH.pingAt = 0; seshDraw(); drawPills();
+}
+function seshHide(){ const el = $('.egg.sesh'); if (!el) return; el.classList.remove('on'); setTimeout(() => { el.remove(); drawPills(); }, 260); }
+function seshSt(p){
+  if (!p.live) return 'Puffco not connected';
+  if (p.hit) return `💨 Hitting ${(p.me ? p.hs : Math.max(0, (Date.now() - (p.hitT0 || Date.now())) / 1000)).toFixed(1)}s`;
+  const d = p.tc ? ' · ' + vrDeg(p.tc, store.unit) : '';
+  return p.st === 7 ? 'Heating' + d : p.st === 8 ? 'Ready' + d : p.st === 9 ? 'Cooling down' : 'Idle';
+}
+function seshDraw(){
+  const el = $('.egg.sesh'); if (!el) return; const card = el.firstElementChild, X = SESH;
+  if (!X.on){
+    if (el.dataset.sph === 'menu') return; // don't wipe the code they're typing
+    el.dataset.sph = 'menu'; card._h = null;
+    card.innerHTML = `<span class="label" style="text-align:center">Group sesh <span class="beta-tag">TEST</span></span><h2 style="margin:0;text-align:center">Dab together, anywhere</h2>
+      <p class="muted" style="margin:0;font-size:14px;text-align:center">Up to ${SESH_MAX} friends. Everyone’s Puffco heats up on one tap, then you all hit it on the same 3-2-1.</p>
+      <button class="btn primary" data-s="new" style="width:100%">Start a sesh</button>
+      <div class="row" style="gap:8px"><input type="text" id="sxCode" placeholder="Friend’s code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" style="flex:1;min-width:0;background:var(--fill);border:0;border-radius:14px;padding:12px 14px;color:var(--fg);font:inherit;font-size:16px;text-transform:uppercase;letter-spacing:.1em"><button class="btn" data-s="join">Join</button></div>
+      <details class="dhow"><summary>How it works</summary><div class="dhow-b">
+        <div><b>1. Get everyone in</b><span>Start a sesh, then invite friends or send them the code. Pairs great with a FaceTime call.</span></div>
+        <div><b>2. Heat together</b><span>Anyone taps Heat together and every Puffco in the sesh starts heating. Everyone uses their own heat settings.</span></div>
+        <div><b>3. Hit it</b><span>When everyone is Ready, every phone counts 3-2-1 at the same time. Then hit it together and watch everyone’s hits live.</span></div>
+        <div><b>4. After</b><span>See who took the biggest hit, then go again. Your hits count like any other session.</span></div></div></details>
+      <button class="btn" data-s="x" style="width:100%">Close</button>`;
+    return;
+  }
+  if (el.dataset.sph !== 'on'){
+    el.dataset.sph = 'on';
+    card.innerHTML = `<div class="row between"><span class="label">Group sesh${X.demo ? ' · demo' : ''} <span class="beta-tag">TEST</span></span><button class="btn small ghost" data-s="x">Hide</button></div>
+      <div id="sxTop" style="display:grid;gap:8px"></div><div id="sxGrid" class="sx-grid"></div><div id="sxAct" style="display:grid;gap:8px"></div>
+      ${X.demo ? '' : '<details class="dhow" id="sxInv"><summary>Invite friends</summary><div id="sxFr" class="dfr-list" style="margin-top:8px"></div></details>'}
+      <button class="btn" data-s="leave" style="width:100%">Leave sesh</button>`;
+    seshFriends();
+  }
+  const parts = seshParts(), live = parts.filter(p => p.live), rdy = live.filter(p => p.st === 8).length, up = X.demo || (X.rt && X.rt.open);
+  const ban = !up ? '<b>Connecting…</b><small>Hang on a sec</small>'
+    : X.ph === 'lobby' ? `<b>${parts.length} in the sesh</b><small>${parts.length < 2 ? 'Invite friends or send them the code' : 'Tap Heat together when everyone’s here'}</small>`
+    : X.ph === 'heat' ? `<b>Heating up · ${rdy}/${live.length} Ready</b><small>When everyone’s Ready you all get a 3-2-1</small>`
+    : X.ph === 'count' ? '<b>Get ready…</b><small>Hit it on the count</small>'
+    : X.ph === 'sesh' ? `<b>Hit it! 🔥</b><small>${vrMS((Date.now() - X.hitAt) / 1000)} into the sesh</small>`
+    : '<b>Sesh done</b><small>Heat together again whenever you’re ready</small>';
+  setHTML($('#sxTop'), `<div class="sx-code-row"><div><small class="muted">Code</small><b class="sx-code">${esc(X.code)}</b></div>${X.demo ? '' : '<button class="btn small" data-s="copy">Copy</button>'}</div><div class="sx-ban ${X.ph}">${ban}</div>`);
+  const done = X.ph === 'done', big = Math.max(0, ...parts.map(p => p.b || 0));
+  const list = done ? parts.slice().sort((a, b) => (b.tot || 0) - (a.tot || 0)) : parts;
+  setHTML($('#sxGrid'), list.map(p => `<div class="sx-p${p.hit ? ' hit' : ''}${p.me ? ' you' : ''}" style="--pc:${okColor(p.c)}">${lbAvatar(p.a, p.n, 40)}<div class="sx-pn"><b>${done && big && p.b === big ? '👑 ' : ''}${esc(p.n || 'Player')}${p.me ? ' (you)' : ''}</b><small>${done ? `${p.tot || 0}s total` : esc(seshSt(p))}</small>${X.ph === 'sesh' || done ? `<small>${p.h || 0} hit${p.h === 1 ? '' : 's'}${p.b ? ' · best ' + p.b + 's' : ''}</small>` : ''}</div></div>`).join(''));
+  setHTML($('#sxAct'), X.ph === 'lobby' || done ? `<button class="btn primary" data-s="heat" style="width:100%">🔥 ${done ? 'Heat together again' : 'Heat together'}</button><span class="muted" style="font-size:12px;text-align:center">Starts every Puffco in the sesh</span>`
+    : X.ph === 'heat' ? '<button class="btn" data-s="stop" style="width:100%">Stop my heat</button>' : '');
+  seshFriends();
+}
+function seshFriends(){
+  const fr = $('#sxFr'); if (!fr || !SESH.on) return; const me = LB.me || lbStore().meCache, now = Date.now();
+  if (!me || !me.username) return setHTML(fr, '<p class="muted" style="margin:0;font-size:13px">Make a ranked profile in Social to invite friends. Anyone can still join with the code.</p>');
+  if (!SOC.loaded){ if (!seshFriends.loading){ seshFriends.loading = true; socLoad().catch(() => {}).finally(() => { seshFriends.loading = false; seshFriends(); }); } return setHTML(fr, '<p class="muted" style="margin:0;font-size:13px">Loading your friends…</p>'); }
+  const fs = SOC.followerSet || new Set(), on = id => { const o = LOBBY.online.get(String(id)); return o && now - o.at < 60000 ? o : null; };
+  const rows = (SOC.followingRows || []).filter(r => !r.banned && r.id !== me.id && fs.has(r.id)).sort((a, b) => (!!on(b.id) - !!on(a.id)) || String(a.username).localeCompare(String(b.username)));
+  setHTML(fr, rows.length ? rows.slice(0, 30).map(r => { const o = on(r.id), sent = SESH.invited.has(String(r.id));
+    return `<div class="dfr-row">${lbAvatar(r.avatar_url, r.username, 36)}<span class="dfr-name"><b>${esc(r.username)}</b><small><i class="dfr-dot${o ? o.busy ? ' busy' : ' on' : ''}"></i>${o ? o.busy ? 'Busy' : 'Online' : 'Offline'}</small></span><button class="btn small${o && !o.busy && !sent ? ' primary' : ''}" data-s="inv" data-id="${esc(String(r.id))}" data-n="${esc(r.username)}">${sent ? 'Invited' : 'Invite'}</button></div>`; }).join('')
+    : '<p class="muted" style="margin:0;font-size:13px">No friends yet. Friends are people you follow who follow you back. Anyone can join with the code.</p>');
+}
+async function seshClick(e){
+  if (e.target === $('.egg.sesh')) return seshHide();
+  const b = e.target.closest('[data-s]'); if (!b) return; const k = b.dataset.s;
+  if (k === 'x') return seshHide();
+  if (k === 'new') return seshStart();
+  if (k === 'join'){ const c = rtClean(($('#sxCode') || {}).value); if (c.length !== 6) return toast('Codes are 6 letters and numbers'); return seshStart(c); }
+  if (k === 'copy'){ try { await navigator.clipboard.writeText(SESH.code); toast('Code copied'); } catch(_){ toast('Code: ' + SESH.code); } return; }
+  if (k === 'heat') return seshHeat();
+  if (k === 'stop'){ try { await modeCmd(8); } catch(_){} return; }
+  if (k === 'leave') return seshEnd();
+  if (k === 'inv') return seshInvite(b.dataset.id, b.dataset.n);
+}
+/* ---- test tools: a sesh with three fake friends, to try it alone ---- */
+const SESH_FAKE = [['Kingo', '#2bd9ff', 'Peak Pro'], ['ooobabyatriple', '#ff5ec8', 'Peak Pro'], ['Tokin’ Stoner Friend', '#ffd23f', 'Proxy']];
+function seshDemoAdd(){ SESH_FAKE.forEach(([n, c, dev], i) => SESH.peers.set('zz' + i, { id:'zz' + i, n, c, a:'', live:true, dev, st:5, tc:22, h:0, b:0, tot:0, at: Date.now() })); }
+function seshDemoHeat(){ SESH.peers.forEach(p => Object.assign(p, { st:7, tc:25, rdyAt: Date.now() + 5000 + Math.random() * 9000, h:0, b:0, tot:0, hit:false, next:0, lag: Math.random() * 1800 })); }
+function seshDemoTick(now){
+  SESH.peers.forEach(p => {
+    p.at = now;
+    if (p.st === 7){ p.tc = Math.min(p.tc + 12, 268); if (now >= p.rdyAt){ p.st = 8; p.tc = 271; } }
+    if (SESH.ph !== 'sesh' || p.st !== 8) return;
+    if (p.hit){ if (now >= p.hitEnd){ const s = Math.round((p.hitEnd - p.hitT0) / 100) / 10; Object.assign(p, { hit:false, h: p.h + 1, b: Math.max(p.b, s), tot: Math.round((p.tot + s) * 10) / 10, next: now + 3000 + Math.random() * 6000 }); } }
+    else if (now >= (p.next || SESH.hitAt + p.lag)){ if (now - SESH.hitAt > 30000){ p.st = 5; p.tc = 60; } else Object.assign(p, { hit:true, hitT0: now, hitEnd: now + 2000 + Math.random() * 8000 }); }
+  });
+}
 function lobbyInv(m){
   if (!lobbyMe(m) || !m.id || !duelAllowed()) return;
   const code = rtClean(m.code); if (code.length !== 6) return;
-  if (DUEL.on || LOBBY.inv){ LOBBY.rt.send('inv:no', { id: lobbyId(), to: m.id, code, busy:true }); return; }
+  if (m.r && m.r.sesh) return seshInvPop(m, code);
+  if (DUEL.on || SESH.on || LOBBY.inv){ LOBBY.rt.send('inv:no', { id: lobbyId(), to: m.id, code, busy:true }); return; }
   LOBBY.inv = { from: String(m.id), n: String(m.n || 'Someone').slice(0, 20), code, r: m.r || {}, at: Date.now() }; lobbyTimer();
   const r = LOBBY.inv.r, el = document.createElement('div'); el.className = 'egg dinv';
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="1v1 invite" style="gap:12px"><span class="label">1v1</span><h2 style="margin:0">${esc(LOBBY.inv.n)} wants to 1v1</h2>
