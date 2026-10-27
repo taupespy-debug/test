@@ -5102,7 +5102,9 @@ async function lbPush(force){
   LB.lastPush = Date.now();
   try { const pl = lbPayload(), r = await lbCall(pl); store.rpSent = { month: pl.month, id: acctId() || 'local', rp: pl.rp }; if (r && r.player){ LB.me = r.player; lbStore().meCache = r.player; save(); } } catch(e){}
 }
-async function lbLoad(){
+async function lbLoad(force){
+  if (!force && LB.rows && Date.now() - (LB.loadedAt || 0) < 60000) return drawLeaderboard(); // switching tabs: use the list from under a minute ago (every request is a Supabase log line)
+  LB.loadedAt = Date.now();
   try {
     LB.rows = await sbRows(`/rest/v1/players?select=*&month=eq.${lbMonth()}&banned=not.is.true&order=rp.desc,updated_at.asc&limit=1000`); // banned players don't show
     lbMarkSeen(LB.rows);
@@ -6200,13 +6202,15 @@ function drawBadgeBook(){
 }
 /* ===================== SOCIAL: profiles, bios, follows, search ===================== */
 const SOC = { following: new Set(), followers: [], followingRows: [], results: null, q: '', loaded: false };
+const SOC_CNT = new Map(); // follower counts from under a minute ago
 async function socCounts(pid){
+  const c = SOC_CNT.get(pid); if (c && Date.now() - c.at < 60000) return c.v;
   try {
     const [a, b] = await Promise.all([
       sbJSON(`/rest/v1/follows?select=follower&followee=eq.${pid}&limit=2000`, { method:'GET' }),
       sbJSON(`/rest/v1/follows?select=followee&follower=eq.${pid}&limit=2000`, { method:'GET' })
     ]);
-    return { followers: a.length, following: b.length, followerIds: a.map(x => x.follower), followingIds: b.map(x => x.followee) };
+    const v = { followers: a.length, following: b.length, followerIds: a.map(x => x.follower), followingIds: b.map(x => x.followee) }; SOC_CNT.set(pid, { at: Date.now(), v }); return v;
   } catch(e){ return { followers: 0, following: 0, followerIds: [], followingIds: [] }; }
 }
 const SOC_COLS = '*'; // everything public about a player (includes gear once the column exists)
@@ -6243,6 +6247,7 @@ function socSetMyCounts(){
 }
 async function socToggleFollow(r){
   if (!LB.me || !LB.me.id || r.id === LB.me.id) return;
+  SOC_CNT.delete(r.id); SOC_CNT.delete(LB.me.id); // counts change
   const was = SOC.following.has(r.id);
   if (was) SOC.following.delete(r.id); else SOC.following.add(r.id); // flip right away, undo if the server says no
   socPaintFollow(r.id);
@@ -6694,7 +6699,7 @@ async function lbSave(){
     if (code && r.player && !r.player.referred_by){ delete store.inviteRef; save(); toast('Couldn’t find a player called ' + code + '. You can add the code later from Squad Up.'); }
     else toast(wasJoined ? 'Profile saved' : 'You’re on the leaderboard');
     if (!wasJoined) setTimeout(keepOpenNotice, 700);
-    LB.busy = false; lbLoad();
+    LB.busy = false; lbLoad(true);
   } catch(e){ LB.busy = false; LB.err = e.code === 'puffco_blocked' ? e.message : (LB_ERRS[e.code] || (/load failed|failed to fetch|network/i.test(e.message) ? 'Couldn’t reach the leaderboard server.' : 'Couldn’t save: ' + e.message)); drawLeaderboard(); }
 }
 document.addEventListener('click', e => {
@@ -6740,7 +6745,7 @@ function lbStart(){ // called when Stats opens: load now, refresh every 30s whil
   if (lbUsesPuffco() && !LB.me){ lbRestore(); } else if (lbStore().joined && !LB.me) lbCall({ action:'me' }).then(r => { LB.me = r.player; if (r.player){ lbStore().dev = !!r.player.dev; if (r.player.username) lbStore().username = r.player.username; lbStore().meCache = r.player; save(); } drawLeaderboard(); try { drawRank(); drawSocial(); } catch(e){} }).catch(() => {});
   lbPush(); lbLoad();
   clearInterval(LB.timer);
-  LB.timer = setInterval(() => { if (view !== 'stats' && view !== 'social'){ clearInterval(LB.timer); return; } if (!document.hidden) lbLoad(); }, 180000); // every 3 min: each reload downloads every player, which used up the Supabase free data allowance at 30s
+  LB.timer = setInterval(() => { if (view !== 'stats' && view !== 'social'){ clearInterval(LB.timer); return; } if (!document.hidden) lbLoad(true); }, 180000); // every 3 min: each reload downloads every player, which used up the Supabase free data allowance at 30s
 }
 
 function drawStats(){
@@ -8891,7 +8896,8 @@ const WAKE = { lock:null };
 async function wakeOn(){ try { if (navigator.wakeLock && !WAKE.lock && !document.hidden){ WAKE.lock = await navigator.wakeLock.request('screen'); WAKE.lock.addEventListener('release', () => { WAKE.lock = null; }); } } catch(e){} }
 function wakeOff(){ if (VRH.code || DUEL.on) return; try { WAKE.lock && WAKE.lock.release(); } catch(e){} WAKE.lock = null; }
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) return;
+  if (document.hidden){ clearTimeout(LOBBY.idle); LOBBY.idle = setTimeout(() => { if (document.hidden && LOBBY.rt && !LOBBY.q && !DUEL.on){ LOBBY.rt.close(); LOBBY.rt = null; } }, 60000); return; } // in the background a minute: let the lobby go
+  clearTimeout(LOBBY.idle); if (!LOBBY.rt && lobbyWanted()) lobbyOn();
   if (VRH.code || DUEL.on) wakeOn();
   [VRH.rt, VRP.rt, DUEL.rt, LOBBY.rt].forEach(r => r && r.wake());
 });
@@ -9835,7 +9841,7 @@ function duelFinish(res, why, sc, quit){
   if (D.rules.bet && res !== 'draw') rec.rp = (rec.rp || 0) + (res === 'win' ? D.rules.bet : -D.rules.bet);
   // real RP: not for practice, and not for a win because the other player just left (they never pay, so nobody gets paid)
   const leftOnly = res === 'win' && D.op && D.op.gone && !D.op.quit;
-  if (DUEL_RP_REAL && !D.bot && D.rules.bet && res !== 'draw' && !leftOnly){ D.res.real = true; D.res.paid = res === 'win' ? Math.min(D.rules.bet, duelDayLeft()) : Math.min(D.rules.bet, myRpNow()); D.res.capped = res === 'win' && D.res.paid < D.rules.bet; const n = res === 'win' ? D.res.paid : -D.res.paid; D.res.rpFrom = myRpNow(); if (n){ duelDayAdd(n); duelRpAdd(n); } D.res.rpTo = myRpNow(); if (D.res.capped) setTimeout(() => duelCapPop(), 1800); setTimeout(() => { try { drawRank(); lbPush(true).then(() => { lbLoad(); drawRank(); }).catch(() => {}); } catch(e){} }, 400); } // send it now and reload the board so the new RP shows everywhere
+  if (DUEL_RP_REAL && !D.bot && D.rules.bet && res !== 'draw' && !leftOnly){ D.res.real = true; D.res.paid = res === 'win' ? Math.min(D.rules.bet, duelDayLeft()) : Math.min(D.rules.bet, myRpNow()); D.res.capped = res === 'win' && D.res.paid < D.rules.bet; const n = res === 'win' ? D.res.paid : -D.res.paid; D.res.rpFrom = myRpNow(); if (n){ duelDayAdd(n); duelRpAdd(n); } D.res.rpTo = myRpNow(); if (D.res.capped) setTimeout(() => duelCapPop(), 1800); setTimeout(() => { try { drawRank(); lbPush(true).then(() => { lbLoad(true); drawRank(); }).catch(() => {}); } catch(e){} }, 400); } // send it now and reload the board so the new RP shows everywhere
   const op = D.op || {}, pick = o => ({ h: o.h || 0, b: o.b || 0, bl: o.bl || 0, tot: Math.round((o.tot || 0) * 10) / 10, out: o.out || 0 });
   (store.duelHist = store.duelHist || []).unshift({ t: D.start || D.made || now, end: now, op: op.n || 'Player', bot: !!D.bot, r: res, why, quit: !!quit, opQuit: !!op.quit,
     sc: sc ? [sc.a, sc.b] : null, bet: D.rules.bet || 0, me: pick(D.me), them: pick(op), rules: { min: D.rules.min, win: D.rules.win, cap: D.rules.cap } });
@@ -10234,7 +10240,8 @@ function lobbyInv(m){
   });
 }
 function duelInvClose(){ LOBBY.inv = null; const el = $('.egg.dinv'); if (!el) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); }
-(function lobbyBoot(n){ duelGate(); if (duelAllowed()){ if (!document.hidden) lobbyOn(); return; } if (n < 20) setTimeout(() => lobbyBoot(n + 1), 15000); })(0); // in the lobby while the app is open, so friends' invites reach you (waits for the profile to load)
+const lobbyWanted = () => duelAllowed() && !!lbStore().joined; // invites only reach players with a profile, so guests don't hold a connection
+(function lobbyBoot(n){ duelGate(); if (lobbyWanted()){ if (!document.hidden) lobbyOn(); return; } if (n < 20) setTimeout(() => lobbyBoot(n + 1), 15000); })(0); // in the lobby while the app is open, so friends' invites reach you (waits for the profile to load)
 // Rich's personal moods: put in his My moods once (Spin works on both the Peak and the Proxy). Delete one and it stays gone
 const RICH_MOODS = [{ id:'rich-spin', name:'Rich Spin', tag:'pikaled2-spin-mood-light', meta:{ userColors:['#8a00ff', '#ffffff', '#8a00ff', '#ffffff'], tempoFrac:.62, dynamicInhale:0 } }];
 function richMoods(n){
