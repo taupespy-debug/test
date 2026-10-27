@@ -2180,6 +2180,7 @@ body.vr-on #dvFrame{display:none}
     <h1 class="largetitle" id="setTitle">Settings</h1>
     <div class="card" style="display:grid;gap:10px;border:1px dashed var(--accent)">
       <span class="label">Test build tools</span>
+      <button class="btn small primary" id="tbNotif">🔔 Notifications test (run this one)</button>
       <button class="btn small" id="tbKeepOpen">Show "Keep Emberline open" popup</button>
       <button class="btn small primary" id="tbProxyLab">Proxy test section</button>
       <button class="btn small" id="tbInspect">Device inspector (connect first)</button>
@@ -6454,7 +6455,7 @@ function keepOpenNotice(){
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
   el.querySelector('#koOk').onclick = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
 }
-setTimeout(() => { const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; const pl = $('#tbProxyLab'); if (pl) pl.onclick = proxyLab; const ct = $('#tbColorTest'); if (ct) ct.onclick = colorTest; const mt = $('#tbMoodTest'); if (mt) mt.onclick = moodTest; const ih = $('#tbInhale'); if (ih) ih.onclick = inhaleTest; const wn = $('#tbWhatsNew'); if (wn) wn.onclick = () => whatsNew(true); const ll = $('#tbLightLab'); if (ll) ll.onclick = lightLab; const es = $('#tbEdShare'); if (es) es.onclick = () => { if (S.mode !== 'live') return toast('Connect first'); if (!edIsLimited()) return toast(`${S.edition || 'This device'} is not a limited edition`); edShareAsk(true); }; }, 0);
+setTimeout(() => { const nb = $('#tbNotif'); if (nb) nb.onclick = () => pathNotifTry(); const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; const pl = $('#tbProxyLab'); if (pl) pl.onclick = proxyLab; const ct = $('#tbColorTest'); if (ct) ct.onclick = colorTest; const mt = $('#tbMoodTest'); if (mt) mt.onclick = moodTest; const ih = $('#tbInhale'); if (ih) ih.onclick = inhaleTest; const wn = $('#tbWhatsNew'); if (wn) wn.onclick = () => whatsNew(true); const ll = $('#tbLightLab'); if (ll) ll.onclick = lightLab; const es = $('#tbEdShare'); if (es) es.onclick = () => { if (S.mode !== 'live') return toast('Connect first'); if (!edIsLimited()) return toast(`${S.edition || 'This device'} is not a limited edition`); edShareAsk(true); }; }, 0);
 // test build: one place to check everything on a Proxy, with live raw readings
 function proxyLab(){
   if (document.querySelector('.plab')) return;
