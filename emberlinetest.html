@@ -1107,7 +1107,7 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:non
 .soc-id > b{font-size:21px;display:flex;align-items:center;gap:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .soc-counts{display:flex;gap:14px;font-size:14px;color:var(--muted)}
 .soc-counts b,.lbp-head .soc-counts b,.soc-id .soc-counts b{display:inline;font-size:15px;color:var(--fg);font-variant-numeric:tabular-nums;font-weight:700}
-.soc-counts span{white-space:nowrap}
+.soc-counts span{white-space:nowrap}.soc-counts [data-flist]{cursor:pointer;border-radius:8px;padding:2px 4px;margin:-2px -4px}.soc-counts [data-flist]:active{background:var(--fill)}
 .lbp-head .soc-counts{justify-content:center;margin-top:2px}
 .gear{display:grid;gap:6px}
 .lbp .gear{justify-items:center}
@@ -5321,7 +5321,7 @@ function openPlayer(r){
   const sc = r.showcase || [], meId = LB.me && LB.me.id, isMe = r.id === meId;
   el.innerHTML = `<div class="wl-card lbp"><div class="row between"><span class="label">Profile</span><button class="btn small ghost" id="lbpClose">Close</button></div>
     <div class="lbp-head">${isRichId(r.id) ? devFramed(lbAvatar(r.avatar_url, r.username, 96), 96, true) : isMe ? framed(lbAvatar(r.avatar_url, r.username, 96), 96, myFrame(), true) : lbAvatar(r.avatar_url, r.username, 96)}<b class="lbp-name" data-pstats role="button" tabindex="0">${esc(r.username)}${r.dev ? devBadge(26) : ''}${isPremRow(r) ? premStar(24) : ''}<svg class="lbp-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
-      <div class="soc-counts"><span><b data-cnt="followers">–</b> followers</span><span><b data-cnt="following">–</b> following</span></div></div>
+      <div class="soc-counts"><span data-flist="followers" data-pid="${esc(String(r.id))}" data-n="${esc(r.username)}" role="button" tabindex="0"><b data-cnt="followers">–</b> followers</span><span data-flist="following" data-pid="${esc(String(r.id))}" data-n="${esc(r.username)}" role="button" tabindex="0"><b data-cnt="following">–</b> following</span></div></div>
     <div class="lbp-stats" id="lbpStats" hidden></div>
     ${r.bio ? `<p class="soc-bio">${esc(r.bio)}</p>` : ''}
     <div id="lbpGear">${gearHtml(isMe ? myGear() : r.gear, true)}</div>
@@ -6274,6 +6274,32 @@ function socPaintFollow(id){
   });
 }
 function socPaintAllFollow(){ new Set([...document.querySelectorAll('[data-follow]')].map(b => b.dataset.follow)).forEach(socPaintFollow); }
+// anyone's followers or following (tap the numbers on a profile): tap a person to open them, Follow right from the list
+async function socListOpen(pid, kind, name){
+  if (!pid) return;
+  document.querySelectorAll('.egg.flist').forEach(e => e.remove());
+  const el = document.createElement('div'); el.className = 'egg flist'; el.style.zIndex = 260;
+  const title = kind === 'followers' ? 'Followers' : 'Following';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="${title}" style="text-align:left;justify-items:stretch;gap:10px;max-height:80vh;display:grid;grid-template-rows:auto minmax(0,1fr)"><div class="row between"><h2 style="margin:0;font-size:20px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name ? esc(name) + ' · ' : ''}${title}</h2><button class="btn small ghost" data-fx>Close</button></div>
+    <div class="soc-list" style="overflow:auto;-webkit-overflow-scrolling:touch;display:grid;gap:6px;align-content:start"><p class="muted" style="margin:0">Loading…</p></div></div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  let rows = [];
+  el.addEventListener('click', async e => {
+    e.stopPropagation(); // the page's own row and Follow taps don't know these rows
+    if (e.target === el || e.target.closest('[data-fx]')) return shut();
+    const f = e.target.closest('[data-follow]'); if (f){ const r = rows.find(x => x.id === f.dataset.follow); if (r) await socToggleFollow(r); return; }
+    const row = e.target.closest('[data-soc]'); if (row){ const r = rows.find(x => x.id === row.dataset.soc); if (r){ shut(); openPlayer(r); } }
+  });
+  SOC_CNT.delete(pid); // fresh list
+  const c = await socCounts(pid), ids = kind === 'followers' ? c.followerIds : c.followingIds;
+  rows = (await socPlayers(ids)).filter(r => !r.banned).sort((a, b) => (b.rp || 0) - (a.rp || 0) || String(a.username).localeCompare(String(b.username)));
+  const list = el.querySelector('.soc-list'); if (!list) return;
+  list.innerHTML = rows.length ? rows.map(socRow).join('') + (ids.length > 200 ? `<p class="muted" style="margin:0;font-size:12px">Showing the top 200 of ${ids.length}</p>` : '')
+    : `<p class="muted" style="margin:0">${kind === 'followers' ? 'No followers yet.' : 'Not following anyone yet.'}</p>`;
+  socPaintAllFollow(); applyHaptics();
+}
+document.addEventListener('click', e => { const t = e.target.closest && e.target.closest('[data-flist]'); if (t) socListOpen(t.dataset.pid, t.dataset.flist, t.dataset.n || ''); });
 function socSetMyCounts(){
   const c = SOC.myCounts; if (!c) return;
   document.querySelectorAll('#socMe [data-cnt]').forEach(b => { const v = c[b.dataset.cnt]; if (v != null && b.textContent !== String(v)) b.textContent = v; });
@@ -6331,7 +6357,7 @@ function drawSocial(){
     const rich = isRichId(me.id), pb = !rich && !myBanner() && premBannerOf(me), hasB = rich || !!myBanner() || !!pb; meEl.classList.toggle('has-bnr', hasB);
     setHTML(meEl, `${rich ? richBannerHtml() : pb ? premBannerHtml(pb) : bannerHtml(myBanner(), true)}<div class="soc-head" style="${hasB ? 'margin-top:44px' : ''}">${rich ? devFramed(lbAvatar(me.avatar_url, me.username, 72), 72, true) : framed(lbAvatar(me.avatar_url, me.username, 72), 72, myFrame(), true)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}${isPremRow(me) ? premStar(20) : ''}</b>
         <span class="muted"><span style="color:${lbTierColor(myRank().tier.n)};font-weight:700">${myRank().tier.n}</span> · ${myRank().rp} RP</span>
-        <div class="soc-counts"><span><b data-cnt="followers">${c ? c.followers : '–'}</b> followers</span><span><b data-cnt="following">${c ? c.following : '–'}</b> following</span></div></div></div>
+        <div class="soc-counts"><span data-flist="followers" data-pid="${esc(String(me.id))}" role="button" tabindex="0"><b data-cnt="followers">${c ? c.followers : '–'}</b> followers</span><span data-flist="following" data-pid="${esc(String(me.id))}" role="button" tabindex="0"><b data-cnt="following">${c ? c.following : '–'}</b> following</span></div></div></div>
       ${me.bio ? `<p class="soc-bio">${esc(me.bio)}</p>` : '<p class="muted" style="margin:0;font-size:14px">No bio yet.</p>'}
       ${gearHtml(myGear())}
       ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, { tier: myRank().tier.n })}">${showBadge(k, undefined, { tier: myRank().tier.n })}<span>${esc(showName(k, { tier: myRank().tier.n }))}</span></div>`).join('')}</div>` : ''}
