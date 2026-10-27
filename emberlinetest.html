@@ -2155,7 +2155,7 @@ body.vr-on #dvFrame{display:none}
     <div class="card soc-me" id="socMe"></div>
     <button class="card ish-entry" id="ishOpen">ITEM SHOP<small>Shop · Ember Pass · Locker</small></button>
     <button class="card ish-entry duel-entry" id="duelOpen">1V1 <span class="beta-tag">BETA</span><small>2-minute matches · every second scores</small></button>
-    <button class="card ish-entry sesh-entry" id="seshOpen">GROUP SESH <span class="beta-tag">TEST</span><small>Heat up with friends and hit it together</small></button>
+    <button class="card ish-entry sesh-entry" id="seshOpen">GROUP SESH <span class="beta-tag">BETA</span><small>Heat up with friends and hit it together</small></button>
     <div class="card soc-find"><span class="label">Find people</span>
       <div class="soc-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" id="socQ" placeholder="Search usernames" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
       <div class="soc-list" id="socResults"></div></div>
@@ -10463,12 +10463,23 @@ function seshTick(){
     else if (now - X.heatAt > SESH_WAIT + 10000) seshCount(); // whoever should call it is gone
   } else if (X.ph === 'sesh'){
     const busy = live.some(p => p.st >= 7 && p.st <= 9);
-    if ((!busy && now - X.hitAt > 8000) || now - X.hitAt > 6 * 60000){ X.ph = 'done'; buzz(20); }
+    if ((!busy && now - X.hitAt > 8000) || now - X.hitAt > 6 * 60000){ X.ph = 'done'; buzz(20); seshBonus(); }
   }
   const me = seshMe(), key = [me.live, me.st, me.hit, me.h, X.ph].join();
   if (key !== X.sentKey || now - X.sentAt > (me.hit ? 1000 : 2500)){ X.sentKey = key; X.sentAt = now; seshSend('s:st', me); }
   if ($('.egg.sesh') && !X.demo && lobbyWanted() && now - (X.pingAt || 0) > 20000){ X.pingAt = now; lobbyOn(); setTimeout(() => LOBBY.rt && LOBBY.rt.open && LOBBY.rt.send('on:ping', { id: lobbyId() }), 800); } // who's online, for the invite list
   seshDraw(); drawPills();
+}
+// beta week: +10 RP for a sesh with at least one friend (you both took a hit), 3 a day. The test build never counts it
+const SESH_BONUS = 10, SESH_BONUS_DAY = 3, SESH_BONUS_END = new Date(2026, 10, 3).getTime(); // through Nov 2
+const seshBonusOn = () => Date.now() < SESH_BONUS_END;
+function seshBonusLeft(){ const b = store.seshBonus; return SESH_BONUS_DAY - (b && b.d === dayKey() && b.id === (acctId() || 'local') ? +b.n || 0 : 0); }
+function seshBonus(){
+  const X = SESH; X.bonus = 0;
+  if (X.demo || !seshBonusOn() || S.mode !== 'live' || !(X.mine || []).length || !seshPeers().some(p => p.live && p.h > 0) || seshBonusLeft() <= 0) return;
+  store.seshBonus = { d: dayKey(), id: acctId() || 'local', n: SESH_BONUS_DAY - seshBonusLeft() + 1 }; X.bonus = SESH_BONUS;
+  if (IS_TEST){ save(); toast(`+${SESH_BONUS} RP sesh bonus (test build: not counted)`); return; }
+  duelRpAdd(SESH_BONUS); toast(`+${SESH_BONUS} RP group sesh bonus 🔥`); try { drawRank(); } catch(e){} try { lbPush(true); } catch(e){}
 }
 function seshInvite(id, name){
   if (!SESH.on || SESH.demo) return; const me = LB.me || lbStore().meCache; if (!me || !me.id) return toast('Make a ranked profile in Social to invite friends');
@@ -10515,21 +10526,22 @@ function seshDraw(){
   if (!X.on){
     if (el.dataset.sph === 'menu') return; // don't wipe the code they're typing
     el.dataset.sph = 'menu'; card._h = null;
-    card.innerHTML = `<span class="label" style="text-align:center">Group sesh <span class="beta-tag">TEST</span></span><h2 style="margin:0;text-align:center">Dab together, anywhere</h2>
+    card.innerHTML = `<span class="label" style="text-align:center">Group sesh <span class="beta-tag">BETA</span></span><h2 style="margin:0;text-align:center">Dab together, anywhere</h2>
       <p class="muted" style="margin:0;font-size:14px;text-align:center">Up to ${SESH_MAX} friends. Everyone’s Puffco heats up on one tap, then you all hit it on the same 3-2-1.</p>
+      ${seshBonusOn() ? `<p style="margin:0;font-size:13px;text-align:center;color:#ffd23f;font-weight:700">Beta week: +${SESH_BONUS} RP for every sesh with a friend (${SESH_BONUS_DAY} a day, until Nov 2)</p>` : ''}
       <button class="btn primary" data-s="new" style="width:100%">Start a sesh</button>
       <div class="row" style="gap:8px"><input type="text" id="sxCode" placeholder="Friend’s code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" style="flex:1;min-width:0;background:var(--fill);border:0;border-radius:14px;padding:12px 14px;color:var(--fg);font:inherit;font-size:16px;text-transform:uppercase;letter-spacing:.1em"><button class="btn" data-s="join">Join</button></div>
       <details class="dhow"><summary>How it works</summary><div class="dhow-b">
         <div><b>1. Get everyone in</b><span>Start a sesh, then invite friends or send them the code. Pairs great with a FaceTime call.</span></div>
         <div><b>2. Heat together</b><span>Anyone taps Heat together and every Puffco in the sesh starts heating. Everyone uses their own heat settings.</span></div>
         <div><b>3. Hit it</b><span>When everyone is Ready, every phone counts 3-2-1 at the same time. Then hit it together and watch everyone’s hits live.</span></div>
-        <div><b>4. After</b><span>See who took the biggest hit, then go again. Your hits count like any other session.</span></div></div></details>
+        <div><b>4. After</b><span>See who took the biggest hit, then go again. Your hits count like any other session.${seshBonusOn() ? ` During beta week, a sesh where you and at least one friend both take a hit gives +${SESH_BONUS} RP, up to ${SESH_BONUS_DAY} a day.` : ''}</span></div></div></details>
       <button class="btn" data-s="x" style="width:100%">Close</button>`;
     return;
   }
   if (el.dataset.sph !== 'on'){
     el.dataset.sph = 'on';
-    card.innerHTML = `<div class="row between"><span class="label">Group sesh${X.demo ? ' · demo' : ''} <span class="beta-tag">TEST</span></span><button class="btn small ghost" data-s="x">Hide</button></div>
+    card.innerHTML = `<div class="row between"><span class="label">Group sesh${X.demo ? ' · demo' : ''} <span class="beta-tag">BETA</span></span><button class="btn small ghost" data-s="x">Hide</button></div>
       <div id="sxTop" style="display:grid;gap:8px"></div><div id="sxGrid" class="sx-grid"></div><div id="sxAct" style="display:grid;gap:8px"></div>
       ${X.demo ? '' : '<details class="dhow" id="sxInv"><summary>Invite friends</summary><div id="sxFr" class="dfr-list" style="margin-top:8px"></div></details>'}
       <button class="btn" data-s="leave" style="width:100%">Leave sesh</button>`;
@@ -10541,7 +10553,7 @@ function seshDraw(){
     : X.ph === 'heat' ? `<b>Heating up · ${rdy}/${live.length} Ready</b><small>When everyone’s Ready you all get a 3-2-1</small>`
     : X.ph === 'count' ? '<b>Get ready…</b><small>Hit it on the count</small>'
     : X.ph === 'sesh' ? `<b>Hit it! 🔥</b><small>${vrMS((Date.now() - X.hitAt) / 1000)} into the sesh</small>`
-    : '<b>Sesh done</b><small>Heat together again whenever you’re ready</small>';
+    : `<b>Sesh done${X.bonus ? ` · +${X.bonus} RP` : ''}</b><small>${X.bonus ? 'Beta week bonus. ' : ''}Heat together again whenever you’re ready</small>`;
   setHTML($('#sxTop'), `<div class="sx-code-row"><div><small class="muted">Code</small><b class="sx-code">${esc(X.code)}</b></div>${X.demo ? '' : '<button class="btn small" data-s="copy">Copy</button>'}</div><div class="sx-ban ${X.ph}">${ban}</div>`);
   const done = X.ph === 'done', big = Math.max(0, ...parts.map(p => p.b || 0));
   const list = done ? parts.slice().sort((a, b) => (b.tot || 0) - (a.tot || 0)) : parts;
