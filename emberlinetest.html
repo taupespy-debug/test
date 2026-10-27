@@ -5230,17 +5230,20 @@ function premBannerPicker(){
   if (!isPremium()) return '';
   const cur = LB.bannerImg || LB.bannerDraft || premBannerOf(LB.me || lbStore().meCache), pic = LB.bannerImg || (bnrIsImg(cur) ? cur : null);
   return `<div style="display:grid;gap:6px"><span class="label">Profile banner ${premStar(14)}</span><div class="prem-bnrs">
-    <label class="prem-bnr prem-up${pic && cur === pic ? ' on' : ''}" ${pic ? `data-bnr="${esc(pic)}" style="background:${premBannerCss(pic)}"` : ''}><input type="file" id="premBnrFile" accept="image/*" hidden><span>${pic ? 'Your picture' : '＋ Upload'}</span></label>
+    <label class="prem-bnr prem-up${pic && cur === pic ? ' on' : ''}" for="premBnrFile" ${pic ? `data-bnr="${esc(pic)}" style="background:${premBannerCss(pic)}"` : ''}><span>${pic ? 'Your picture' : '＋ Upload'}</span></label>
     ${Object.entries(PREM_BANNERS).map(([k, [n, css]]) => `<button type="button" class="prem-bnr${k === cur ? ' on' : ''}" data-bnr="${k}" style="background:${css}" aria-label="${n} banner"><span>${n}</span></button>`).join('')}</div>
     <span class="muted" style="font-size:12px">Upload any picture or GIF (up to 1.5 MB). It’s cropped to a wide strip.</span></div>`;
 }
 document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-bnr]'); if (!b || e.target.closest('input')) return; if (b.classList.contains('prem-up') && !b.dataset.bnr) return; // the upload tile opens the file picker
   const v = b.dataset.bnr; if (bnrIsImg(v)){ LB.bannerDraft = null; if (v.startsWith('data:')) LB.bannerImg = v; } else { LB.bannerDraft = v; LB.bannerImg = null; }
   document.querySelectorAll('.prem-bnr').forEach(x => x.classList.toggle('on', x === b)); });
-document.addEventListener('change', async e => {
-  if (e.target.id !== 'premBnrFile' || !e.target.files || !e.target.files[0]) return;
+// the file picker lives on the page itself, not in the Edit profile card: on iPhone, picking a photo backgrounds Emberline and the card
+// can be drawn again while you choose, which used to drop the picture you picked (profile pictures already worked this way)
+const premBnrInput = (() => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.id = 'premBnrFile'; i.hidden = true; document.body.appendChild(i); return i; })();
+premBnrInput.addEventListener('change', async e => {
+  if (!e.target.files || !e.target.files[0]) return;
   try { const d = await bannerResize(e.target.files[0]); LB.bannerImg = d; LB.bannerDraft = null;
-    const t = e.target.closest('.prem-up'); t.dataset.bnr = d; t.style.background = premBannerCss(d); t.querySelector('span').textContent = d.startsWith('data:image/gif') ? 'Your GIF' : 'Your picture';
+    const t = document.querySelector('.prem-up'); if (!t){ toast('Banner ready. Tap Save profile'); return; } t.dataset.bnr = d; t.style.background = premBannerCss(d); t.querySelector('span').textContent = d.startsWith('data:image/gif') ? 'Your GIF' : 'Your picture';
     document.querySelectorAll('.prem-bnr').forEach(x => x.classList.toggle('on', x === t)); toast(d.startsWith('data:image/gif') ? 'GIF banner ready. Tap Save profile' : 'Banner picture ready. Tap Save profile');
   } catch(err){ toast(err.message || 'Couldn’t use that picture'); }
   e.target.value = '';
@@ -6726,6 +6729,11 @@ async function lbSave(){
         ? 'Saved, but the server didn’t keep ' + (lost.length ? 'your new badges' : 'your bio') + '. Update the player function in Supabase (paste the newest player-function.ts and Deploy), and run add-social.sql.'
         : 'Saved, but the server didn’t keep some badges. Try again.';
       LB.edit = true; LB.pick = sent.slice(); LB.busy = false; drawLeaderboard(); return;
+    }
+    // the server keeps a banner only for Premium (and only a new enough player function takes pictures): say so instead of failing silently
+    const nb = String((r.player && r.player.banner) || '');
+    if ((body.bannerImg && !nb.includes('-banner.')) || (body.banner && nb !== body.banner)){
+      toast('Profile saved, but the banner didn’t save. Ask in the Discord: your Premium may have run out, or the server needs an update'); LB.busy = false; lbLoad(true); return;
     }
     if (code && r.player && !r.player.referred_by){ delete store.inviteRef; save(); toast('Couldn’t find a player called ' + code + '. You can add the code later from Squad Up.'); }
     else toast(wasJoined ? 'Profile saved' : 'You’re on the leaderboard');
