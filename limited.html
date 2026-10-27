@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Limited Edition Testing</title>
-<meta name="description" content="Own a limited edition Peak Pro? Help test it with Emberline and get the Bug Hunter badge.">
+<meta name="description" content="Own a limited edition Puffco? Help test it with Emberline and get the Bug Hunter badge.">
 <style>
 :root{--bg:#0d0a12;--panel:#1a1522;--panel2:#231c2e;--fg:#f3eefa;--muted:#a99fb8;--line:#2f2740;--accent:#b46cff;--ink:#140b1f;--ok:#4cd68a;--bad:#ff6b6b;--gold:#ffd23f;color-scheme:dark}
 *{box-sizing:border-box}
@@ -40,21 +40,21 @@ ol{margin:0;padding-left:20px;display:grid;gap:4px;color:var(--muted)}
   <div class="hero">
     <div class="ic">🧪</div>
     <h1>Limited Edition <span>Testing</span></h1>
-    <p>Own one of these limited edition Peak Pros? Help us test it with Emberline and get the <b>🐛 Bug Hunter</b> badge.</p>
+    <p>Own a limited edition Peak, Peak Pro or Proxy? Help us test it with Emberline and get the <b>🐛 Bug Hunter</b> badge.</p>
     <div class="eds" id="eds"></div>
   </div>
 
   <div class="card on" id="c1">
     <h2><span class="n">1</span>Get ready</h2>
     <ol>
-      <li>Open the <b>Puffco app</b> and set your Peak to its <b>limited edition light</b> (the Storm or Glacier one that came with it). Put it on <b>Profile 1</b>.</li>
-      <li><b>Fully close the Puffco app</b> (swipe it away). Only one app can talk to your Peak at a time.</li>
+      <li>Open the <b>Puffco app</b> and set your Peak to its <b>limited edition light</b> (the one that came with your edition). Put it on <b>Profile 1</b>.</li>
+      <li><b>Fully close the Puffco app</b> (swipe it away). Only one app can talk to your Puffco at a time.</li>
       <li>Open this page in <b>Path</b> (iPhone) or Chrome (Android or computer).</li>
     </ol>
-    <label class="chk"><input type="checkbox" id="cSet"> My Peak is on its limited edition light (Profile 1)</label>
-    <p style="font-size:13px">This page only <b>reads</b> your lights. Nothing on your Peak is changed, and no serial number is read.</p>
+    <label class="chk"><input type="checkbox" id="cSet"> My Puffco is on its limited edition light (Profile 1)</label>
+    <p style="font-size:13px">This page only <b>reads</b> your lights. Nothing on your Puffco is changed, and no serial number is read.</p>
     <div class="st" id="s1">Not connected</div>
-    <button id="bConnect" disabled>Connect my Peak Pro</button>
+    <button id="bConnect" disabled>Connect my Puffco</button>
   </div>
 
   <div class="card off" id="c2">
@@ -75,10 +75,11 @@ ol{margin:0;padding-left:20px;display:grid;gap:4px;color:var(--muted)}
   <p class="foot">Made for <a href="https://emberlineapp.github.io/emberline/">Emberline</a>. Not made by Puffco.</p>
 </div>
 <script>
-// the editions we still need (the badge is only for these). Add a name here to hunt for more
-const WANTED = ['Storm', 'Glacier'];
+// every special edition (the badge is only for these). A Proxy edition we don't know yet comes in as "Proxy <code>". Keep in step with the server's list
+const WANTED = ['Opal', 'Indiglow', 'Guardian', 'Desert', 'Flourish', 'Storm', 'Daybreak', 'Plasma', 'Glacier', 'Haze', 'Pine'];
+const wanted = e => WANTED.includes(e) || /^Proxy \d+$/.test(e || '');
 const IS_PATH = /Path\//i.test(navigator.userAgent || '') || !!window.notifications;
-const store = {}; const isProxy = () => false;
+const store = {}; const isProxy = () => D.series === 'toad';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function withTimeout(p, ms, stage){ let t; return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(Object.assign(new Error('Timed out'), { stage })), ms); })]).finally(() => clearTimeout(t)); }
 const SVC='e276967f-ea8a-478a-a92e-d78f5dd15dd5', CMD='60133d5c-5727-4f2c-9697-d842c5292a3c',
@@ -251,23 +252,35 @@ const toHex = u => [...u].map(x => x.toString(16).padStart(2, '0')).join('');
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1d3phYndpa2xvb2J6dmdjZGFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4ODExOTUsImV4cCI6MjEwNjQ1NzE5NX0.dESN5nYqgX087fzd27txEXf6fEKraF4D0RW8MaUuv6w';
 const SB_URL = 'https://auwzabwikloobzvgcdaa.supabase.co';
 const EDITIONS = { 0:'OG', 21:'OG', 1:'Opal', 22:'Opal', 2:'Indiglow', 4:'Guardian', 12:'Pearl', 13:'Onyx', 15:'Desert', 17:'Flourish', 19:'Storm', 23:'Daybreak', 25:'Plasma', 26:'Glacier' };
-const ED_ICON = { Storm:'🌩️', Glacier:'❄️' };
+const PROXY_EDITIONS = { 0:'Onyx', 1:'Haze', 2:'Pine' };
+const OLD_PEAK = ['Opal', 'Indiglow', 'Guardian']; // original Peaks, not Pros
+const ED_ICON = { Opal:'🤍', Indiglow:'💜', Guardian:'🛡️', Desert:'🏜️', Flourish:'🌿', Storm:'🌩️', Daybreak:'🌅', Plasma:'⚡', Glacier:'❄️', Haze:'🌫️', Pine:'🌲' };
+const devWord = () => isProxy() ? 'Proxy' : OLD_PEAK.includes(D.edition) ? 'Peak' : 'Peak Pro';
 // the same light files Emberline shares, so both land in one table the same way
-const PATHS = [0,1,2,3].map(i => `/u/app/hc/${i}/colr`).concat(['/p/app/thc/colr', '/p/app/ltrn/colr'], [0,1,2,3,4,5].map(i => `/u/app/led/aa/${i}`), [0,1,2,3,4,5,6,7].flatMap(i => [`/u/app/led/ca/${i}`, `/u/app/led/oa/${i}`]));
+const PATHS = () => [0,1,2,3].map(i => `/u/app/hc/${i}/colr`).concat(['/p/app/thc/colr', '/p/app/ltrn/colr'],
+  D.api === 2 ? [0,1,2,3].flatMap(i => [`/u/app/hc/${i}/phcl`, `/u/app/hc/${i}/accl`]) : [0,1,2,3,4,5].map(i => `/u/app/led/aa/${i}`).concat([0,1,2,3,4,5,6,7].flatMap(i => [`/u/app/led/ca/${i}`, `/u/app/led/oa/${i}`])));
 const SLOT = { '/u/app/hc/0/colr':'Profile 1', '/u/app/hc/1/colr':'Profile 2', '/u/app/hc/2/colr':'Profile 3', '/u/app/hc/3/colr':'Profile 4', '/p/app/thc/colr':'Heating light now', '/p/app/ltrn/colr':'Lantern' };
 const ble = new Lorax();
 const $ = id => document.getElementById(id);
 const st = (id, t, c) => { const e = $(id); e.textContent = t; e.className = 'st' + (c ? ' ' + c : ''); };
 const card = (id, k) => { $(id).className = 'card ' + k; };
 const revStr = v => { const L = 'ABCDEFGHJKMNPRTUVWXYZ'; if (!(v > 0)) return 'X*'; let s = '', n = v - 1; while (n >= 0){ s = L[n % L.length] + s; n = Math.floor(n / L.length) - 1; } return s; };
-const D = { edition:null, hash:null };
+const D = { edition:null, hash:null, series:'peach', api:3 };
 $('eds').innerHTML = WANTED.map(e => `<span class="ed">${ED_ICON[e] || '✨'} ${e}</span>`).join('');
 try { const u = localStorage.getItem('cwUser'); if (u) $('uName').value = u; } catch(e){}
 $('cSet').onchange = () => { $('bConnect').disabled = !$('cSet').checked; };
 
 // what a light file shows: its mood name and colors
 function lightInfo(hex){
+  if (D.api === 2) return { name: hex.length === 16 ? 'Light' : 'Light', cols: ['#' + hex.slice(0, 6)] }; // original Peak: an 8-byte color
   try {
+    const o0 = cborDecode(new Uint8Array(hex.match(/../g).map(x => parseInt(x, 16))));
+    if (o0 && o0['0'] && !o0.lamp){ // Proxy: numbered keys
+      const m = o0['1'] || {}, lid = o0['0']['0'], par = o0['0']['1'] || {}, c = par[{ 0:6, 1:0, 2:3 }[lid]], uc = m['9'];
+      const hx = b => b && b.$b ? b.$b.match(/.{6}/g).map(x => '#' + x) : [];
+      const cols = (hx(uc).length ? hx(uc) : [...new Set(hx(c))]).slice(0, 12);
+      return { name: typeof m['2'] === 'string' ? m['2'] : m['0'] ? 'Puffco mood' : cols.length === 1 ? 'Solid color' : 'Light', cols };
+    }
     const o = cborDecode(new Uint8Array(hex.match(/../g).map(x => parseInt(x, 16))));
     const meta = o.meta || {}, par = (o.lamp && o.lamp.param) || {}, c = par.color || par.colors;
     let cols = [];
@@ -282,31 +295,32 @@ $('bConnect').onclick = async () => {
   if (!navigator.bluetooth) return st('s1', 'This browser can’t use Bluetooth. Open this page in Path (iPhone) or Chrome.', 'bad');
   $('bConnect').disabled = true;
   try {
-    st('s1', 'Pick your Peak Pro…'); await ble.request(false);
+    st('s1', 'Pick your Puffco…'); await ble.request(false);
     st('s1', 'Connecting…'); await ble.attach(x => st('s1', { gatt:'Connecting…', service:'Connecting…', auth:'Unlocking…' }[x] || 'Connecting…'));
     let api = null; try { api = await ble.u32('/p/sys/fw/api'); } catch(e){}
-    if (api != null && (api >>> 16) === 1){ st('s1', 'That’s a Proxy. This test is for Peak Pros right now.', 'bad'); ble.disconnect(true); $('bConnect').disabled = false; return; }
+    D.series = api != null && (api >>> 16) === 1 ? 'toad' : 'peach'; // same as Puffco's app: api series 1 = Proxy
+    D.api = 3; if (!isProxy()){ if (api != null && (api & 0xffff) < 27) D.api = 2; else if (api == null){ try { await ble.read('/u/app/hc/0/phcl', 8); D.api = 2; } catch(e){} } }
     let mc = null; try { mc = await ble.u32('/p/sys/hw/mdcd'); } catch(e){}
-    D.edition = EDITIONS[mc] || null;
+    D.edition = isProxy() ? (PROXY_EDITIONS[mc] || (mc != null ? 'Proxy ' + mc : null)) : (EDITIONS[mc] || null);
     try { const r = await ble.read('/p/sys/fw/ver', 4); D.fw = revStr(r[0]); } catch(e){}
-    if (!D.edition || !WANTED.includes(D.edition)){
-      st('s1', D.edition ? `This is a ${D.edition} Peak Pro. It isn’t part of this test right now. Thank you anyway!` : 'Couldn’t tell which edition this is. Try again, or ask in the Discord.', 'bad');
+    if (!D.edition || !wanted(D.edition)){
+      st('s1', D.edition ? `This is a ${D.edition === 'OG' || D.edition === 'Onyx' ? 'regular' : D.edition} ${devWord()}, not a limited edition. Thank you anyway!` : 'Couldn’t tell which edition this is. Try again, or ask in the Discord.', 'bad');
       ble.disconnect(true); $('bConnect').disabled = false; return;
     }
-    st('s1', `${ED_ICON[D.edition] || '✨'} Found a ${D.edition} Peak Pro`, 'ok'); card('c1', 'done'); $('bConnect').textContent = 'Connected';
+    st('s1', `${ED_ICON[D.edition] || '✨'} Found a ${/^Proxy \d/.test(D.edition) ? 'special edition Proxy (code ' + D.edition.slice(6) + ')' : D.edition + ' ' + devWord()}`, 'ok'); card('c1', 'done'); $('bConnect').textContent = 'Connected';
     await share();
   } catch(e){
-    st('s1', e && e.name === 'NotFoundError' ? 'No Peak picked. Tap Connect to try again.' : 'Couldn’t connect: ' + (e.message || e) + '. Close the Puffco app and try again.', 'bad');
+    st('s1', e && e.name === 'NotFoundError' ? 'Nothing picked. Tap Connect to try again.' : 'Couldn’t connect: ' + (e.message || e) + '. Close the Puffco app and try again.', 'bad');
     $('bConnect').disabled = false;
   }
 };
 
 async function share(){
   card('c2', 'on'); st('s2', 'Testing…');
-  const files = {}; let i = 0;
-  for (const p of PATHS){
+  const files = {}; let i = 0, paths = PATHS();
+  for (const p of paths){
     try { const r = await ble.readAll(p); if (r && r.length) files[p] = toHex(r).slice(0, 8000); } catch(e){}
-    $('bar').style.width = Math.round(++i / PATHS.length * 100) + '%';
+    $('bar').style.width = Math.round(++i / paths.length * 100) + '%';
   }
   ble.disconnect(true);
   if (!Object.keys(files).length){ st('s2', 'The test couldn’t finish. Reload the page and try again.', 'bad'); return; }
@@ -316,11 +330,11 @@ async function share(){
   st('s2', 'Sending…');
   try {
     const r = await fetch(SB_URL + '/rest/v1/edition_lights', { method:'POST', headers:{ apikey:SB_KEY, Authorization:'Bearer ' + SB_KEY, 'Content-Type':'application/json', Prefer:'return=minimal' },
-      body: JSON.stringify({ hash: D.hash, edition: D.edition, series:'peach', fw: D.fw || null, api: 3, files }) });
+      body: JSON.stringify({ hash: D.hash, edition: D.edition, series: D.series, fw: D.fw || null, api: D.api, files }) });
     if (!r.ok && r.status !== 409) throw new Error('error ' + r.status); // 409: these exact lights were already shared
   } catch(e){ st('s2', 'Couldn’t send: ' + (e.message || e) + '. Check your internet and try again.', 'bad'); return; }
   const p1 = files['/u/app/hc/0/colr'] ? lightInfo(files['/u/app/hc/0/colr']) : null;
-  st('s2', p1 && p1.cols.length <= 1 ? `Done, thank you! 🙌 Heads up: Profile 1 is a plain color. If your ${D.edition} has its own light in the Puffco app, put it on Profile 1 and run the test again.` : 'Done. Thank you! 🙌', 'ok'); card('c2', 'done');
+  st('s2', D.api !== 2 && p1 && p1.cols.length <= 1 ? `Done, thank you! 🙌 Heads up: Profile 1 is a plain color. If your ${D.edition} has its own light in the Puffco app, put it on Profile 1 and run the test again.` : 'Done. Thank you! 🙌', 'ok'); card('c2', 'done');
   card('c3', 'on'); $('uName').disabled = false; $('bClaim').disabled = false; $('uName').focus();
 }
 
