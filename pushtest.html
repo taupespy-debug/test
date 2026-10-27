@@ -36,7 +36,7 @@ fn('push_key').then(r => { KEY = r.key; log('key: ' + (KEY ? 'ready' : 'MISSING 
 if (window.pushManager) window.pushManager.permissionState({ userVisibleOnly:true }).then(s => log('permission now: ' + s)).catch(e => log('permission ERROR ' + e.message));
 function subJSON(s){ let j = null; try { j = s.toJSON(); } catch(e){} if (j && j.endpoint) return j; const k = n => { try { const b = s.getKey(n); return b ? btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : null; } catch(e){ return null; } }; return { endpoint: s.endpoint, keys: { p256dh: k('p256dh'), auth: k('auth') } }; }
 function doSubscribe(){ // nothing before subscribe: it has to be inside the tap
-  if (/Path\//.test(navigator.userAgent) && !confirm('This crashed Path last time. Try anyway?')) return log('skipped');
+  if (/Path\//.test(navigator.userAgent) && !(doSubscribe.armed > Date.now())){ doSubscribe.armed = Date.now() + 8000; return log('This crashed Path last time. Tap 1 again within 8 seconds to really try.'); } // Path has no confirm() popups
   if (!window.pushManager) return log('no window.pushManager here');
   if (!KEY) return log('key not loaded yet, tap again in a second');
   log('tap: activation ' + (navigator.userActivation ? navigator.userActivation.isActive : '?'));
