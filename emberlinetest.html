@@ -2086,6 +2086,7 @@ body.vr-on #dvFrame{display:none}
         <button class="btn" id="bStop">Stop</button>
       </div>
     </div>
+    <div class="card" id="torchCard" hidden></div>
     <div class="card">
       <div class="row between"><span class="label">Clean meter</span><span class="mono" id="cleanTxt">0 / 150</span></div>
       <div class="meter" style="margin-top:10px"><b id="cleanBar" style="width:0"></b></div>
@@ -4075,6 +4076,7 @@ function markCleaned(){
 const BOOST = { temp: 0, time: 0 };
 async function boostCmd(){
   if (!needLive('boost')) return;
+  if (torchLive()) return torchRetorch(); // Torch dab: Boost torches it again
   if (!isProxy()) return modeCmd(9); // the Peak's own boost button command
   const p = S.profiles[S.active] || {}, addC = (p.boostF || 0) * 5 / 9, addS = p.boostT || 0;
   try {
@@ -4558,6 +4560,7 @@ function drawHome(){
   const shownTarget = heatingNow && S.liveTargetC ? S.liveTargetC : target;
   $('#gTarget').textContent = `Target ${fmtT(shownTarget)}${U()} · ${p.time}s · ${vaporName(p.vapor)}`;
   $('#adjustRow').hidden = !heatingNow;
+  try { const tc = $('#torchCard'); if (tc && tc.hidden === torchOk()) drawTorch(); } catch(e){} // the Torch dab card (Rich only)
   setHTML($('#bBoost'), `<span class="bst"><span>Boost</span><small>+${store.unit === 'F' ? Math.round(p.boostF) : Math.round(p.boostF * 5 / 9)}° +${p.boostT}s</small></span>`);
   const noCh = S.mode === 'live' && !isProxy() && S.chamber === 0, cb = $('#chamberBanner');
   cb.hidden = !noCh;
@@ -8028,6 +8031,103 @@ async function devWrite(fn, ok){
   drawDevice();
 }
 
+/* ===== Torch dab (Rich only for now, Premium later): hits like a torched quartz banger =====
+   A hot start dab: the banger is torched, cools for a bit, and you drop the dab while the quartz is still hot.
+   It hits hardest at the start, then the quartz keeps cooling while you pull, and pulling cools it faster
+   (air through the banger). The 3D and 3DXL chambers heat from the side walls with a sensor in the wall,
+   so they follow a moving target well. We move the target with the live temp offset (/p/app/tmpo, the
+   same file Boost and the ± buttons use), about once a second:
+   preheat goes to the start temp, it holds there a few seconds once Ready, then cools like quartz does
+   (fast at first, then slower) down to the end temp. Boost re-torches it back to the start temp. */
+const TORCH_PRESETS = [
+  { id:'hot', n:'Hot start', s:600, e:470 },
+  { id:'classic', n:'Classic', s:565, e:480 },
+  { id:'low', n:'Low temp', s:530, e:460 }
+];
+const TORCH_HOLD = 4, TORCH_PULL = 1.8, TORCH_STEP = 3; // seconds at full heat once Ready; a pull cools 1.8x as fast; only send changes of 3°F+
+const TORCH = { at:0, last:0, te:0, sent:null, busy:false, sim:0 };
+function torchOk(){ return isRich(); } // Premium later: || isPremium()
+function torchCfg(){ const c = Object.assign({ on:false, s:600, e:470 }, store.torch || {}); c.s = clamp(Math.round(c.s), 480, 644); c.e = clamp(Math.round(c.e), 400, c.s - 20); return c; }
+function torchLive(){ let duel = false; try { duel = DUEL.on; } catch(e){} return torchCfg().on && torchOk() && !duel && (S.state === 7 || S.state === 8); } // never in a 1v1
+// the target (°F) te seconds into Ready: hold, then Newton's cooling toward the end temp, about 95% of the way there by the end
+function torchTargetF(te, total){
+  const c = torchCfg(), span = Math.max(10, (total || 45) - TORCH_HOLD);
+  return te <= TORCH_HOLD ? c.s : c.e + (c.s - c.e) * Math.exp(-3 * (te - TORCH_HOLD) / span);
+}
+async function torchSend(wantF){
+  const p = S.profiles[S.active] || {};
+  if (S.mode !== 'live'){ S.liveTargetC = f2c(wantF); TORCH.sent = wantF; return; }
+  const off = f2c(wantF) - p.tempC; if (!isFinite(off) || Math.abs(off) > 150) return; // never send anything wild
+  TORCH.busy = true;
+  try { await ble.wf32('/p/app/tmpo', off); BOOST.temp = off; S.liveTargetC = f2c(wantF); TORCH.sent = wantF; } catch(e){} finally { TORCH.busy = false; }
+}
+async function torchTick(){
+  const now = performance.now();
+  if (TORCH.sim && !(S.state === 7 || S.state === 8)){ // test tools: play the curve with no Peak
+    TORCH.te = (now - TORCH.sim) / 1000; if (TORCH.te > 50){ TORCH.sim = 0; TORCH.te = 0; } torchDot(); return;
+  }
+  if (!torchLive()){ if (TORCH.at || TORCH.sent != null){ TORCH.at = 0; TORCH.te = 0; TORCH.sent = null; torchDot(); } return; }
+  let wantF;
+  if (S.state === 7){ TORCH.at = 0; TORCH.te = 0; wantF = torchCfg().s; }
+  else {
+    if (!TORCH.at){ TORCH.at = TORCH.last = now; TORCH.te = 0; }
+    TORCH.te += (now - TORCH.last) / 1000 * (HIT.on ? TORCH_PULL : 1); TORCH.last = now;
+    wantF = Math.round(torchTargetF(TORCH.te, S.total));
+  }
+  torchDot();
+  if (TORCH.busy || (TORCH.sent != null && Math.abs(TORCH.sent - wantF) < TORCH_STEP && wantF !== torchCfg().e)) return;
+  if (TORCH.sent === wantF) return;
+  await torchSend(wantF); render();
+}
+setInterval(torchTick, 1000);
+// Boost while it's on: torch it again (back to the start temp) and add the boost time
+async function torchRetorch(){
+  const p = S.profiles[S.active] || {}, addS = p.boostT || 15;
+  TORCH.te = 0; TORCH.last = performance.now(); TORCH.sent = null;
+  if (S.mode === 'live'){ try { BOOST.time += addS; await ble.wf32('/p/app/timo', BOOST.time); } catch(e){} }
+  buzz(15); toast(`Re-torched: back to ${fmtT(f2c(torchCfg().s))}${U()} +${addS}s`); torchTick();
+}
+async function torchSet(c){
+  const was = torchCfg().on; store.torch = Object.assign(torchCfg(), c); save();
+  if (was && !store.torch.on && S.mode === 'live' && (S.state === 7 || S.state === 8)){ try { await ble.wf32('/p/app/tmpo', 0); BOOST.temp = 0; S.liveTargetC = null; } catch(e){} } // off mid-session: back to the profile temp
+  TORCH.sent = null; drawTorch(); render();
+}
+// the curve on the card: x is seconds into Ready, y is °F
+function torchSvg(total){
+  const c = torchCfg(), W = 300, H = 90, lo = c.e - 15, hi = c.s + 10, T = Math.max(20, total || 45);
+  const X = t => (t / T * W).toFixed(1), Y = f => (H - (f - lo) / (hi - lo) * H).toFixed(1);
+  let d = ''; for (let t = 0; t <= T; t += T / 60) d += (d ? 'L' : 'M') + X(t) + ',' + Y(torchTargetF(t, T));
+  return `<svg viewBox="-4 -6 ${W + 8} ${H + 12}" style="width:100%;height:auto;display:block" aria-hidden="true">
+    <defs><linearGradient id="trG" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff4d1a"/><stop offset=".5" stop-color="#ffb02e"/><stop offset="1" stop-color="#5ab0ff"/></linearGradient></defs>
+    <path d="${d}L${W},${H}L0,${H}Z" fill="url(#trG)" opacity=".15"/><path d="${d}" fill="none" stroke="url(#trG)" stroke-width="3" stroke-linecap="round"/>
+    <circle id="torchDot" r="5" fill="#fff" stroke="#ff7a1a" stroke-width="2" cx="0" cy="${Y(c.s)}" style="opacity:0;transition:cx 1s linear,cy 1s linear"/></svg>`;
+}
+function torchDot(){
+  const el = $('#torchDot'); if (!el) return;
+  const on = torchLive() || TORCH.sim, c = torchCfg(), T = Math.max(20, (torchLive() ? S.total : 0) || 45), W = 300, H = 90, lo = c.e - 15, hi = c.s + 10;
+  const te = Math.min(TORCH.te, T), f = S.state === 7 && torchLive() ? c.s : torchTargetF(te, T);
+  el.style.opacity = on ? 1 : 0; el.setAttribute('cx', (te / T * W).toFixed(1)); el.setAttribute('cy', (H - (f - lo) / (hi - lo) * H).toFixed(1));
+  const n = $('#torchNow'); if (n) n.textContent = on ? (S.state === 7 && torchLive() ? `Preheating to ${fmtT(f2c(c.s))}${U()}` : `${fmtT(f2c(f))}${U()} now${HIT.on && torchLive() ? ' · cooling faster while you pull' : ''}`) : '';
+}
+function drawTorch(){
+  const el = $('#torchCard'); if (!el) return;
+  el.hidden = !torchOk(); if (el.hidden) return;
+  const c = torchCfg(), F = f => `${fmtT(f2c(f))}${U()}`, pre = TORCH_PRESETS.find(p => p.s === c.s && p.e === c.e);
+  el.innerHTML = `<div class="row between"><span class="label">🔥 Torch dab <span class="muted" style="font-size:11px;letter-spacing:0">Rich only for now</span></span><button class="btn small ${c.on ? 'primary' : ''}" data-tor="on">${c.on ? 'On' : 'Off'}</button></div>
+    <p class="muted" style="margin:6px 0 8px;font-size:13px">Hits like a torched banger: starts hot, then cools off as you pull. Pulling cools it faster, and Boost torches it again.</p>
+    <div class="shop-actions" style="margin:0 0 8px">${TORCH_PRESETS.map(p => `<button class="btn small" data-tor="p:${p.id}" ${pre && pre.id === p.id ? 'style="box-shadow:inset 0 0 0 2px var(--accent)"' : ''}>${p.n}</button>`).join('')}</div>
+    ${torchSvg(S.state === 8 && torchLive() ? S.total : 45)}
+    <div class="row between mono" style="font-size:12px;margin-top:2px"><span>${F(c.s)} start</span><span id="torchNow" style="color:var(--accent)"></span><span>${F(c.e)} end</span></div>
+    <label style="display:grid;gap:2px;margin-top:8px;font-size:13px"><span class="row between"><span>Start (fresh torch)</span><b>${F(c.s)}</b></span><input type="range" data-tor="s" min="480" max="644" step="1" value="${c.s}"></label>
+    <label style="display:grid;gap:2px;margin-top:6px;font-size:13px"><span class="row between"><span>End (cooled off)</span><b>${F(c.e)}</b></span><input type="range" data-tor="e" min="400" max="${c.s - 20}" step="1" value="${c.e}"></label>
+    ${isProxy() ? '<p class="muted" style="margin:6px 0 0;font-size:12px">On a Proxy the start temp is capped by the Proxy itself.</p>' : ''}`;
+  torchDot();
+}
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('#torchCard [data-tor]'); if (!b || b.tagName === 'INPUT') return;
+  const k = b.dataset.tor; if (k === 'on') return torchSet({ on: !torchCfg().on });
+  const p = TORCH_PRESETS.find(x => 'p:' + x.id === k); if (p) torchSet({ s: p.s, e: p.e }); });
+document.addEventListener('change', e => { const i = e.target.closest && e.target.closest('#torchCard input[data-tor]'); if (i) torchSet({ [i.dataset.tor]: +i.value }); });
+
 /* ---- live adjust during a session ---- */
 async function adjustLive(kind, delta){
   const heating = S.state >= 7 && S.state <= 9;
@@ -8459,7 +8559,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="pathnotiftry">Notifications test (details)</button><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="premmoods">Premium moods (Lights tab)</button><button class="btn small" data-tt="gifpfp">GIF profile picture</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="seshnote">Group sesh Premium notification</button><button class="btn small" data-tt="ednote">Special edition moods Premium notification</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${(() => { try { return Object.keys(DFX_FX); } catch(e){ return []; } })().map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="pathnotiftry">Notifications test (details)</button><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="torch">Torch dab (Rich)</button><button class="btn small" data-tt="torchsim">Torch dab curve demo</button><button class="btn small" data-tt="premmoods">Premium moods (Lights tab)</button><button class="btn small" data-tt="gifpfp">GIF profile picture</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="seshnote">Group sesh Premium notification</button><button class="btn small" data-tt="ednote">Special edition moods Premium notification</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${(() => { try { return Object.keys(DFX_FX); } catch(e){ return []; } })().map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -8669,6 +8769,7 @@ $('#testTools').addEventListener('click', e => {
   if (k === 'micchk'){ vcMicCheck(); return; }
   if (k === 'sesh'){ seshSheet(); return; }
   if (k === 'gifpfp'){ if (!isPremium()) return toast('Turn on Act as Premium first'); lbPicFile.click(); return; } // pick a GIF, then Save profile in Social
+  if (k === 'torch' || k === 'torchsim'){ if (!torchOk()) return toast('Turn on Act as rich first'); show('home'); drawTorch(); if (k === 'torchsim'){ TORCH.sim = performance.now(); TORCH.te = 0; } setTimeout(() => { const c = $('#torchCard'); if (c) c.scrollIntoView({ block:'center' }); }, 300); return; }
   if (k === 'premmoods'){ show('lights'); setTimeout(() => { const g = [...document.querySelectorAll('#moodLib .label')].find(x => /Premium moods/.test(x.textContent)); if (g) g.scrollIntoView({ block:'center' }); }, 300); return; }
   if (k === 'ednote'){ edPremNote(true); return; }
   if (k === 'seshnote'){ seshPremNote(true); return; }
