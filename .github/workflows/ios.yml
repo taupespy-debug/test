@@ -1,0 +1,60 @@
+# Builds the Emberline iPhone app (ios/) into an unsigned Emberline.ipa on every push that changes it.
+# Download it from Releases (tag "ios-latest") and install it with Sideloadly, which signs it with your Apple ID.
+# The build log goes to the "ios-log" branch so problems can be read without signing in to GitHub.
+name: iOS app
+on:
+  push:
+    branches: [main]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Make the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+      - name: Build
+        id: build
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -project Emberline.xcodeproj -scheme Emberline -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 | tee build.log
+      - name: Package Emberline.ipa
+        working-directory: ios
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/Emberline.app Payload/
+          zip -qry Emberline.ipa Payload
+          ls -la Emberline.ipa
+      - name: Publish to Releases (ios-latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ios-latest --yes --cleanup-tag || true
+          gh release create ios-latest ios/Emberline.ipa --title "Emberline iPhone app (test)" \
+            --notes "Built from ${GITHUB_SHA::7}. Install with Sideloadly. See ios/README.md." --prerelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Emberline-ipa
+          path: ios/Emberline.ipa
+      - name: Save the build log to the ios-log branch
+        if: always()
+        run: |
+          cd ios
+          { echo "result: ${{ job.status }} ($GITHUB_SHA)"; echo; grep -E "error:|warning: .*(Swift|swift)|BUILD (SUCCEEDED|FAILED)" build.log | head -200; echo; echo "---- last 120 lines ----"; tail -120 build.log; } > ../build-summary.txt 2>/dev/null || echo "no build log" > ../build-summary.txt
+          cd ..
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git fetch origin ios-log || true
+          git switch --orphan ios-log-tmp
+          git rm -rfq --cached . || true
+          git add -f build-summary.txt
+          git commit -qm "iOS build log $GITHUB_SHA"
+          git push -f origin HEAD:ios-log

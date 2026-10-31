@@ -1,0 +1,51 @@
+# Emberline iPhone app. The GitHub workflow (.github/workflows/ios.yml) turns this into an Xcode project with
+# XcodeGen and builds an unsigned Emberline.ipa. Sideloadly signs it with your own Apple ID when you install it.
+name: Emberline
+options:
+  bundleIdPrefix: app.emberline
+  deploymentTarget:
+    iOS: "15.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+targets:
+  Emberline:
+    type: application
+    platform: iOS
+    sources:
+      - path: Emberline
+        excludes: [bridge.js]
+      - path: Emberline/bridge.js
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.emberline.ios
+        INFOPLIST_FILE: Emberline/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+    info:
+      path: Emberline/Info.plist
+      properties:
+        CFBundleDisplayName: Emberline
+        CFBundleName: Emberline
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIStatusBarStyle: UIStatusBarStyleLightContent
+        UIViewControllerBasedStatusBarAppearance: true
+        UILaunchScreen: {}
+        UIBackgroundModes: [bluetooth-central, audio]
+        NSBluetoothAlwaysUsageDescription: Emberline connects to your Puffco over Bluetooth to control it and track your sessions.
+        NSBluetoothPeripheralUsageDescription: Emberline connects to your Puffco over Bluetooth to control it and track your sessions.
+        NSMicrophoneUsageDescription: Voice chat in 1v1s and group seshes uses your microphone.
+        NSCameraUsageDescription: Take a photo for your profile picture.
+        NSPhotoLibraryUsageDescription: Pick a photo or GIF for your profile picture or banner.
+        ITSAppUsesNonExemptEncryption: false
