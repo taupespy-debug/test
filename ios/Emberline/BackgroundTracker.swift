@@ -39,6 +39,7 @@ final class BackgroundTracker {
     private var lastDia = 0.0
     private var dia = 1.0
     private var hitOK = true
+    private var proxyOn = false // Proxy: reading pinned near 1.0 (a pull)
     private var cur: Sess?
     private var hit = HitCounter()
     private(set) var finished: [[String: Any]] = []
@@ -479,7 +480,16 @@ final class BackgroundTracker {
                 var v = self.number(b, scale: 4096)
                 if !v.isFinite { return }
                 if self.ctx.proxy && !(self.dia > 0) { v = 0 }
-                self.hit.sample(min(max(v, 0), 1), now: CACurrentMediaTime(), state: self.lastState, wall: Date())
+                let t = CACurrentMediaTime()
+                if self.ctx.proxy {
+                    // Proxy: the reading pins at 1.0 while you pull, then fades over ~5s. Only "pinned" is a pull, or the fade
+                    // makes fake hits (proxyHitStep in the page). It pins ~0.55s late and lets go ~0.6s late, so time it back
+                    let was = self.proxyOn
+                    if !was && v >= 0.9 { self.proxyOn = true } else if was && v < 0.88 { self.proxyOn = false }
+                    self.hit.sample(self.proxyOn ? 1 : 0, now: was && !self.proxyOn ? t - 0.6 : !was && self.proxyOn ? t - 0.55 : t, state: self.lastState, wall: Date())
+                } else {
+                    self.hit.sample(min(max(v, 0), 1), now: t, state: self.lastState, wall: Date())
+                }
                 self.hitsChanged()
             case .failure(let e):
                 if let te = e as? TrackErr, case .status(_) = te { self.hitOK = false } // this firmware has no inhale reading
@@ -492,6 +502,7 @@ final class BackgroundTracker {
         let prev = lastState; lastState = st
         let now = Date()
         if st == 7 && prev != 7 && cur == nil {
+            proxyOn = false
             preheatStart()
             torchTe = 0; torchSent = -1; torchAt = 0
             cur = Sess(t: now, p: 0)

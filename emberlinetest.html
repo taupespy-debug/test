@@ -3346,6 +3346,7 @@ async function afterConnect(quick){
     try { await applyProfileBright(S.active); } catch(e){}
     try { await readDeviceInfo(); render(); rememberDevice(); save(); } catch(e){}
     setTimeout(() => { try { edShareAsk(); } catch(e){} }, 9000); // limited edition owners: offer to share the edition's lights
+    setTimeout(() => { try { ogPeakNotice(0); } catch(e){} }, 2500); // original Peak / older firmware: animated moods and hit timing now work
     // mood shuffle catch-up: if the Puffco did sessions while Emberline was closed (dab count went up), pick fresh moods now
     try { if (store.shuffle && S.odo != null){ if (store.shufOdo != null && S.odo > store.shufOdo){ Object.keys(store.shuffle).forEach(k => { if (store.shuffle[k].on) setTimeout(() => shuffleNext(+k), 1500 + 600 * k); }); } store.shufOdo = S.odo; save(); } } catch(e){}
     { const g = myGear().join(); if (g && g !== store.gearSent){ store.gearSent = g; save(); try { await lbPush(true); } catch(e){} } } // share your gear on your profile as soon as a new device connects
@@ -3410,7 +3411,7 @@ const HIT_MERGE = 700; // a dip shorter than this is the same hit
 const hitMerge = () => HIT.mode === 'heat' ? 1600 : HIT_MERGE; // older Peaks time hits from the heater, which dips mid-pull
 const HIT_IDLE = .03; // typical sensor value with nobody pulling
 const HIT_STUCK = 120000; // no real pull lasts 2 minutes (a session ends first)
-function hitReset(){ HIT.lastSt = -1; HIT.armed = false; HIT.quiet = 0; HIT.endAt = 0; HIT.lastStart = 0; HIT.pbase = null; HIT.diaAt = 0; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.ends = []; HIT.base = HIT_IDLE; HIT.live = 0; }
+function hitReset(){ PH.on = false; HIT.lastSt = -1; HIT.armed = false; HIT.quiet = 0; HIT.same = 0; HIT.lastV = -1; HIT.endAt = 0; HIT.lastStart = 0; HIT.pbase = null; HIT.diaAt = 0; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.ends = []; HIT.base = HIT_IDLE; HIT.live = 0; }
 function hitSample(v, now){
   // some firmware freezes the inhale reading on its last value (e.g. a mood with reactive light off). A real pull
   // never reads the exact same number for ~1.5s, so a frozen reading counts as no pull
@@ -3508,21 +3509,90 @@ function discoHeatCycle(blob){
   });
   setTimeout(() => ledJob(async () => { const r = discoRestore; discoRestore = null; if (r && S.mode === 'live'){ try { await r(); } catch(e){} } }), DISCO_MS);
 }
+/* older Peaks have no inhale sensor. Pulling air cools the coil, so the heater works harder:
+   duty (how hard it's heating) jumps from ~30% to ~65% while you hit. Right after Ready the heater is
+   still maxed out, so until it settles we watch for the temperature dropping instead.
+   Tuned on a Guardian recording: 5 of 5 hits found, no false hits, lengths within about half a second. */
+const HH = { buf:[], tb:[], settled:false, on:false, how:'', low:0, t0:0 };
+/* heater recorder for original Peaks: open the site with ?heatrec, run a session, tap Copy and paste it in Discord */
+const HREC = { on:false, t0:0, rows:[] };
+function hrecAdd(now, duty, temp, raw, hit){
+  if (!HREC.on || HREC.rows.length >= 3000) return;
+  HREC.rows.push([Math.round(now - HREC.t0), Math.round(duty), Math.round(temp * 10) / 10, S.state, raw, hit]);
+  const n = document.querySelector('#hrecN'); if (n) n.textContent = HREC.rows.length + ' samples';
+}
+function hrecPanel(){
+  if (!/[?&]heatrec\b/.test(location.search) || document.querySelector('#hrec')) return;
+  const el = document.createElement('div'); el.id = 'hrec';
+  el.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 92px);z-index:60;display:flex;gap:8px;align-items:center;padding:10px 12px;border-radius:16px;background:rgba(20,14,30,.92);backdrop-filter:blur(10px);font-size:13px;color:#fff';
+  el.innerHTML = '<b style="flex:1">Heater recorder <span id="hrecN" style="font-weight:400;opacity:.7">0 samples</span></b><button class="btn small primary" id="hrecGo">Record</button><button class="btn small" id="hrecCp">Copy</button>';
+  document.body.appendChild(el);
+  el.querySelector('#hrecGo').onclick = e => { HREC.on = !HREC.on; if (HREC.on){ HREC.rows = []; HREC.t0 = performance.now(); } e.target.textContent = HREC.on ? 'Stop' : 'Record'; };
+  el.querySelector('#hrecCp').onclick = async () => {
+    // tell me what really happened next to the numbers
+    const txt = `heatrec ${S.edition || ''} fw=${S.fw || ''} api=${S.api}\nms,duty,temp,state,raw(1 duty 2 temp),hit\n` + HREC.rows.map(r => r.join(',')).join('\n');
+    try { await navigator.clipboard.writeText(txt); toast('Copied. Paste it in Discord'); } catch(e){ prompt('Copy this', txt); }
+  };
+}
+setTimeout(hrecPanel, 1500);
+const HEAT_CONFIRM = 1000; // ms the heater has to look like a pull before it counts
+function heatHitReset(){ HH.buf = []; HH.tb = []; HH.settled = false; HH.on = false; HH.how = ''; HH.low = 0; HH.t0 = 0; HH.since = 0; HH.shown = false; }
+function heatHitStep(duty, tempC, now){
+  now = now || performance.now(); if (!HH.t0) HH.t0 = now;
+  HH.buf = HH.buf.concat(duty).slice(-4); HH.tb = HH.tb.concat(tempC).slice(-10); // ~0.6s of duty, ~1.6s of temp
+  const full = HH.buf.length === 4, avg = HH.buf.reduce((a, b) => a + b, 0) / HH.buf.length;
+  if (!HH.on){
+    // only once the heater has settled. Right after Ready (a recording from an Opal) the heater sits at 100% while the temp
+    // falls ~30° on its own for ~3s and climbs back, which looks exactly like a pull, so nothing counts until it settles (~5s)
+    if (HH.settled && full && avg >= 50){ HH.on = true; HH.how = 'duty'; }
+  }
+  else if (full && avg < 42) HH.on = false;
+  if (full && avg < 45 && !HH.on) HH.settled = true;
+  return HH.on;
+}
+function heatHitStart(){
+  if (HIT.loop || BG.on) return;
+  heatHitReset(); HIT.supported = true; HIT.mode = 'heat';
+  HIT.loop = setInterval(async () => {
+    if (S.mode !== 'live' || (S.state !== 8 && S.state !== 7)){ hitLoopStop(); return; }
+    if (HIT.inflight) return; HIT.inflight = true;
+    try {
+      const duty = await ble.f32('/p/htr/duty'); let t = S.tempC; try { const v = await ble.f32('/p/app/htr/temp'); if (isFinite(v)) t = v; } catch(e){}
+      const now = performance.now();
+      if (S.state !== 8){ heatHitReset(); hrecAdd(now, duty, t, 0, 0); return; } // preheat: nothing to time yet
+      const raw = heatHitStep(duty, t, now);
+      // only count it once the heater has looked like a pull for a full second (a short blip at the start of Ready was a
+      // fake hit), then start the clock from when it really began
+      if (raw && !HH.since) HH.since = now; else if (!raw) HH.since = 0;
+      const resume = HIT.endAt && now - HIT.endAt < hitMerge(); // picking up again right after a dip: same hit, no wait
+      const was = HH.shown, on = raw && (now - HH.since >= HEAT_CONFIRM || resume); HH.shown = on; hrecAdd(now, duty, t, raw ? (HH.how === 'temp' ? 2 : 1) : 0, on ? 1 : 0);
+      hitSample(on ? 1 : 0, was && !on ? now - 450 : !was && on ? HH.since - (HH.how === 'temp' ? 800 : 0) : now); // the heater lags the end of the pull by about half a second; a temp drop takes ~0.8s to show
+    } catch(e){ if (e && e.status){ HIT.supported = false; hitLoopStop(); } }
+    finally { HIT.inflight = false; }
+  }, 160);
+}
+/* Proxy inhale reading (from a labeled recording): it jumps to 1.0 within ~0.4s of a pull, sits at 1.0 while you
+   pull, stays at 1.0 about 0.9s after you stop, then fades over ~5s (0.8, 0.5, 0.3...). The fade and the idle
+   wobble (up to ~0.4) are what made fake hits. So a hit is only "reading pinned near 1.0". */
+const PH = { on:false };
+function proxyHitStep(v){ if (!PH.on && v >= .9) PH.on = true; else if (PH.on && v < .88) PH.on = false; return PH.on; }
 function hitLoopStart(){
-  if (HIT.loop || S.mode !== 'live' || HIT.supported === false || BG.on) return;
+  if (HIT.loop || S.mode !== 'live' || BG.on) return; // BG: the iPhone app's tracker has the Peak while the app is closed
+  if (S.api === 2) return heatHitStart(); // older firmware: no inhale sensor, time hits from the heater instead
+  if (HIT.supported === false) return;
+  HIT.mode = 'inhale';
   HIT.loop = setInterval(async () => {
     if (S.mode !== 'live' || (S.state !== 8 && S.state !== 7)){ hitLoopStop(); return; }
     if (HIT.inflight) return; HIT.inflight = true;
     try {
       let v = await ble.f32('/p/app/led/dif'); HIT.supported = true;
-      if (isFinite(v) && isProxy() && store.inhOld){
-        if (HIT.pbase == null || S.state === 7) HIT.pbase = HIT.pbase == null ? v : HIT.pbase * .8 + v * .2;           // learn the resting level while heating
-        else if (!HIT.on && Math.abs(v - HIT.pbase) < .02) HIT.pbase = HIT.pbase * .97 + v * .03;                    // drift slowly when quiet
-        v = Math.abs(v - HIT.pbase) * 4;
-      }
       // Proxy: the inhale reading only counts while dynamic inhale is live (dia > 0). Otherwise dif freezes on its last value.
-      if (isFinite(v) && isProxy() && !store.inhOld){ const t = performance.now(); if (!HIT.diaAt || t - HIT.diaAt > 1000){ HIT.diaAt = t; try { HIT.dia = await ble.f32('/p/app/led/dia'); } catch(e){ HIT.dia = 1; } } if (!(HIT.dia > 0)) v = 0; } // dia only checked once a second, so the inhale reading stays fast
-      if (isFinite(v)) hitSample(clamp(v, 0, 1), performance.now());
+      if (isFinite(v) && isProxy()){ const t = performance.now(); if (!HIT.diaAt || t - HIT.diaAt > 1000){ HIT.diaAt = t; try { HIT.dia = await ble.f32('/p/app/led/dia'); } catch(e){ HIT.dia = 1; } } if (!(HIT.dia > 0)) v = 0; } // dia only checked once a second, so the inhale reading stays fast
+      if (isFinite(v)){
+        const now = performance.now();
+        if (isProxy()){ const was = PH.on, on = proxyHitStep(v); HIT.mode = 'proxy'; hitSample(on ? 1 : 0, was && !on ? now - 600 : !was && on ? now - 550 : now); } // Proxy: only a maxed reading is a pull; it pins ~0.8s after you start and lets go ~0.6s after you stop
+        else hitSample(clamp(v, 0, 1), now);
+      }
     }
     catch(e){ if (e && e.status){ HIT.supported = false; hitLoopStop(); } }
     finally { HIT.inflight = false; }
@@ -4309,7 +4379,8 @@ async function saveProfile(i){
     try { await ble.wf32(`/u/app/hc/${i}/intn`, p.vapor); } catch(e){}
     if (p.lightDirty && isProxy()){ await writeProfileColor(i, p.color || '#ffffff'); p.lightDirty = false; }
     if (p.lightDirty){
-      if (p.mood && S.api !== 2){ const blob = moodPayload(p.mood); await ble.writeBlob(`/u/app/hc/${i}/colr`, blob); if (S.active === i){ try { await ble.writeBlob('/p/app/thc/colr', blob); } catch(e){} } }
+      if (p.mood && S.api === 2 && await api2Mood(i, p.mood).catch(() => false)){ if (S.active === i){ try { await api2Mood('temp', p.mood); } catch(e){} } }
+      else if (p.mood && S.api !== 2){ const blob = moodPayload(p.mood); await ble.writeBlob(`/u/app/hc/${i}/colr`, blob); if (S.active === i){ try { await ble.writeBlob('/p/app/thc/colr', blob); } catch(e){} } }
       else await writeProfileColor(i, p.color);
       p.lightDirty = false;
     }
@@ -7825,6 +7896,25 @@ function swatchStyle(ref){
   const sp = moodSpeed(ref), dur = sp > 0 ? Math.max(1.2, Math.min(14, 400 / sp)) : 0;
   return `background:linear-gradient(90deg,${list});background-size:200% 100%;${dur ? `animation:moodPan ${dur.toFixed(1)}s linear infinite` : ''}`;
 }
+/* original Peak / older firmware: moods the way Puffco's app does it.
+   32-color list -> /u/app/led/ca/N, offsets -> /u/app/led/oa/N, then an 8-byte "table" color that points at slot N.
+   Slots: 0 = active session, 1-4 = profiles, 5/6 = lantern. */
+async function api2Mood(target, ref){
+  let L = null; try { L = moodLamp(ref); } catch(e){}
+  if (!L || L.name !== 'pikaled2' || !L.param || !L.param.color) return false; // only the classic animations fit this format
+  const P = L.param;
+  let h = target === 'lantern' ? 5 : target === 'temp' ? 0 : target + 1;
+  if (target === 'lantern' && S.lantern){ try { const r = await ble.read('/p/app/ltrn/colr', 8); if (r[3] === 1 && (r[6] & 15) - 8 === 5) h = 6; } catch(e){} } // swap slots so a lit lantern changes smoothly
+  const c = Array.from(P.color), ca = new Uint8Array(128);
+  for (let k = 0; k < 32; k++){ const j = k * 3; if (j + 2 < c.length){ ca[k * 4] = c[j]; ca[k * 4 + 1] = c[j + 1]; ca[k * 4 + 2] = c[j + 2]; } }
+  await ble.writeBlob(`/u/app/led/ca/${h}`, ca);
+  if (P.offset && P.offset.length){ const oa = new Uint8Array(P.offset.length * 4), dv = new DataView(oa.buffer); P.offset.forEach((v, k) => dv.setUint32(k * 4, v >>> 0, true)); await ble.writeBlob(`/u/app/led/oa/${h}`, oa); }
+  const idx = 8 + h, cl = P.colorLen == null ? 32 : P.colorLen;
+  const rg = new Uint8Array([P.bright == null ? 255 : P.bright, clamp(Math.round(P.speed == null ? 255 : P.speed), 0, 255), P.anim || 0, 1, P.plNum || 0, P.plDenom || 0, (idx << 4) | idx, cl < 32 ? cl : 0]);
+  const path = target === 'lantern' ? '/p/app/ltrn/colr' : target === 'temp' ? '/p/app/thc/colr' : `/u/app/hc/${target}/colr`;
+  await ble.write(path, rg);
+  return true;
+}
 async function writeMoodTo(target, ref){
   const name = ref.name || 'Mood';
   const pi = phIdx(target);
@@ -7837,7 +7927,7 @@ async function writeMoodTo(target, ref){
   if (target === 'lantern'){
     store.lanternMood = ref; save(); drawLightsState(); toast(`${name} picked for the lantern`);
     if (!needLive('light the lantern')) return;
-    if (S.api === 2){ await writeLanternColor(moodColors(ref)[0] || '#ffffff'); }
+    if (S.api === 2){ let ok = false; try { ok = await api2Mood('lantern', ref); } catch(e){} if (!ok) await writeLanternColor(moodColors(ref)[0] || '#ffffff'); }
     else await ble.writeBlob('/p/app/ltrn/colr', moodPayload(ref));
     await ble.write('/p/app/ltrn/cmd', new Uint8Array([1])); S.lantern = true;
     try { await ble.wf32('/p/app/ltrn/time', store.lanternTime || 7200); } catch(e){}
@@ -7847,7 +7937,11 @@ async function writeMoodTo(target, ref){
   const i = target, p = S.profiles[i];
   p.mood = ref; { const mc = moodColors(ref).filter((c, k, a) => a.indexOf(c) === k); p.color = pickAccent(mc) || p.color; p.pal = mc.filter(c => Math.max(...hexBytes(c)) > 40).slice(0, 6); }
   if (S.mode !== 'live'){ p.lightDirty = true; toast(`${name} saved on ${p.name}. It goes to your ${devWord()} when you connect and save.`); render(); return; }
-  if (S.api === 2){ await writeProfileColor(i, p.color); toast(['Opal', 'Indiglow', 'Guardian'].includes(S.edition) ? `The original Peak only shows solid colors, so ${p.name} is set to the mood's main color` : `Your Peak's firmware only shows solid colors, so ${p.name} is set to the mood's main color. Update it in the Puffco app to get animated moods.`); return; }
+  if (S.api === 2){
+    let ok = false; try { ok = await api2Mood(i, ref); if (ok && S.active === i){ try { await api2Mood('temp', ref); } catch(e){} } } catch(e){ ok = false; }
+    if (ok){ toast(`${name} set on ${p.name}`); render(); return; }
+    await writeProfileColor(i, p.color); toast(`This mood can't animate on your Peak yet, so ${p.name} is set to its main color`); return;
+  }
   const blob = moodPayload(ref);
   await ble.writeBlob(`/u/app/hc/${i}/colr`, blob);
   if (S.active === i){ try { await ble.writeBlob('/p/app/thc/colr', blob); } catch(e){} }
@@ -9222,6 +9316,25 @@ function edShareAsk(force){
   const st = (store.edShare || {})[S.edition];
   if (!force && st && st.ok && Date.now() - st.at < 7 * 864e5 && (st.claimed || edHasBug() || !(LB.me || lbStore().meCache || {}).username)) return; // shared recently (again if the badge is still waiting on a profile)
   edShareSend().then(ok => { if (force) toast(ok ? `${S.edition} lights shared` : 'Could not read the lights'); }).catch(e => { if (force) toast('Share failed: ' + (e.message || e)); });
+}
+let ogNoticeShown = false;
+function ogPeakNotice(n){
+  if (ogNoticeShown || S.mode !== 'live' || store.ogSupportSeen) return;
+  const og = S.api === 2 || ['OG', 'Opal', 'Indiglow', 'Guardian'].includes(S.edition);
+  if (!og) return;
+  if ((document.querySelector('.egg') || greetOpen) && n < 20){ setTimeout(() => ogPeakNotice(n + 1), 1500); return; } // wait for other popups
+  ogNoticeShown = true; store.ogSupportSeen = true; save();
+  const name = S.edition && S.edition !== 'OG' ? 'Peak ' + S.edition : 'original Peak';
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Support update" style="gap:12px">
+    <span class="label">New</span>
+    <h2 style="margin:0">Your Peak is supported</h2>
+    <p class="muted" style="margin:0;font-size:14px">Animated moods and the hit timer now work on your ${esc(name)}, so blinkers count too. Thanks for your patience! Some extras may still be missing, report anything weird in the Discord.</p>
+    <button class="btn primary" id="ogOk" style="width:100%">Got it</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now();
+  el.querySelector('#ogOk').addEventListener('click', () => { if (Date.now() - opened < 400) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); });
 }
 // rank changes notice: once, on Stats, only for ranks the tax hits (Blaze and up)
 let rankNoteShown = false;
