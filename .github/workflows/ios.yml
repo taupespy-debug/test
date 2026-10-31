@@ -33,7 +33,9 @@ jobs:
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/Emberline.app Payload/
           # an ad-hoc signature, like most sideload .ipa files: Sideloadly re-signs it with your Apple ID on install
+          for x in Payload/Emberline.app/PlugIns/*.appex; do [ -e "$x" ] && codesign --force --sign - --timestamp=none --generate-entitlement-der "$x"; done
           codesign --force --sign - --timestamp=none --generate-entitlement-der Payload/Emberline.app
+          ls Payload/Emberline.app/PlugIns || true
           codesign -dv Payload/Emberline.app 2>&1 | head -5
           zip -qry Emberline.ipa Payload
           ls -la Emberline.ipa

@@ -38,6 +38,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         uc.add(WeakHandler(self), name: "ble")
         uc.add(WeakHandler(self), name: "app")
         cfg.userContentController = uc
+        WebViewController.unlock120Hz(cfg.preferences)
 
         web = WKWebView(frame: .zero, configuration: cfg)
         web.isOpaque = false
@@ -48,6 +49,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         web.allowsBackForwardNavigationGestures = false
         web.navigationDelegate = self
         web.uiDelegate = self
+        web.alpha = 0 // fades in once the page has drawn: no white or blank flash at launch
         if #available(iOS 16.4, *) { web.isInspectable = true } // Safari > Develop works for debugging
         view = web
     }
@@ -59,6 +61,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         ble.tracker = tracker
         ble.onAwayConnect = { [weak self] in self?.keepAlive.start() } // the Peak came back while the app was closed
         tracker.bridge = ble
+        AppServices.tracker = tracker
+        Notify.shared.setUp()
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(wentAway), name: UIApplication.didEnterBackgroundNotification, object: nil)
         nc.addObserver(self, selector: #selector(cameBack), name: UIApplication.willEnterForegroundNotification, object: nil)
@@ -73,9 +77,17 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         guard let body = m.body as? [String: Any] else { return }
         if m.name == "ble" { ble.handle(body); return }
         // "app" messages: the page's state every couple of seconds, so the tracker knows where things stand
-        if body["op"] as? String == "ctx" {
+        switch body["op"] as? String {
+        case "ctx":
             lastCtx = ctx(from: body)
-            if body["connected"] as? Bool == true { hadDevice = true }
+            if body["connected"] as? Bool == true { if !hadDevice { Notify.shared.ask() }; hadDevice = true }
+            // the screen stays on while heating (no more dimming mid-session)
+            let st = body["state"] as? Int ?? 5
+            UIApplication.shared.isIdleTimerDisabled = body["connected"] as? Bool == true && (st == 7 || st == 8)
+        case "haptic": Haptics.play(body["kind"] as? String ?? "light")
+        case "live": LiveSession.shared.handle(body)
+        case "notify": Notify.shared.send(body["title"] as? String ?? "Emberline", body["body"] as? String ?? "")
+        default: break
         }
     }
 
@@ -84,6 +96,19 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         c.proxy = b["proxy"] as? Bool ?? false
         c.api = b["api"] as? Int ?? 3
         c.open = b["open"] as? [String: Any]
+        if let n = b["name"] as? String { c.name = n }
+        if let col = b["color"] as? String { c.color = col }
+        c.targetF = b["targetF"] as? Int ?? 0
+        c.blk = b["blk"] as? Double ?? 8
+        c.p = b["p"] as? Int ?? 0
+        if let fx = b["fx"] as? [String: Any] {
+            let bytes = { (k: String) -> [UInt8]? in (fx[k] as? String).flatMap { Data(base64Encoded: $0) }.map { [UInt8]($0) } }
+            c.preheat = bytes("preheat"); c.disco = bytes("disco"); c.warn = bytes("warn"); c.back = bytes("back")
+            c.warnSecs = fx["warnSecs"] as? Double ?? 15
+            if let t = fx["torch"] as? [String: Any], let s = t["s"] as? Double, let e = t["e"] as? Double, let pc = t["profC"] as? Double {
+                c.torch = (s, e, pc, t["te"] as? Double ?? 0)
+            }
+        }
         return c
     }
 
@@ -147,6 +172,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     }
 
     func webView(_ w: WKWebView, didFinish n: WKNavigation!) {
+        if w.alpha < 1 { UIView.animate(withDuration: 0.25) { w.alpha = 1 } }
         if let a = pendingResume { pendingResume = nil; DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.resume(a) } }
     }
 
@@ -163,7 +189,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         decisionHandler(.allow)
     }
 
-    func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) { offline(e) }
+    func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) { offline(e); w.alpha = 1 }
     func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: Error) {
         if (e as NSError).code != NSURLErrorCancelled { offline(e) }
     }
@@ -212,6 +238,25 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     @available(iOS 15.0, *)
     func webView(_ w: WKWebView, requestMediaCapturePermissionFor o: WKSecurityOrigin, initiatedByFrame f: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         decisionHandler(WebViewController.hosts.contains(o.host) ? .grant : .prompt)
+    }
+}
+
+// MARK: - 120 Hz
+
+extension WebViewController {
+    // ProMotion: Info.plist has CADisableMinimumFrameDurationOnPhone, and WebKit is told not to hold pages to 60fps.
+    // These are WebKit settings without a public switch, so each one is only used if this iOS has it
+    static func unlock120Hz(_ prefs: WKPreferences) {
+        for name in ["_setPreferPageRenderingUpdatesNear60FPSEnabled:", "setPreferPageRenderingUpdatesNear60FPSEnabled:"] {
+            let sel = NSSelectorFromString(name)
+            if prefs.responds(to: sel) { prefs.perform(sel, with: nil) } // nil = NO
+        }
+        let featuresSel = NSSelectorFromString("_features"), setSel = NSSelectorFromString("_setEnabled:forFeature:")
+        guard (WKPreferences.self as AnyObject).responds(to: featuresSel), prefs.responds(to: setSel),
+              let list = (WKPreferences.self as AnyObject).perform(featuresSel)?.takeUnretainedValue() as? [NSObject] else { return }
+        for f in list where f.responds(to: NSSelectorFromString("key")) {
+            if (f.value(forKey: "key") as? String) == "PreferPageRenderingUpdatesNear60FPSEnabled" { prefs.perform(setSel, with: nil, with: f) }
+        }
     }
 }
 

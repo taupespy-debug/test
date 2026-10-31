@@ -335,6 +335,7 @@ section.view>*{min-width:0}
 .ish-binfo{flex:1;min-width:150px;display:grid;padding-left:12px}.ish-binfo b{font:900 italic 24px var(--f-round,system-ui)}.ish-binfo small{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
 .ish-me{display:flex;align-items:center;gap:22px;padding:18px;border-radius:10px;background:#0a1a5599}.ish-me b{display:block;font:900 italic 20px var(--f-round,system-ui)}.ish-me small{opacity:.8}
 .ish-note{margin:6px 0 0;font-size:12px;opacity:.75}
+html[data-app] #fsRow{display:none!important}
 .ish-entry{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;border:0;cursor:pointer;color:#fff!important;background:linear-gradient(110deg,#2d7cf0,#6a1bb5)!important;font:900 italic 20px var(--f-round,system-ui)}
 .ish-entry small{font:700 12px var(--f-body,system-ui);opacity:.85}
 
@@ -2260,7 +2261,7 @@ body.vr-on #dvFrame{display:none}
     </div>
     <div class="card" style="display:grid;gap:10px">
       <span class="label">Display</span>
-      <label class="toggle"><span>Full screen<br><span class="muted" style="font-size:13px" id="fsNote">Hides the browser bars</span></span><input type="checkbox" class="switch" id="tFull"></label>
+      <label class="toggle" id="fsRow"><span>Full screen<br><span class="muted" style="font-size:13px" id="fsNote">Hides the browser bars</span></span><input type="checkbox" class="switch" id="tFull"></label>
       <span class="label" style="margin-top:6px">Connection</span>
       <label class="toggle"><span>Connect automatically<br><span class="muted" style="font-size:13px">Reconnects to your last Peak when you open Emberline</span></span><input type="checkbox" class="switch" id="tAuto"></label>
       <label class="toggle"><span>Show all Bluetooth devices when pairing<br><span class="muted" style="font-size:13px">Use if your Peak has a custom name and won't show up</span></span><input type="checkbox" class="switch" id="tAll"></label>
@@ -2567,6 +2568,7 @@ function hapticTick(){
   } catch(e){}
 }
 function buzz(p){
+  if (window.EMBER_APP && window.EMBER_APP.native){ window.EMBER_APP.post('haptic', { kind: Array.isArray(p) ? 'success' : p >= 40 ? 'heavy' : p >= 20 ? 'medium' : 'light' }); return; } // the iPhone app: the real Taptic Engine
   try { if (navigator.vibrate && navigator.vibrate(p)) return; } catch(e){}
   const n = Array.isArray(p) ? Math.ceil(p.length / 2) : 1;
   for (let k = 0; k < n; k++) setTimeout(hapticTick, k * 160);
@@ -4015,12 +4017,53 @@ window.addEventListener('pagehide', saveOpenSess);
    iOS freezes the page in the background, so the app's own tracker (ios/Emberline/BackgroundTracker.swift) reads the
    Peak instead. Going away: emberBgPause stops the page's polling and hands over the unfinished session. Coming back:
    emberBgResume gets the sessions it tracked (with hits, so blinkers count) and logs them here like any other. */
+// the exact light data the page would write, so the app plays the same effects on the Peak while it's closed
+function appFx(){
+  const p = S.profiles[S.active] || {};
+  let torch = null; try { if (torchOk() && torchCfg().on) torch = { s: torchCfg().s, e: torchCfg().e, profC: p.tempC, te: TORCH.te || 0 }; } catch(e){}
+  const key = [S.active, S.api, isProxy(), JSON.stringify(phVal(S.active)), store.warnColor, store.warnOn, store.warnSecs, store.bigHit, p.color, p.tempC].join('|');
+  if (appFx.key !== key){
+    const b64 = u8 => { let x = ''; for (const c of u8) x += String.fromCharCode(c); return btoa(x); }, v = {};
+    try { const ph = phVal(S.active); if (ph && S.api !== 2) v.preheat = b64(typeof ph === 'string' ? solidPayload(ph) : moodPayload(ph)); } catch(e){}
+    try { if (store.bigHit !== false){ if (S.api === 2) v.disco = b64(rgbt('#ff00ff')); else { const d = MOODS.excl.find(x => /disco/i.test(x.name)); if (d) v.disco = b64(moodPayload({ kind:'excl', id:d.id, name:d.name })); } } } catch(e){}
+    try { if (store.warnOn !== false){ const hx = store.warnColor || '#ffffff'; v.warn = b64(S.api === 2 ? rgbt(hx) : solidPayload(hx)); v.warnSecs = clamp(+store.warnSecs || 15, 3, 110); } } catch(e){}
+    try { if (S.api === 2) v.back = b64(rgbt(p.color || '#ffffff')); } catch(e){}
+    appFx.key = key; appFx.v = v;
+  }
+  return Object.assign({}, appFx.v, torch ? { torch } : {});
+}
 function appCtx(){
   const o = cur ? { t:cur.t, readyAt:cur.readyAt || 0, p:cur.p, setF:cur.setF || 0, hits:(cur.hits || HIT.hits || []).slice(0, 20), ends:(HIT.ends || []).slice(0, 20) } : null;
-  return { connected: S.mode === 'live', proxy: isProxy(), api: S.api, open: o };
+  const p = S.profiles[S.active] || {};
+  return { connected: S.mode === 'live', state: S.state, proxy: isProxy(), api: S.api, open: o, name: p.name || 'Session', color: /^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : '#8a2bff',
+    targetF: Math.round(c2f(S.liveTargetC || p.tempC || 260)), blk: (cur && cur.blk) || +store.bigHitSecs || 8, p: S.active, fx: appFx() };
 }
 if (IS_APP) setInterval(() => { if (!document.hidden) window.EMBER_APP.post('ctx', appCtx()); }, 2000);
-window.emberBgPause = () => { BG.on = true; try { hitLoopStop(); } catch(e){} saveOpenSess(); return JSON.stringify(appCtx()); };
+
+/* ===== iPhone app: native extras =====
+   Live Activity (lock screen + Dynamic Island) with the session, a native tap on buttons, and no Path-only settings */
+if (IS_APP){
+  document.documentElement.dataset.app = '1';
+  document.addEventListener('pointerdown', e => { const b = e.target.closest && e.target.closest(HZ_SEL + ', .btn, .pchip, [data-p], #nav > button'); if (b && !b.disabled) window.EMBER_APP.post('haptic', { kind: 'light' }); }, { passive: true });
+  let liveOn = false;
+  setInterval(() => {
+    if (BG.on) return; // the app's own tracker sends it while the app is closed
+    const heating = S.mode === 'live' && (S.state === 7 || S.state === 8);
+    if (!heating){ if (liveOn){ liveOn = false; window.EMBER_APP.post('live', { phase: S.state === 9 ? 'done' : 'idle' }); } return; }
+    liveOn = true;
+    const p = S.profiles[S.active] || {}, hits = (cur && cur.hits) || HIT.hits || [], blk = (cur && cur.blk) || +store.bigHitSecs || 8, last = hits.length ? hits[hits.length - 1] : 0;
+    window.EMBER_APP.post('live', { phase: S.state === 7 ? 'heat' : 'ready', name: p.name || 'Session', color: /^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : '#8a2bff',
+      tempF: Math.round(c2f(S.tempC)), targetF: Math.round(c2f(S.liveTargetC || p.tempC || 260)),
+      readyAt: (cur && cur.readyAt) || 0, endsAt: S.state === 8 && S.total ? Date.now() + Math.max(0, S.total - liveElapsed()) * 1000 : 0,
+      hits: hits.length, lastHit: last, best: hits.length ? Math.max(...hits) : 0, blinker: last >= blk });
+  }, 1000);
+}
+window.emberBgPause = () => {
+  const c = appCtx(); BG.on = true; try { hitLoopStop(); } catch(e){} saveOpenSess();
+  try { if (phRestore) phEnd(); } catch(e){} // the app plays these from here: put back anything showing so nothing gets stuck on the Peak
+  try { if (discoRestore) ledJob(async () => { const r = discoRestore; discoRestore = null; if (r) await r(); }); } catch(e){}
+  return JSON.stringify(c);
+};
 window.emberBgResume = json => {
   BG.on = false;
   let r = {}; try { r = JSON.parse(json || '{}') || {}; } catch(e){}
@@ -4570,7 +4613,7 @@ function setHTML(el, html){ if (el && el._h !== html){ el._h = html; el.innerHTM
 /* haptics: only on the moments that matter (start/stop/boost, picking a profile or vapor level, saving lights, marking cleaned) */
 const HZ_SEL = '#bBoost, #bCleaned, #ltSave, #homeChips .pchip, .seg.vap button, .seg.hseg button, #nav > button, .bv-art, .soc-follow, .bv-close, .crop [data-c="ok"]';
 function applyHaptics(){
-  if (document.documentElement.dataset.ui === 'cockpit') return;
+  if (document.documentElement.dataset.ui === 'cockpit' || IS_APP) return; // the iPhone app taps natively (see the pointerdown listener below)
   document.querySelectorAll('[data-bv] > .hz').forEach(x => x.remove());
   document.querySelectorAll(HZ_SEL).forEach(el => {
     if (el.closest('.soc-list')){ const x = el.querySelector(':scope > .hz'); if (x){ x.remove(); el.classList.remove('hz-host'); } return; } // no haptic on Follow in the friends / search lists
@@ -8631,7 +8674,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="pathnotiftry">Notifications test (details)</button><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="appbg">iPhone app: fake closed-app session</button><button class="btn small" data-tt="hwsplash">Halloween startup</button><button class="btn small" data-tt="torch">Torch dab (Rich)</button><button class="btn small" data-tt="torchsim">Torch dab curve demo</button><button class="btn small" data-tt="premmoods">Premium moods (Lights tab)</button><button class="btn small" data-tt="gifpfp">GIF profile picture</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="seshnote">Group sesh Premium notification</button><button class="btn small" data-tt="ednote">Special edition moods Premium notification</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${(() => { try { return Object.keys(DFX_FX); } catch(e){ return []; } })().map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="pathnotiftry">Notifications test (details)</button><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="appfps">Frame rate (120 Hz check)</button><button class="btn small" data-tt="applive">iPhone app: Live Activity demo</button><button class="btn small" data-tt="appnotif">iPhone app: test notification</button><button class="btn small" data-tt="apphaptic">iPhone app: haptics</button><button class="btn small" data-tt="appbg">iPhone app: fake closed-app session</button><button class="btn small" data-tt="hwsplash">Halloween startup</button><button class="btn small" data-tt="torch">Torch dab (Rich)</button><button class="btn small" data-tt="torchsim">Torch dab curve demo</button><button class="btn small" data-tt="premmoods">Premium moods (Lights tab)</button><button class="btn small" data-tt="gifpfp">GIF profile picture</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="seshnote">Group sesh Premium notification</button><button class="btn small" data-tt="ednote">Special edition moods Premium notification</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${(() => { try { return Object.keys(DFX_FX); } catch(e){ return []; } })().map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -8841,6 +8884,21 @@ $('#testTools').addEventListener('click', e => {
   if (k === 'micchk'){ vcMicCheck(); return; }
   if (k === 'sesh'){ seshSheet(); return; }
   if (k === 'gifpfp'){ if (!isPremium()) return toast('Turn on Act as Premium first'); lbPicFile.click(); return; } // pick a GIF, then Save profile in Social
+  if (k === 'appfps'){ let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 1000) requestAnimationFrame(f); else toast(`${n} fps${n > 100 ? ' · 120 Hz is on' : n > 70 ? '' : ' · 60 Hz'}`); }; requestAnimationFrame(f); return; }
+  if (k === 'applive' || k === 'appnotif' || k === 'apphaptic'){
+    if (!IS_APP) return toast('Only in the iPhone app');
+    const post = (op, a) => window.EMBER_APP.post(op, a);
+    if (k === 'appnotif'){ post('notify', { title:'Ready to dab', body:'This is what Emberline sends when your Peak is ready and the app is closed.' }); return; }
+    if (k === 'apphaptic'){ ['light', 'medium', 'heavy', 'success'].forEach((x, i) => setTimeout(() => post('haptic', { kind:x }), i * 450)); return; }
+    const p = S.profiles[S.active] || {}, base = { name: p.name || 'Session', color: /^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : '#8a2bff', targetF: 545 }, t = Date.now();
+    const at = (ms, st) => setTimeout(() => post('live', Object.assign({}, base, st)), ms);
+    at(0, { phase:'heat', tempF:380, hits:0, lastHit:0, best:0 }); at(3000, { phase:'heat', tempF:500, hits:0, lastHit:0, best:0 });
+    at(6000, { phase:'ready', tempF:545, readyAt:t + 6000, endsAt:t + 51000, hits:0, lastHit:0, best:0 });
+    at(12000, { phase:'ready', tempF:540, readyAt:t + 6000, endsAt:t + 51000, hits:1, lastHit:9.2, best:9.2, blinker:true });
+    at(20000, { phase:'ready', tempF:538, readyAt:t + 6000, endsAt:t + 51000, hits:2, lastHit:3.1, best:9.2 });
+    at(26000, { phase:'done', tempF:530, hits:2, lastHit:3.1, best:9.2 });
+    toast('Lock your phone to see it on the lock screen'); return;
+  }
   if (k === 'appbg'){ const t = Date.now() - 120000; window.emberBgPause(); window.emberBgResume(JSON.stringify({ owned:true, sessions:[{ t, p:S.active, readyAt:t + 25000, end:t + 85000, run:60, hits:[9.2, 3.1], hitAt:[14, 30], setF:Math.round(c2f((S.profiles[S.active] || {}).tempC || 260)) }] })); return; } // what the app hands back after a session with the app closed
   if (k === 'hwsplash'){ location.href = location.pathname + (location.search ? location.search + '&' : '?') + 'halloween' + location.hash; return; } // reload with the Halloween splash
   if (k === 'torch' || k === 'torchsim'){ if (!torchOk()) return toast('Turn on Act as rich first'); show('home'); drawTorch(); if (k === 'torchsim'){ TORCH.sim = performance.now(); TORCH.te = 0; } setTimeout(() => { const c = $('#torchCard'); if (c) c.scrollIntoView({ block:'center' }); }, 300); return; }

@@ -4,11 +4,11 @@ name: Emberline
 options:
   bundleIdPrefix: app.emberline
   deploymentTarget:
-    iOS: "15.0"
+    iOS: "17.0"
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.0"
+    MARKETING_VERSION: "1.1"
     CURRENT_PROJECT_VERSION: "1"
     TARGETED_DEVICE_FAMILY: "1"
     CODE_SIGNING_ALLOWED: "NO"
@@ -24,6 +24,9 @@ targets:
         excludes: [bridge.js]
       - path: Emberline/bridge.js
         buildPhase: resources
+      - path: Shared
+    dependencies:
+      - target: EmberWidgets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.emberline.app
@@ -44,9 +47,34 @@ targets:
         UIViewControllerBasedStatusBarAppearance: true
         UILaunchScreen: {}
         UIBackgroundModes: [bluetooth-central, audio]
+        CADisableMinimumFrameDurationOnPhone: true
+        NSSupportsLiveActivities: true
+        NSSupportsLiveActivitiesFrequentUpdates: true
         NSBluetoothAlwaysUsageDescription: Emberline connects to your Puffco over Bluetooth to control it and track your sessions.
         NSBluetoothPeripheralUsageDescription: Emberline connects to your Puffco over Bluetooth to control it and track your sessions.
         NSMicrophoneUsageDescription: Voice chat in 1v1s and group seshes uses your microphone.
         NSCameraUsageDescription: Take a photo for your profile picture.
         NSPhotoLibraryUsageDescription: Pick a photo or GIF for your profile picture or banner.
         ITSAppUsesNonExemptEncryption: false
+  # the Live Activity (lock screen + Dynamic Island)
+  EmberWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.emberline.app.widgets
+        INFOPLIST_FILE: Widgets/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: "YES"
+    info:
+      path: Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: Emberline
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
