@@ -21,7 +21,8 @@ final class KeepAlive {
         guard !running else { return }
         do {
             let s = AVAudioSession.sharedInstance()
-            try s.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            if MusicLights.shared.on { try s.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothA2DP]) } // music lights is listening: keep the mic
+            else { try s.setCategory(.playback, mode: .default, options: [.mixWithOthers]) }
             try s.setActive(true)
             if player == nil {
                 player = try AVAudioPlayer(data: KeepAlive.silence())
@@ -38,7 +39,7 @@ final class KeepAlive {
     func stop() {
         guard running else { return }
         player?.stop()
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        if !MusicLights.shared.on { try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation]) }
         running = false
     }
 

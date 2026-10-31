@@ -274,6 +274,32 @@ final class BackgroundTracker {
         return true
     }
 
+    // MARK: - music lights (MusicLights.swift): the next color on each beat, on the preview channel
+
+    var currentState: Int { lastState }
+    private var musicBusy = false
+    private var musicNext: [UInt8]?
+    func musicLight(_ blob: [UInt8], api2: Bool) {
+        guard linkChars() != nil else { return }
+        if musicBusy { musicNext = blob; return } // still writing the last one: only the newest color matters
+        musicBusy = true
+        led { [weak self] in
+            guard let self = self else { return }
+            if api2 { _ = try? await self.writeA("/p/app/led/pclr", blob) } else { try? await self.writeBlob("/p/app/led/pclr", blob) }
+            self.musicBusy = false
+            if let n = self.musicNext { self.musicNext = nil; self.musicLight(n, api2: api2) }
+        }
+    }
+    func musicClear(api2: Bool) {
+        musicNext = nil
+        guard linkChars() != nil else { return }
+        led { [weak self] in
+            guard let self = self else { return }
+            if api2 { _ = try? await self.writeA("/p/app/led/pclr", [UInt8](repeating: 0, count: 8)); return }
+            if (try? await self.writeA("/p/app/led/pclr", [], flags: 4)) == nil { _ = try? await self.writeA("/p/app/led/pclr", []) }
+        }
+    }
+
     // MARK: - LoRaX, async (for the light jobs)
 
     private func runA(_ op: UInt8, _ body: [UInt8], timeout: Double = 3) async throws -> [UInt8] {

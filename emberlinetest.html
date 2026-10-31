@@ -2155,6 +2155,7 @@ body.vr-on #dvFrame{display:none}
       <div id="moodLib" style="display:grid;gap:16px"></div>
     </div>
     <div class="card" id="moodEditor" hidden style="display:grid;gap:12px"></div>
+    <div class="card" id="appLights" hidden style="display:grid;gap:10px"></div>
     <div class="card" style="display:grid;gap:10px">
       <div class="row between"><span class="label">LED brightness</span><span class="muted" style="font-size:13px">for <b id="brightFor" style="color:var(--fg)">this profile</b></span></div>
       <div id="brightList" style="display:grid;gap:4px"></div>
@@ -4032,11 +4033,19 @@ function appFx(){
   }
   return Object.assign({}, appFx.v, torch ? { torch } : {});
 }
+// the bell's own request, so the app can check for invites and followers while it's closed
+function appNotes(){
+  try {
+    if (!lbUsesPuffco() || !lbStore().joined) return null;
+    const a = acct(), pid = a.data && a.data.user && a.data.user.id;
+    return { url: SB_URL + '/functions/v1/player', key: SB_KEY, body: { puffcoToken: a.auth.accessToken, puffcoId: pid, device: devInfo() }, seen: (NOTE.list || []).map(n => String(n.id)) };
+  } catch(e){ return null; }
+}
 function appCtx(){
   const o = cur ? { t:cur.t, readyAt:cur.readyAt || 0, p:cur.p, setF:cur.setF || 0, hits:(cur.hits || HIT.hits || []).slice(0, 20), ends:(HIT.ends || []).slice(0, 20) } : null;
   const p = S.profiles[S.active] || {};
   return { connected: S.mode === 'live', state: S.state, proxy: isProxy(), api: S.api, open: o, name: p.name || 'Session', color: /^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : '#8a2bff',
-    targetF: Math.round(c2f(S.liveTargetC || p.tempC || 260)), blk: (cur && cur.blk) || +store.bigHitSecs || 8, p: S.active, fx: appFx() };
+    targetF: Math.round(c2f(S.liveTargetC || p.tempC || 260)), blk: (cur && cur.blk) || +store.bigHitSecs || 8, p: S.active, fx: appFx(), notes: appNotes() };
 }
 if (IS_APP) setInterval(() => { if (!document.hidden) window.EMBER_APP.post('ctx', appCtx()); }, 2000);
 
@@ -4058,6 +4067,87 @@ if (IS_APP){
       hits: hits.length, lastHit: last, best: hits.length ? Math.max(...hits) : 0, blinker: last >= blk });
   }, 1000);
 }
+
+/* ===== session card: a story-size picture of your last session, for Instagram Stories, Snapchat and friends =====
+   In the iPhone app it opens the native share sheet; in a browser it uses the browser's share, or downloads it */
+async function sessionCardPng(){
+  const all = rankSessions().slice().sort((a, b) => a.t - b.t), s = all[all.length - 1]; if (!s) return null;
+  const hits = s.hits || [], best = hits.length ? Math.max(...hits) : 0, blinks = hits.filter(h => h >= blinkOf(s)).length;
+  let rp = 0; try { rp = rankFor(all).rp - rankFor(all.slice(0, -1)).rp; } catch(e){}
+  const me = LB.me || lbStore().meCache || {}, name = me.username || store.name || 'Emberline', r = myRank(), len = typeof s.run === 'number' ? s.run : s.dur || 0;
+  const p = S.profiles[s.p] || S.profiles[S.active] || {}, col = /^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : '#8a2bff';
+  try { await document.fonts.load('700 80px "Chakra Petch"'); } catch(e){}
+  const W = 1080, H = 1920, c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#0b0a10'); g.addColorStop(.55, '#140a24'); g.addColorStop(1, '#05040a'); x.fillStyle = g; x.fillRect(0, 0, W, H);
+  const glow = (cx, cy, rad, color) => { const rg = x.createRadialGradient(cx, cy, 0, cx, cy, rad); rg.addColorStop(0, color + 'aa'); rg.addColorStop(1, color + '00'); x.fillStyle = rg; x.fillRect(0, 0, W, H); };
+  glow(W * .2, H * .18, 700, col); glow(W * .85, H * .82, 650, '#7300ff');
+  const font = (w, px, fam) => { x.font = `${w} ${px}px ${fam || '"Chakra Petch", system-ui, sans-serif'}`; };
+  x.textAlign = 'center'; x.fillStyle = '#fff';
+  font(700, 64); x.letterSpacing = '18px'; x.fillText('EMBERLINE', W / 2 + 9, 230); x.letterSpacing = '0px';
+  font(600, 44, 'system-ui, sans-serif'); x.fillStyle = 'rgba(255,255,255,.7)'; x.fillText(new Date(s.t).toLocaleDateString([], { weekday:'long', month:'short', day:'numeric' }), W / 2, 310);
+  x.fillStyle = col; font(800, 70, 'system-ui, sans-serif'); x.fillText(s.name || 'Session', W / 2, 470);
+  // the big number: best hit
+  x.fillStyle = '#fff'; font(700, 300); x.fillText(best ? best.toFixed(1) + 's' : '—', W / 2, 820);
+  font(600, 48, 'system-ui, sans-serif'); x.fillStyle = 'rgba(255,255,255,.75)'; x.fillText('best hit', W / 2, 900);
+  if (blinks){ x.fillStyle = '#ffd23f'; font(800, 64, 'system-ui, sans-serif'); x.fillText(`🔥 ${blinks} BLINKER${blinks > 1 ? 'S' : ''}`, W / 2, 1020); }
+  const tiles = [[hits.length, 'hits'], [(rp > 0 ? '+' : '') + rp, 'RP'], [len ? len + 's' : '—', 'length']];
+  tiles.forEach(([v, l], i) => { const cx = W / 2 + (i - 1) * 320, y = 1180;
+    x.fillStyle = 'rgba(255,255,255,.07)'; x.beginPath(); x.roundRect(cx - 140, y - 100, 280, 220, 40); x.fill();
+    x.fillStyle = '#fff'; font(700, 92); x.fillText(String(v), cx, y + 30); font(600, 40, 'system-ui, sans-serif'); x.fillStyle = 'rgba(255,255,255,.7)'; x.fillText(l, cx, y + 90); });
+  x.fillStyle = '#fff'; font(800, 60, 'system-ui, sans-serif'); x.fillText(name, W / 2, 1520);
+  x.fillStyle = col; font(700, 46, 'system-ui, sans-serif'); x.fillText(`${r.tier.n} · ${r.rp} RP this month`, W / 2, 1590);
+  font(600, 38, 'system-ui, sans-serif'); x.fillStyle = 'rgba(255,255,255,.5)'; x.fillText('emberlineapp.github.io/emberline', W / 2, 1800);
+  return c.toDataURL('image/png');
+}
+async function shareSessionCard(){
+  const png = await sessionCardPng(); if (!png){ toast('No session yet'); return; }
+  const text = 'My session on Emberline 🔥';
+  if (IS_APP){ window.EMBER_APP.post('share', { png, text }); return; }
+  try {
+    const blob = await (await fetch(png)).blob(), file = new File([blob], 'emberline-session.png', { type:'image/png' });
+    if (navigator.canShare && navigator.canShare({ files:[file] })){ await navigator.share({ files:[file], text }); return; }
+  } catch(e){ if (e && e.name === 'AbortError') return; }
+  const a = document.createElement('a'); a.href = png; a.download = 'emberline-session.png'; document.body.appendChild(a); a.click(); a.remove(); toast('Saved the picture');
+}
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('[data-sesshare]')){ e.stopPropagation(); shareSessionCard(); } });
+
+/* ===== iPhone app: camera color and music sync (Lights tab) ===== */
+let camLiveAt = 0;
+window.emberCameraLive = hex => { // the Peak follows the camera as you aim
+  if (S.mode !== 'live' || (S.state >= 7 && S.state <= 9) || isProxy() || Date.now() - camLiveAt < 400) return;
+  camLiveAt = Date.now(); ledJob(() => previewWrite(hex).catch(() => {}));
+};
+window.emberCameraColor = hex => {
+  ledJob(previewClear);
+  if (!hex) return;
+  const i = S.active, p = S.profiles[i]; if (!p) return;
+  p.color = hex; p.pal = null; p.mood = null; p.lightDirty = true;
+  if (S.mode === 'live') saveProfile(i).then(() => toast(`${p.name} is now ${hex.toUpperCase()}`)).catch(() => {}); else toast(`Color set. Connect to save it to your ${devWord()}`);
+  render(); try { drawProfiles(); } catch(e){}
+};
+window.emberMusicState = on => { store.musicOn = !!on; save(); drawAppLights(); if (!on && store.musicWant) toast('Music sync needs the microphone. Turn it on in Settings > Emberline'); store.musicWant = false; };
+function musicToggle(){
+  if (!IS_APP) return;
+  if (store.musicOn){ window.EMBER_APP.post('music', { on:false }); return; }
+  if (isProxy()) return toast('Music sync works on the Peak for now');
+  const p = S.profiles[S.active] || {}, cols = (p.pal && p.pal.length > 1 ? p.pal : ['#ff0040', '#ff8a00', '#ffe600', '#00ff6a', '#00c8ff', '#7300ff', '#ff00d4']).slice(0, 8);
+  const b64 = u8 => { let t = ''; for (const c of u8) t += String.fromCharCode(c); return btoa(t); };
+  store.musicWant = true;
+  window.EMBER_APP.post('music', { on:true, api2: S.api === 2, blobs: cols.map(h => b64(S.api === 2 ? rgbt(h) : solidPayload(h))) });
+}
+function drawAppLights(){
+  const el = $('#appLights'); if (!el) return;
+  el.hidden = !IS_APP; if (!IS_APP) return;
+  el.innerHTML = `<div class="row between"><span class="label">iPhone app</span><span class="muted" style="font-size:12px">Only in the app</span></div>
+    <div class="shop-actions" style="margin:0"><button class="btn small" data-camcolor>📷 Color from camera</button><button class="btn small ${store.musicOn ? 'primary' : ''}" data-music>🎵 Music sync: ${store.musicOn ? 'On' : 'Off'}</button></div>
+    <p class="muted" style="margin:0;font-size:13px">Camera: aim at anything and your Peak copies the color, then tap Use color. Music sync: the light moves to the beat of whatever's playing, even with the app closed (uses the mic, not during a session).</p>`;
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest) return;
+  if (e.target.closest('[data-camcolor]')){ if (S.mode !== 'live') toast(`Connect your ${devWord()} to see it live`); window.EMBER_APP && window.EMBER_APP.post('camera', {}); }
+  if (e.target.closest('[data-music]')) musicToggle();
+});
+setTimeout(() => { store.musicOn = false; drawAppLights(); }, 0); // a fresh start never has music sync running
 window.emberBgPause = () => {
   const c = appCtx(); BG.on = true; try { hitLoopStop(); } catch(e){} saveOpenSess();
   try { if (phRestore) phEnd(); } catch(e){} // the app plays these from here: put back anything showing so nothing gets stuck on the Peak
@@ -5082,7 +5172,7 @@ function lastSessionHtml(){
   const mins = Math.round((Date.now() - s.t) / 60000), when = mins < 1 ? 'just now' : mins < 60 ? mins + 'm ago' : mins < 1440 ? Math.round(mins / 60) + 'h ago' : new Date(s.t).toLocaleDateString([], { month:'short', day:'numeric' });
   const len = typeof s.run === 'number' ? s.run : s.dur || 0;
   const why = notCounted(s) || (s.t < m0.getTime() ? 'From last month' : '');
-  return `<div class="last-sess"><div class="row between"><span class="label">Last session</span><span class="muted" style="font-size:12px">${esc(s.name || 'Session')} · ${when}</span></div>
+  return `<div class="last-sess"><div class="row between"><span class="label">Last session</span><span class="row" style="gap:8px"><span class="muted" style="font-size:12px">${esc(s.name || 'Session')} · ${when}</span><button class="btn small" data-sesshare style="padding:4px 10px;min-height:0">Share</button></span></div>
     <div class="ls-grid"><div><b>${rp > 0 ? '+' + rp : rp}</b><span>RP</span></div><div><b>${hits.length}</b><span>hit${hits.length === 1 ? '' : 's'}</span></div><div><b>${best ? best.toFixed(1) + 's' : '-'}</b><span>best hit</span></div><div><b>${blinks}</b><span>blinker${blinks === 1 ? '' : 's'}</span></div><div><b>${len ? len + 's' : '-'}</b><span>length</span></div></div>
     ${parts && !why ? `<p class="muted" style="margin:0;font-size:12px">${parts}</p>` : ''}${why ? `<p class="muted" style="margin:0;font-size:12px">${why}</p>` : ''}</div>`;
 }
@@ -5221,11 +5311,18 @@ function gearHtml(list, empty){
   return `<div class="gear"><span class="label">Gear</span><div class="gear-list">${list.map(chip).join('')}</div></div>`;
 }
 // your stats for your profile: this month's counted sessions, hits, best hit, days you dabbed, and all-time blinkers
+// days in a row with a session, up to today (or yesterday, so it doesn't reset before your first dab of the day)
+function dabStreak(){
+  const day = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); }, have = new Set(rankSessions().map(x => day(x.t)));
+  let d = day(Date.now()); if (!have.has(d)) d -= 864e5;
+  let n = 0; while (have.has(d) && n < 3650){ n++; d = day(d - 12 * 36e5); }
+  return n;
+}
 function myStats(){
   const d = new Date(), m0 = new Date(d.getFullYear(), d.getMonth(), 1).getTime(), all = rankSessions();
   const ss = all.filter(s => s.t >= m0 && !(typeof s.run === 'number' && s.run < 20) && !lowTemp(s)), hits = ss.flatMap(s => s.hits || []);
   return { sessions: ss.length, hits: hits.length, best: hits.length ? Math.round(Math.max(...hits) * 10) / 10 : 0,
-    days: new Set(ss.map(s => new Date(s.t).toDateString())).size, blAll: Math.max(all.reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0), serverBlinkers()), // never lower than another device already sent
+    days: new Set(ss.map(s => new Date(s.t).toDateString())).size, clean: sinceClean(), cleanEvery: +store.cleanEvery || 150, streak: dabStreak(), blAll: Math.max(all.reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0), serverBlinkers()), // never lower than another device already sent
     ...duelPubStats() };
 }
 // 1v1 record for your profile: real matches only (no bot or demo), all time. Never lower than what another device sent
@@ -8674,7 +8771,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="pathnotiftry">Notifications test (details)</button><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="appfps">Frame rate (120 Hz check)</button><button class="btn small" data-tt="applive">iPhone app: Live Activity demo</button><button class="btn small" data-tt="appnotif">iPhone app: test notification</button><button class="btn small" data-tt="apphaptic">iPhone app: haptics</button><button class="btn small" data-tt="appbg">iPhone app: fake closed-app session</button><button class="btn small" data-tt="hwsplash">Halloween startup</button><button class="btn small" data-tt="torch">Torch dab (Rich)</button><button class="btn small" data-tt="torchsim">Torch dab curve demo</button><button class="btn small" data-tt="premmoods">Premium moods (Lights tab)</button><button class="btn small" data-tt="gifpfp">GIF profile picture</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="seshnote">Group sesh Premium notification</button><button class="btn small" data-tt="ednote">Special edition moods Premium notification</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${(() => { try { return Object.keys(DFX_FX); } catch(e){ return []; } })().map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="pathnotiftry">Notifications test (details)</button><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="sesscard">Session share card</button><button class="btn small" data-tt="appcam">iPhone app: camera color</button><button class="btn small" data-tt="appmusic">iPhone app: music sync</button><button class="btn small" data-tt="appfps">Frame rate (120 Hz check)</button><button class="btn small" data-tt="applive">iPhone app: Live Activity demo</button><button class="btn small" data-tt="appnotif">iPhone app: test notification</button><button class="btn small" data-tt="apphaptic">iPhone app: haptics</button><button class="btn small" data-tt="appbg">iPhone app: fake closed-app session</button><button class="btn small" data-tt="hwsplash">Halloween startup</button><button class="btn small" data-tt="torch">Torch dab (Rich)</button><button class="btn small" data-tt="torchsim">Torch dab curve demo</button><button class="btn small" data-tt="premmoods">Premium moods (Lights tab)</button><button class="btn small" data-tt="gifpfp">GIF profile picture</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="seshnote">Group sesh Premium notification</button><button class="btn small" data-tt="ednote">Special edition moods Premium notification</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${(() => { try { return Object.keys(DFX_FX); } catch(e){ return []; } })().map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -8884,6 +8981,9 @@ $('#testTools').addEventListener('click', e => {
   if (k === 'micchk'){ vcMicCheck(); return; }
   if (k === 'sesh'){ seshSheet(); return; }
   if (k === 'gifpfp'){ if (!isPremium()) return toast('Turn on Act as Premium first'); lbPicFile.click(); return; } // pick a GIF, then Save profile in Social
+  if (k === 'sesscard'){ sessionCardPng().then(png => { if (!png) return toast('No session yet'); const el = document.createElement('div'); el.className = 'egg on'; el.style.zIndex = 300; el.innerHTML = `<div class="egg-card" style="gap:10px"><img src="${png}" style="width:100%;border-radius:16px"><div class="row" style="gap:8px"><button class="btn primary" data-sesshare>Share</button><button class="btn" data-x>Close</button></div></div>`; el.addEventListener('click', ev => { if (ev.target === el || ev.target.closest('[data-x]') || ev.target.closest('[data-sesshare]')) el.remove(); }); document.body.appendChild(el); }); return; }
+  if (k === 'appcam'){ if (!IS_APP) return toast('Only in the iPhone app'); window.EMBER_APP.post('camera', {}); return; }
+  if (k === 'appmusic'){ if (!IS_APP) return toast('Only in the iPhone app'); musicToggle(); return; }
   if (k === 'appfps'){ let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 1000) requestAnimationFrame(f); else toast(`${n} fps${n > 100 ? ' · 120 Hz is on' : n > 70 ? '' : ' · 60 Hz'}`); }; requestAnimationFrame(f); return; }
   if (k === 'applive' || k === 'appnotif' || k === 'apphaptic'){
     if (!IS_APP) return toast('Only in the iPhone app');

@@ -99,49 +99,25 @@ final class Notify: NSObject, UNUserNotificationCenterDelegate {
     }
 }
 
-// MARK: - Siri and Shortcuts
+// MARK: - Siri and Shortcuts (the intents themselves are in Shared/EmberIntents.swift, also used by the controls)
 
 enum AppServices {
     static weak var tracker: BackgroundTracker?
-    static func command(_ c: BackgroundTracker.Command) async -> BackgroundTracker.CommandResult {
-        await withCheckedContinuation { cont in
+    static func setUp() {
+        IntentHook.run = { c, done in
             DispatchQueue.main.async {
-                guard let t = tracker else { return cont.resume(returning: .notConnected) }
-                t.command(c) { cont.resume(returning: $0) }
+                guard let t = tracker else { return done("Open Emberline and connect your Puffco first.") }
+                let cmd: BackgroundTracker.Command = c == "start" ? .start : c == "stop" ? .stop : .boost
+                t.command(cmd) { r in
+                    switch r {
+                    case .ok: done(c == "start" ? "Heating up 🔥" : c == "stop" ? "Stopped." : "Boosted ⚡️")
+                    case .notConnected: done("Open Emberline and connect your Puffco first.")
+                    case .proxyBoost: done("On a Proxy, Boost from the app.")
+                    case .failed: done("Your Puffco didn't answer. Try again.")
+                    }
+                }
             }
         }
-    }
-    static func say(_ r: BackgroundTracker.CommandResult, ok: String) -> String {
-        switch r {
-        case .ok: return ok
-        case .notConnected: return "Open Emberline and connect your Puffco first."
-        case .proxyBoost: return "On a Proxy, Boost from the app."
-        case .failed: return "Your Puffco didn't answer. Try again."
-        }
-    }
-}
-
-struct StartHeatIntent: AppIntent {
-    static let title: LocalizedStringResource = "Start heating"
-    static let description = IntentDescription("Starts a heat cycle on your Puffco with the profile it's on.")
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        .result(dialog: IntentDialog(stringLiteral: AppServices.say(await AppServices.command(.start), ok: "Heating up 🔥")))
-    }
-}
-
-struct StopHeatIntent: AppIntent {
-    static let title: LocalizedStringResource = "Stop heating"
-    static let description = IntentDescription("Stops the heat cycle on your Puffco.")
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        .result(dialog: IntentDialog(stringLiteral: AppServices.say(await AppServices.command(.stop), ok: "Stopped.")))
-    }
-}
-
-struct BoostIntent: AppIntent {
-    static let title: LocalizedStringResource = "Boost"
-    static let description = IntentDescription("Boosts the heat cycle on your Peak.")
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        .result(dialog: IntentDialog(stringLiteral: AppServices.say(await AppServices.command(.boost), ok: "Boosted ⚡️")))
     }
 }
 

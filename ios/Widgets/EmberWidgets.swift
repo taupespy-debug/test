@@ -4,7 +4,14 @@ import ActivityKit
 
 @main
 struct EmberWidgets: WidgetBundle {
-    var body: some Widget { EmberLiveActivity() }
+    var body: some Widget {
+        EmberLiveActivity()
+        StatsWidget()
+        AurumWidget()
+        StartHeatControl()
+        StopHeatControl()
+        BoostControl()
+    }
 }
 
 extension Color {
@@ -60,6 +67,21 @@ private struct Bar: View {
     }
 }
 
+// Boost and Stop right on the lock screen / Dynamic Island (they run in the app, which holds the Bluetooth link)
+private struct ActionRow: View {
+    let tint: Color
+    var body: some View {
+        HStack(spacing: 10) {
+            Button(intent: BoostIntent()) { Label("Boost", systemImage: "bolt.fill").frame(maxWidth: .infinity) }
+                .tint(tint)
+            Button(intent: StopHeatIntent()) { Label("Stop", systemImage: "stop.fill").frame(maxWidth: .infinity) }
+                .tint(.gray)
+        }
+        .buttonStyle(.borderedProminent)
+        .font(.subheadline.bold())
+    }
+}
+
 private struct LockView: View {
     let a: EmberActivity
     let s: EmberActivity.ContentState
@@ -83,6 +105,7 @@ private struct LockView: View {
                 }
             }
             Bar(s: s, tint: tint)
+            if s.phase != "done" { ActionRow(tint: tint) }
         }
         .padding(16)
     }
@@ -114,6 +137,7 @@ struct EmberLiveActivity: Widget {
                             HitsLine(s: ctx.state).font(.subheadline)
                         }
                         Bar(s: ctx.state, tint: tint)
+                        if ctx.state.phase != "done" { ActionRow(tint: tint) }
                     }
                 }
             } compactLeading: {

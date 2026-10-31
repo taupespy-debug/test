@@ -15,6 +15,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     private let bg = UIColor(red: 11 / 255, green: 10 / 255, blue: 16 / 255, alpha: 1)
 
     private var lastCtx = BackgroundTracker.Ctx()
+    private var pageState = 5
     private var hadDevice = false
     private var awayTimer: Timer?
     private var awaySince: Date?
@@ -63,6 +64,13 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         tracker.bridge = ble
         AppServices.tracker = tracker
         Notify.shared.setUp()
+        MusicLights.shared.tracker = tracker
+        MusicLights.shared.idle = { [weak self] in
+            guard let self = self else { return true }
+            let st = self.tracker.owning ? self.tracker.currentState : self.pageState
+            return !(7...9).contains(st) // the preview channel is ignored mid-session anyway
+        }
+        MusicLights.shared.onChange = { [weak self] on in self?.ble.js("window.emberMusicState && window.emberMusicState(\(on))") }
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(wentAway), name: UIApplication.didEnterBackgroundNotification, object: nil)
         nc.addObserver(self, selector: #selector(cameBack), name: UIApplication.willEnterForegroundNotification, object: nil)
@@ -83,10 +91,19 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             if body["connected"] as? Bool == true { if !hadDevice { Notify.shared.ask() }; hadDevice = true }
             // the screen stays on while heating (no more dimming mid-session)
             let st = body["state"] as? Int ?? 5
+            pageState = st
+            if let n = body["notes"] as? [String: Any] { NotesWatch.shared.configure(n) }
             UIApplication.shared.isIdleTimerDisabled = body["connected"] as? Bool == true && (st == 7 || st == 8)
         case "haptic": Haptics.play(body["kind"] as? String ?? "light")
         case "live": LiveSession.shared.handle(body)
         case "notify": Notify.shared.send(body["title"] as? String ?? "Emberline", body["body"] as? String ?? "")
+        case "share": share(body)
+        case "camera": camera()
+        case "music":
+            if body["on"] as? Bool == true {
+                let blobs = (body["blobs"] as? [String] ?? []).compactMap { Data(base64Encoded: $0) }.map { [UInt8]($0) }
+                MusicLights.shared.start(blobs: blobs, api2: body["api2"] as? Bool ?? false)
+            } else { MusicLights.shared.stop() }
         default: break
         }
     }
@@ -115,6 +132,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     // MARK: - background
 
     @objc private func wentAway() {
+        NotesWatch.shared.startAway() // invites and followers, even with no Peak around
+        if MusicLights.shared.on { keepAlive.start() }
         guard hadDevice || ble.isConnected(ble.activeId) else { return }
         keepAlive.start()
         awaySince = Date(); lastSeenAway = Date()
@@ -149,6 +168,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     @objc private func cameBack() {
         awayTimer?.invalidate(); awayTimer = nil
         idleTimer?.invalidate(); idleTimer = nil
+        NotesWatch.shared.stopAway()
         keepAlive.stop()
         let wasOwning = tracker.owning
         let out = tracker.release()
@@ -238,6 +258,28 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     @available(iOS 15.0, *)
     func webView(_ w: WKWebView, requestMediaCapturePermissionFor o: WKSecurityOrigin, initiatedByFrame f: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         decisionHandler(WebViewController.hosts.contains(o.host) ? .grant : .prompt)
+    }
+}
+
+// MARK: - share sheet and camera color picker
+
+extension WebViewController {
+    // the session card (a PNG from the page) to Instagram Stories, Snapchat, Messages... through the share sheet
+    func share(_ b: [String: Any]) {
+        guard let s = b["png"] as? String, let comma = s.firstIndex(of: ","), let d = Data(base64Encoded: String(s[s.index(after: comma)...])),
+              let img = UIImage(data: d) else { return }
+        var items: [Any] = [img]
+        if let t = b["text"] as? String, !t.isEmpty { items.append(t) }
+        let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        (presentedViewController ?? self).present(vc, animated: true)
+    }
+
+    func camera() {
+        let pk = CameraColorPicker()
+        pk.modalPresentationStyle = .fullScreen
+        pk.onLive = { [weak self] hx in self?.ble.js("window.emberCameraLive && window.emberCameraLive('\(hx)')") }
+        pk.onDone = { [weak self] hx in self?.ble.js("window.emberCameraColor && window.emberCameraColor(\(hx.map { "'\($0)'" } ?? "null"))") }
+        present(pk, animated: true)
     }
 }
 
