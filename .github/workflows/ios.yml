@@ -32,6 +32,9 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/Emberline.app Payload/
+          # an ad-hoc signature, like most sideload .ipa files: Sideloadly re-signs it with your Apple ID on install
+          codesign --force --sign - --timestamp=none --generate-entitlement-der Payload/Emberline.app
+          codesign -dv Payload/Emberline.app 2>&1 | head -5
           zip -qry Emberline.ipa Payload
           ls -la Emberline.ipa
       - name: Publish to Releases (ios-latest)

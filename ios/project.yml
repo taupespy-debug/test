@@ -26,7 +26,8 @@ targets:
         buildPhase: resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.emberline.ios
+        PRODUCT_BUNDLE_IDENTIFIER: com.emberline.app
+        TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_FILE: Emberline/Info.plist
         GENERATE_INFOPLIST_FILE: "NO"
     info:
