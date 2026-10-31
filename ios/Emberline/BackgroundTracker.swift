@@ -191,7 +191,7 @@ final class BackgroundTracker {
             read("/p/app/htr/tcmd", 4) { [weak self] r in
                 guard let self = self else { return }
                 self.busy = false
-                if case .success(let b) = r { let t = self.number(b, scale: 10); if t > 100 && t < 400 { self.cur?.setF = max(self.cur?.setF ?? 0, Int((t * 9 / 5 + 32).rounded())) } }
+                if case .success(let b) = r { let t = self.number(b, scale: 10); if t > 100 && t < 400, var c = self.cur { c.setF = max(c.setF, Int((t * 9 / 5 + 32).rounded())); self.cur = c } }
             }
             return
         }

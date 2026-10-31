@@ -34,6 +34,7 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     private var writeWaits: [String: [Int]] = [:]
     private var notifyWaits: [String: [Int]] = [:]
     private var availWaits: [Int] = []
+    private var readyWaits: [() -> Void] = [] // calls that came in before Bluetooth finished starting up
     private var noResponseQueue: [(p: CBPeripheral, c: CBCharacteristic, d: Data, id: Int)] = []
 
     // device picker / scan
@@ -62,9 +63,9 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         case "avail":
             if central.state == .unknown || central.state == .resetting { availWaits.append(id) }
             else { reply(id, true, ["on": central.state == .poweredOn]) }
-        case "known": reply(id, true, ["list": knownList()])
-        case "request": request(id, body["opts"] as? [String: Any] ?? [:])
-        case "connect": connect(id, body["dev"] as? String)
+        case "known": whenReady { [weak self] in self?.reply(id, true, ["list": self?.knownList() ?? []]) }
+        case "request": whenReady { [weak self] in self?.request(id, body["opts"] as? [String: Any] ?? [:]) }
+        case "connect": whenReady { [weak self] in self?.connect(id, body["dev"] as? String) }
         case "disconnect":
             if let u = uuid(body["dev"]), let p = peripherals[u] { manualClose.insert(u); central.cancelPeripheralConnection(p) }
         case "service": service(id, body)
@@ -74,6 +75,11 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         case "notify": notify(id, body)
         default: reply(id, false, ["name": "NotSupportedError", "msg": "Unknown op \(op)"])
         }
+    }
+
+    // right after launch Bluetooth is still starting: hold the call until it knows if it's on
+    private func whenReady(_ f: @escaping () -> Void) {
+        if central.state == .unknown || central.state == .resetting { readyWaits.append(f) } else { f() }
     }
 
     private func uuid(_ v: Any?) -> UUID? { (v as? String).flatMap { UUID(uuidString: $0) } }
@@ -191,6 +197,7 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     // MARK: - connect
 
     private func connect(_ id: Int, _ dev: String?) {
+        guard central.state == .poweredOn else { return fail(id, "NetworkError", "Bluetooth is off.") }
         guard let u = uuid(dev) else { return fail(id, "NotFoundError", "Unknown device") }
         var p = peripherals[u]
         if p == nil, let r = central.retrievePeripherals(withIdentifiers: [u]).first { adopt(r); p = r }
@@ -379,6 +386,8 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         if c.state != .unknown && c.state != .resetting {
             let ids = availWaits; availWaits = []
             ids.forEach { reply($0, true, ["on": on]) }
+            let fs = readyWaits; readyWaits = []
+            fs.forEach { $0() }
         }
         js("window.__emberBle&&window.__emberBle.avail(\(on))")
         if on, away, let u = activeId, let p = peripherals[u], p.state == .disconnected { c.connect(p, options: nil) }
