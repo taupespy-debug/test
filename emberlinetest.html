@@ -5488,18 +5488,9 @@ function stripeBlock(isPrem){
           : `<button class="btn primary" disabled style="width:100%">Make your profile in Social first</button>`}`;
 }
 // back from the checkout: ask the server once a few times so Premium shows right away
-// the checkout opens in a real browser, where Apple Pay and saved cards work. The iPhone app already sends outside
-// links to your default browser; Path would keep it inside, so hand it to Safari there (and fall back if that's blocked)
-document.addEventListener('click', e => {
-  const a = e.target.closest && e.target.closest('[data-stripe]'); if (!a) return;
-  store.stripeAt = Date.now(); save();
-  if (IS_APP || !IS_PATH) return; // app: default browser; other browsers: a new tab
-  e.preventDefault();
-  const url = a.href; let left = false;
-  const gone = () => { left = true; }; document.addEventListener('visibilitychange', gone, { once:true });
-  location.href = 'x-safari-' + url; // opens Safari from another app (iOS 17+)
-  setTimeout(() => { document.removeEventListener('visibilitychange', gone); if (!left && !document.hidden) window.open(url, '_blank'); }, 1500);
-}, true);
+// the checkout opens outside the page: in the iPhone app that's your default browser (Apple Pay works there).
+// Path keeps it inside Path (handing it to Safari with x-safari- just showed Path's error page), and cards work there
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('[data-stripe]')){ store.stripeAt = Date.now(); save(); } });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && store.stripeAt && Date.now() - store.stripeAt < 30 * 60000) stripeCheck(0); });
 async function stripeCheck(n){
   if (isPremium()){ store.stripeAt = 0; save(); return; }
