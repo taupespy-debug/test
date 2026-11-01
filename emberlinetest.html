@@ -4920,12 +4920,29 @@ function drawLightsState(){ $('#tLantern').checked = S.lantern; $('#tStealth').c
 
 function drawCelDev(){
   const el = $('#celDev'); if (!el) return;
-  if (!(lbStore().dev || (LB.me && LB.me.dev))){ el.hidden = true; return; }
+  const dev = lbStore().dev || (LB.me && LB.me.dev);
+  if (!dev && !isRich()){ el.hidden = true; return; }
   el.hidden = false;
-  el.innerHTML = `<span class="label">Dev · preview animations</span>
+  el.innerHTML = `<span class="label">Dev · accounts</span><div class="tiles" id="devCounts" style="margin:0"><p class="muted" style="margin:0;font-size:13px">Counting…</p></div>
+    <button class="btn small" data-devcount style="justify-self:start">Refresh</button>
+    ${dev ? `<span class="label">Dev · preview animations</span>
     <p class="muted" style="margin:0;font-size:13px">Only you see this. Nothing here changes your points.</p>
-    <div class="row"><button class="btn small" data-cel="pop">Session pop</button>${RANK_TIERS.slice(1).map((t, i) => `<button class="btn small" data-cel="${i + 1}">${RANK_TIERS[i].n} → ${t.n}</button>`).join('')}<button class="btn small" data-cel="aurum">Aurum unlock</button></div>`;
+    <div class="row"><button class="btn small" data-cel="pop">Session pop</button>${RANK_TIERS.slice(1).map((t, i) => `<button class="btn small" data-cel="${i + 1}">${RANK_TIERS[i].n} → ${t.n}</button>`).join('')}<button class="btn small" data-cel="aurum">Aurum unlock</button></div>` : ''}`;
+  devCounts();
 }
+// how many accounts Emberline has (Rich and devs): all time, this month, and Premium right now
+let devCountAt = 0;
+async function devCounts(force){
+  const el = $('#devCounts'); if (!el || (!force && Date.now() - devCountAt < 60000 && el.dataset.done)) return;
+  devCountAt = Date.now();
+  const count = async q => { try { const r = await fetch(SB_URL + '/rest/v1/players?select=id' + q, { method:'HEAD', headers:{ apikey:SB_KEY, Authorization:'Bearer ' + SB_KEY, Prefer:'count=exact' } }); const n = +((r.headers.get('content-range') || '').split('/')[1]); return r.ok && Number.isFinite(n) ? n : null; } catch(e){ return null; } };
+  const [all, month, banned] = await Promise.all([count(''), count('&month=eq.' + lbMonth()), count('&banned=is.true')]);
+  let prem = null; try { const rows = await sbRows('/rest/v1/players?select=awards&awards=not.is.null&limit=5000'); prem = rows.filter(r => premAward(r.awards)).length; } catch(e){}
+  const v = x => x == null ? '—' : x;
+  el.innerHTML = tile('Accounts', v(all), 'all time') + tile('Active', v(month), 'this month') + tile('Premium', v(prem), 'right now') + tile('Banned', v(banned), 'accounts');
+  el.dataset.done = '1';
+}
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('[data-devcount]')) devCounts(true); });
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-cel]'); if (!b) return;
   const k = b.dataset.cel;
