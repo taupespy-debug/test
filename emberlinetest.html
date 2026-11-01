@@ -5478,14 +5478,17 @@ function premStar(size){ // tap it: what Premium is
    The checkout link carries your player id (client_reference_id). When the payment goes through, Stripe tells the
    stripe edge function, which turns Premium on until the paid month ends (and keeps extending it on each renewal). */
 const STRIPE_LINK = 'https://buy.stripe.com/7sY00cbWEcaS7rV8uagYU00';
+const STRIPE_PORTAL = 'https://billing.stripe.com/p/login/7sY00cbWEcaS7rV8uagYU00'; // cancel, change card, receipts (sign in with the email you paid with)
 const stripeOn = () => true; // the card checkout is on for everyone
 function stripeUrl(){ const me = LB.me || lbStore().meCache; return me && me.id ? STRIPE_LINK + '?client_reference_id=' + encodeURIComponent(me.id) : null; }
 function stripeBlock(isPrem){
   const url = stripeUrl();
-  if (isPrem) return `<p class="muted" style="margin:0;font-size:14px">Paying by card? It renews every month on its own. To cancel, use the link in your Stripe receipt email.</p>`;
+  if (isPrem) return `<p class="muted" style="margin:0;font-size:14px">Paying by card? It renews every month on its own. You can cancel any time and keep Premium until the month you paid for ends.</p>
+    <a class="btn" href="${STRIPE_PORTAL}" target="_blank" rel="noopener" style="width:100%;text-align:center;text-decoration:none">Manage or cancel Premium</a>`;
   return `<div style="display:grid;gap:4px"><b>$10 a month</b><span class="muted" style="font-size:14px">Card or Apple Pay. Premium turns on by itself a minute after you pay, and you can cancel any time.</span></div>
     ${url ? `<a class="btn primary" href="${url}" target="_blank" rel="noopener" data-stripe style="width:100%;text-align:center;text-decoration:none">Get Premium · $10/month</a>`
-          : `<button class="btn primary" disabled style="width:100%">Make your profile in Social first</button>`}`;
+          : `<button class="btn primary" disabled style="width:100%">Make your profile in Social first</button>`}
+    <a href="${STRIPE_PORTAL}" target="_blank" rel="noopener" style="text-align:center;font-size:13px;color:var(--muted)">Already subscribed? Manage or cancel</a>`;
 }
 // back from the checkout: ask the server once a few times so Premium shows right away
 // the checkout opens outside the page: in the iPhone app that's your default browser (Apple Pay works there).
