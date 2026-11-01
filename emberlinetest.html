@@ -5474,11 +5474,11 @@ function premStar(size){ // tap it: what Premium is
   const id = 'pst' + (premUid++);
   return `<svg class="prem-star" data-prem viewBox="0 0 24 24" width="${size}" height="${size}" role="button" aria-label="Premium"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff4c9"/><stop offset=".5" stop-color="#ffd23f"/><stop offset="1" stop-color="#e09a00"/></linearGradient></defs><path d="M12 2.2l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.1l-5.9 3.1 1.2-6.5L2.5 9.1l6.6-.9z" fill="url(#${id})" stroke="#7a4a00" stroke-width=".8" stroke-linejoin="round"/></svg>`;
 }
-/* ===== Premium by card (Stripe), Rich only for now =====
+/* ===== Premium by card (Stripe) =====
    The checkout link carries your player id (client_reference_id). When the payment goes through, Stripe tells the
    stripe edge function, which turns Premium on until the paid month ends (and keeps extending it on each renewal). */
 const STRIPE_LINK = 'https://buy.stripe.com/7sY00cbWEcaS7rV8uagYU00';
-const stripeOn = () => isRich(); // everyone later
+const stripeOn = () => true; // the card checkout is on for everyone
 function stripeUrl(){ const me = LB.me || lbStore().meCache; return me && me.id ? STRIPE_LINK + '?client_reference_id=' + encodeURIComponent(me.id) : null; }
 function stripeBlock(isPrem){
   const url = stripeUrl();
