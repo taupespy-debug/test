@@ -341,7 +341,12 @@ html[data-app] #fsRow{display:none!important}
 .mus-viz.pop i{animation:musPop .28s ease-out}
 .mus-viz span{position:absolute;bottom:10px;font:700 13px var(--f-body,system-ui);letter-spacing:.06em;color:rgba(255,255,255,.75)}
 @keyframes musPop{0%{filter:brightness(1.8);transform:scale(1.25)}100%{filter:none}}
-.mus-pals{display:flex;flex-wrap:wrap;gap:6px}
+.mus-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.mus-head b{display:block;font-size:17px}.mus-head small{color:var(--muted);font-size:13px}
+.mus-row{display:grid;grid-template-columns:86px 1fr;align-items:center;gap:10px;font-size:14px}.mus-row span{color:var(--muted)}
+.mus-sep{height:1px;background:var(--line,rgba(255,255,255,.1));margin:2px 0}
+.mus-pals{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 -2px;padding:2px}.mus-pals::-webkit-scrollbar{display:none}
+.mus-pals button{flex:none}
 .mus-pals button{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:99px;border:1.5px solid var(--line,rgba(255,255,255,.12));background:var(--fill,rgba(255,255,255,.06));color:inherit;font:600 13px var(--f-body,system-ui)}
 .mus-pals button[aria-pressed="true"]{border-color:var(--accent)}
 .mus-pals i{width:22px;height:12px;border-radius:6px}
@@ -4235,10 +4240,20 @@ function musicCols(){
 // the mood: P pulses per cycle, one color each. The Peak's speed is whole cycles per 3 minutes, so pick the number of
 // pulses that gets closest to the real tempo
 function musicMood(bpm){
-  const st = store.musicStyle || 'beat', rate = st === 'chill' ? bpm / 8 : st === 'bars' ? bpm / 4 : bpm; // pulses a minute
+  const st = store.musicStyle || 'beat';
+  // every color gets one pulse per cycle: use as many of your colors as fit (up to 4, at least 2), whichever count
+  // lands closest to the real tempo (ties go to more colors)
+  // the slow styles pick the nearest slow rhythm the Peak can hit (its slowest speeds are coarse): a pulse every
+  // 4 beats (or 2) for Bar, every 8 (or 4 / 16) for Chill
+  const all = musicCols(), most = Math.max(2, Math.min(4, all.length));
+  const every = st === 'chill' ? [[8, 0], [4, .04], [16, .04]] : st === 'bars' ? [[4, 0], [2, .04], [8, .04]] : [[1, 0]];
   let best = null;
-  for (let P = 1; P <= 4; P++){ const sp = clamp(Math.round(rate / (3 * P)), 1, 255), err = Math.abs(sp * 3 * P - rate); if (!best || err < best.err - .5) best = { P, sp, err }; }
-  const all = musicCols(), cols = Array.from({ length: best.P }, (_, k) => all[Math.floor(k * all.length / best.P) % all.length]);
+  for (const [d, pen] of every) for (let P = most; P >= 2; P--){
+    const rate = bpm / d, sp = clamp(Math.round(rate / (3 * P)), 1, 255), err = Math.abs(sp * 3 * P - rate) / rate, cost = err + pen;
+    if (!best || cost < best.cost - .01) best = { P, sp, err, cost, d };
+  }
+  const cols = Array.from({ length: best.P }, (_, k) => all[Math.floor(k * all.length / best.P) % all.length]);
+  MUSIC.moodCols = cols; // the visualizer shows the same colors in the same order
   const shape = st === 'beat' ? [1, .62, .38, .22, .12, .06, .02, 0] : [.08, .35, .75, 1, .8, .5, .25, .1]; // a punch on the beat, or a smooth swell
   const arr = []; cols.forEach(c => shape.forEach(v => arr.push(mixL('#000000', c.toLowerCase(), v))));
   const lamp = { name:'pikaled2', param:{ bright:255, speed: best.sp, speedDi0: Math.min(best.sp * 2, 255) / 8, speedDi1: Math.min(best.sp * 2, 255), anim:1, plNum:0, plDenom:0,
@@ -4259,7 +4274,7 @@ window.emberMusicState = (on, why) => {
 // a setting changed, or it's the first lock, and never within 10 s of the last write
 window.emberBeat = (i, kind) => {
   if (i === -1){ MUSIC.wroteBpm = 0; ledJob(previewClear); return; } // stopped: put the light back
-  MUSIC.i = (MUSIC.i + 1) % Math.max(1, musicCols().length); MUSIC.cur = musicCols()[MUSIC.i];
+  const vc = MUSIC.moodCols && MUSIC.moodCols.length ? MUSIC.moodCols : musicCols(); MUSIC.i = (MUSIC.i + 1) % vc.length; MUSIC.cur = vc[MUSIC.i];
   if (!store.musicOn || S.mode !== 'live' || (S.state >= 7 && S.state <= 9) || S.api === 2 || isProxy() || MUSIC.busy || !(MUSIC.bpm > 0)) return;
   const key = [store.musicPal, store.musicStyle, S.active].join('|'), moved = !MUSIC.wroteBpm || Math.abs(MUSIC.bpm - MUSIC.wroteBpm) / MUSIC.wroteBpm > .06;
   if (!(moved || key !== MUSIC.wroteKey) || Date.now() - MUSIC.wroteAt < MUSIC_GAP) return;
@@ -4291,19 +4306,20 @@ function drawAppLights(){
   el.hidden = !IS_APP; if (!IS_APP) return;
   const on = !!store.musicOn, st = ['beat', 'bars', 'chill'].includes(store.musicStyle) ? store.musicStyle : 'beat', pk = store.musicPal || 'profile', sens = +store.musicSens || 1;
   const sw = k => { const c = k === 'profile' ? musicCols() : MUSIC_PAL[k].c; return `linear-gradient(90deg,${c.concat(c[0]).join(',')})`; };
-  el.innerHTML = `<div class="row between"><span class="label">iPhone app</span><span class="muted" style="font-size:12px">Only in the app</span></div>
-    <button class="btn small" data-camcolor style="justify-self:start">📷 Color from camera</button>
-    <div class="row between" style="margin-top:4px"><b>🎵 Music sync</b><button class="btn small ${on ? 'primary' : ''}" data-music>${on ? 'On' : 'Off'}</button></div>
+  el.innerHTML = `<div class="mus-head"><div><b>🎵 Music sync</b><small>${on ? 'Listening' : 'Your Peak pulses in time with the music'}</small></div>
+      <label class="toggle" style="margin:0"><input type="checkbox" class="switch" data-music ${on ? 'checked' : ''} aria-label="Music sync"></label></div>
     ${on ? `<div class="mus-viz" id="musViz"><i></i><span id="musBpm">Finding the beat…</span></div>` : ''}
-    <div class="seg" style="display:grid;grid-template-columns:repeat(3,1fr)">${[['beat', 'Pulse'], ['bars', 'Every bar'], ['chill', 'Chill']].map(([k, n]) => `<button data-mstyle="${k}" aria-pressed="${st === k}">${n}</button>`).join('')}</div>
+    <div class="mus-row"><span>Style</span><div class="seg">${[['beat', 'Pulse'], ['bars', 'Bar'], ['chill', 'Chill']].map(([k, n]) => `<button data-mstyle="${k}" aria-pressed="${st === k}">${n}</button>`).join('')}</div></div>
     <div class="mus-pals">${Object.entries(MUSIC_PAL).map(([k, v]) => `<button data-mpal="${k}" aria-pressed="${pk === k}"><i style="background:${sw(k)}"></i>${v.n}</button>`).join('')}</div>
-    <label style="display:grid;gap:2px;font-size:13px"><span class="row between"><span>Sensitivity</span><span class="muted">${sens < .8 ? 'Strong beats only' : sens > 1.4 ? 'Every little hit' : 'Balanced'}</span></span><input type="range" data-msens min="0.5" max="2" step="0.1" value="${sens}"></label>
-    <p class="muted" style="margin:0;font-size:13px">Listens with the mic, so play it out loud (not in AirPods). Once it finds the beat, your Peak pulses your colors in time with the song by itself, and keeps going with the app closed. It only updates the light when the tempo changes (at most every 10 seconds), so it's gentle on your Peak. Pauses during a session.</p>`;
+    <div class="mus-row"><span>Sensitivity</span><input type="range" data-msens min="0.5" max="2" step="0.1" value="${sens}" aria-label="Sensitivity"></div>
+    <p class="muted" style="margin:0;font-size:12px">Play it out loud (the mic listens). Keeps going with the app closed, pauses during a session.</p>
+    <div class="mus-sep"></div>
+    <button class="btn small" data-camcolor style="justify-self:start">📷 Color from camera</button>`;
 }
 document.addEventListener('click', e => {
   if (!e.target.closest) return;
   if (e.target.closest('[data-camcolor]')){ if (S.mode !== 'live') toast(`Connect your ${devWord()} to see it live`); window.EMBER_APP && window.EMBER_APP.post('camera', {}); }
-  if (e.target.closest('[data-music]')) musicToggle();
+  if (e.target.closest('[data-music]')){ e.preventDefault(); musicToggle(); }
   const ms = e.target.closest('[data-mstyle]'); if (ms){ store.musicStyle = ms.dataset.mstyle; save(); drawAppLights(); } // applied on the next beat (at most every 10 s)
   const mp = e.target.closest('[data-mpal]'); if (mp){ store.musicPal = mp.dataset.mpal; save(); drawAppLights(); }
 });
