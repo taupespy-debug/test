@@ -71,7 +71,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             return !(7...9).contains(st) // the preview channel is ignored mid-session anyway
         }
         MusicLights.shared.onChange = { [weak self] on, why in self?.ble.js("window.emberMusicState && window.emberMusicState(\(on), '\(why)')") }
-        MusicLights.shared.onBeat = { [weak self] i in self?.ble.js("window.emberBeat && window.emberBeat(\(i))") }
+        MusicLights.shared.onBeat = { [weak self] i, kind in self?.ble.js("window.emberBeat && window.emberBeat(\(i),\(kind))") }
+        MusicLights.shared.onMeter = { [weak self] lv, bpm, beat in self?.ble.js("window.emberMusicMeter && window.emberMusicMeter(\(String(format: "%.3f", lv)),\(bpm),\(beat))") }
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(wentAway), name: UIApplication.didEnterBackgroundNotification, object: nil)
         nc.addObserver(self, selector: #selector(cameBack), name: UIApplication.willEnterForegroundNotification, object: nil)
@@ -101,10 +102,14 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         case "share": share(body)
         case "camera": camera()
         case "music":
+            let m = MusicLights.shared
+            if let st = body["style"] as? String { m.style = st }
+            if let sv = body["sens"] as? Double { m.sens = sv }
+            if let lat = body["lat"] as? Double, lat > 0.03, lat < 1 { m.latency = lat }
             if body["on"] as? Bool == true {
-                let blobs = (body["blobs"] as? [String] ?? []).compactMap { Data(base64Encoded: $0) }.map { [UInt8]($0) }
-                MusicLights.shared.start(blobs: blobs, api2: body["api2"] as? Bool ?? false)
-            } else { MusicLights.shared.stop() }
+                let dec = { (k: String) -> [[UInt8]] in (body[k] as? [String] ?? []).compactMap { Data(base64Encoded: $0) }.map { [UInt8]($0) } }
+                m.start(blobs: dec("blobs"), dims: dec("dims"), flash: dec("flash").first ?? [], api2: body["api2"] as? Bool ?? false)
+            } else if body["on"] as? Bool == false { m.stop() }
         default: break
         }
     }

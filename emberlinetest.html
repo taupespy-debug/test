@@ -336,6 +336,16 @@ section.view>*{min-width:0}
 .ish-me{display:flex;align-items:center;gap:22px;padding:18px;border-radius:10px;background:#0a1a5599}.ish-me b{display:block;font:900 italic 20px var(--f-round,system-ui)}.ish-me small{opacity:.8}
 .ish-note{margin:6px 0 0;font-size:12px;opacity:.75}
 html[data-app] #fsRow{display:none!important}
+.mus-viz{position:relative;height:150px;display:grid;place-items:center;border-radius:18px;background:radial-gradient(circle at 50% 50%,color-mix(in srgb,var(--mc,#7300ff) 22%,transparent),transparent 70%);overflow:hidden}
+.mus-viz i{width:84px;height:84px;border-radius:50%;background:var(--mc,#7300ff);box-shadow:0 0 40px var(--mc,#7300ff),0 0 90px color-mix(in srgb,var(--mc,#7300ff) 50%,transparent);transform:scale(calc(.7 + var(--ml,0) * .5));transition:transform .07s linear,background .12s,box-shadow .12s}
+.mus-viz.pop i{animation:musPop .28s ease-out}
+.mus-viz span{position:absolute;bottom:10px;font:700 13px var(--f-body,system-ui);letter-spacing:.06em;color:rgba(255,255,255,.75)}
+@keyframes musPop{0%{filter:brightness(1.8);transform:scale(1.25)}100%{filter:none}}
+.mus-pals{display:flex;flex-wrap:wrap;gap:6px}
+.mus-pals button{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:99px;border:1.5px solid var(--line,rgba(255,255,255,.12));background:var(--fill,rgba(255,255,255,.06));color:inherit;font:600 13px var(--f-body,system-ui)}
+.mus-pals button[aria-pressed="true"]{border-color:var(--accent)}
+.mus-pals i{width:22px;height:12px;border-radius:6px}
+@media (prefers-reduced-motion:reduce){.mus-viz i{transition:none}.mus-viz.pop i{animation:none}}
 .ish-entry{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;border:0;cursor:pointer;color:#fff!important;background:linear-gradient(110deg,#2d7cf0,#6a1bb5)!important;font:900 italic 20px var(--f-round,system-ui)}
 .ish-entry small{font:700 12px var(--f-body,system-ui);opacity:.85}
 
@@ -4206,44 +4216,82 @@ window.emberCameraColor = hex => {
   if (S.mode === 'live') saveProfile(i).then(() => toast(`${p.name} is now ${hex.toUpperCase()}`)).catch(() => {}); else toast(`Color set. Connect to save it to your ${devWord()}`);
   render(); try { drawProfiles(); } catch(e){}
 };
+/* ===== iPhone app: music sync =====
+   The app hears the music (bass beats, tempo, how loud) and says when; the page writes the light in its own queue so
+   it never collides with polling. The app fires each color early by how long the Peak takes to show one (measured
+   here), so it lands on the beat. Soft parts get the dim colors, big drops flash white */
+const MUSIC_PAL = { profile:{ n:'Your colors' }, rainbow:{ n:'Rainbow', c:['#ff0040','#ff8a00','#ffe600','#00ff6a','#00c8ff','#7300ff','#ff00d4'] },
+  fire:{ n:'Fire', c:['#ff2a00','#ff6a00','#ffb000','#ff3d1f','#ffd000'] }, ice:{ n:'Ice', c:['#00e5ff','#2a7bff','#bff6ff','#0050ff','#7fd7ff'] },
+  haze:{ n:'Purple haze', c:['#7300ff','#b05bff','#ff00d4','#4a00b0','#e6c4ff'] }, gold:{ n:'Gold', c:['#ffd23f','#ff9a00','#fff1a8','#e0a000','#ffbf3d'] } };
+const MUSIC = { blobs:[], dims:[], flash:null, cols:[], busy:false, next:null, lat:.18, n:0, cur:'#7300ff' };
+const dimHex = (h, f) => '#' + Array.from(hexBytes(h)).map(v => Math.round(v * f).toString(16).padStart(2, '0')).join('');
+function musicCols(){
+  const k = store.musicPal || 'profile';
+  if (k === 'profile'){ const p = S.profiles[S.active] || {}; return (p.pal && p.pal.length > 1 ? p.pal : MUSIC_PAL.rainbow.c).slice(0, 8); }
+  return (MUSIC_PAL[k] || MUSIC_PAL.rainbow).c;
+}
+function musicSend(on){ // the light data for the app: bright, dim and the white flash, the same lights the page writes
+  const cols = musicCols(), a2 = S.api === 2, light = h => a2 ? h : solidPayload(h);
+  const b64 = u8 => { let t = ''; for (const c of u8) t += String.fromCharCode(c); return btoa(t); }, raw = h => b64(a2 ? rgbt(h) : solidPayload(h));
+  MUSIC.cols = cols; MUSIC.blobs = cols.map(light); MUSIC.dims = cols.map(h => light(dimHex(h, .3))); MUSIC.flash = light('#ffffff');
+  window.EMBER_APP.post('music', Object.assign({ api2: a2, style: store.musicStyle || 'beat', sens: +store.musicSens || 1, lat: MUSIC.lat,
+    blobs: cols.map(raw), dims: cols.map(h => raw(dimHex(h, .3))), flash: [raw('#ffffff')] }, on == null ? {} : { on }));
+}
 window.emberMusicState = (on, why) => {
   store.musicOn = !!on; save(); drawAppLights();
-  if (on && store.musicWant) toast('Music sync is on. Play something loud with a beat 🎵');
+  if (on && store.musicWant) toast('Music sync is on. Play something with a beat 🎵');
   if (!on && store.musicWant) toast(why === 'mic' ? 'Music sync needs the microphone. Turn it on in Settings > Emberline' : 'Music sync couldn’t start the mic. Close other apps using it and try again');
   store.musicWant = false;
 };
-// a beat from the app (app open): the page writes the color in its own light queue, so it never collides with polling.
-// A write still going when the next beat lands: only the newest color is kept
-const MUSIC = { blobs:[], busy:false, next:null };
-window.emberBeat = i => {
-  if (i < 0){ MUSIC.next = null; ledJob(previewClear); return; } // stopped: put the light back
-  if (S.mode !== 'live' || (S.state >= 7 && S.state <= 9) || !MUSIC.blobs[i]) return;
-  if (MUSIC.busy){ MUSIC.next = i; return; }
-  MUSIC.busy = true;
-  ledJob(() => previewWrite(MUSIC.blobs[i]).catch(() => {})).finally(() => { MUSIC.busy = false; const n = MUSIC.next; MUSIC.next = null; if (n != null) window.emberBeat(n); });
+window.emberBeat = (i, kind) => {
+  if (i === -1){ MUSIC.next = null; ledJob(previewClear); return; } // stopped: put the light back
+  if (S.mode !== 'live' || (S.state >= 7 && S.state <= 9)) return;
+  const blob = i === -2 ? MUSIC.flash : (kind === 0 ? MUSIC.dims : MUSIC.blobs)[i]; if (!blob) return;
+  MUSIC.cur = i === -2 ? '#ffffff' : kind === 0 ? dimHex(MUSIC.cols[i], .45) : MUSIC.cols[i];
+  if (MUSIC.busy){ MUSIC.next = [i, kind]; return; } // still showing the last one: only the newest matters
+  MUSIC.busy = true; const t0 = performance.now();
+  ledJob(() => previewWrite(blob).catch(() => {})).finally(() => {
+    // how long the Peak takes to show a light: the app fires that much early so it lands on the beat
+    const dt = (performance.now() - t0) / 1000; if (dt > .03 && dt < 1) MUSIC.lat = MUSIC.lat * .8 + dt * .2;
+    if (++MUSIC.n % 8 === 0) window.EMBER_APP.post('music', { lat: MUSIC.lat });
+    MUSIC.busy = false; const n = MUSIC.next; MUSIC.next = null; if (n) window.emberBeat(n[0], n[1]);
+  });
+};
+// the visualizer: a circle that breathes with the bass and pops on each beat, in the color the Peak is showing
+window.emberMusicMeter = (lv, bpm, beat) => {
+  const c = $('#musViz'); if (!c) return;
+  c.style.setProperty('--mc', MUSIC.cur || '#7300ff'); c.style.setProperty('--ml', Math.min(1, lv).toFixed(3));
+  if (beat){ c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop'); }
+  const t = $('#musBpm'); if (t){ const s = bpm ? bpm + ' BPM' : 'Finding the beat…'; if (t.textContent !== s) t.textContent = s; }
 };
 function musicToggle(){
   if (!IS_APP) return;
   if (store.musicOn){ window.EMBER_APP.post('music', { on:false }); return; }
   if (isProxy()) return toast('Music sync works on the Peak for now');
-  const p = S.profiles[S.active] || {}, cols = (p.pal && p.pal.length > 1 ? p.pal : ['#ff0040', '#ff8a00', '#ffe600', '#00ff6a', '#00c8ff', '#7300ff', '#ff00d4']).slice(0, 8);
-  const b64 = u8 => { let t = ''; for (const c of u8) t += String.fromCharCode(c); return btoa(t); };
-  store.musicWant = true;
-  MUSIC.blobs = cols.map(h => S.api === 2 ? h : solidPayload(h)); // previewWrite takes a hex on the original Peak, light data otherwise
-  window.EMBER_APP.post('music', { on:true, api2: S.api === 2, blobs: cols.map(h => b64(S.api === 2 ? rgbt(h) : solidPayload(h))) });
+  store.musicWant = true; musicSend(true);
 }
 function drawAppLights(){
   const el = $('#appLights'); if (!el) return;
   el.hidden = !IS_APP; if (!IS_APP) return;
+  const on = !!store.musicOn, st = store.musicStyle || 'beat', pk = store.musicPal || 'profile', sens = +store.musicSens || 1;
+  const sw = k => { const c = k === 'profile' ? musicCols() : MUSIC_PAL[k].c; return `linear-gradient(90deg,${c.concat(c[0]).join(',')})`; };
   el.innerHTML = `<div class="row between"><span class="label">iPhone app</span><span class="muted" style="font-size:12px">Only in the app</span></div>
-    <div class="shop-actions" style="margin:0"><button class="btn small" data-camcolor>📷 Color from camera</button><button class="btn small ${store.musicOn ? 'primary' : ''}" data-music>🎵 Music sync: ${store.musicOn ? 'On' : 'Off'}</button></div>
-    <p class="muted" style="margin:0;font-size:13px">Camera: aim at anything and your Peak copies the color, then tap Use color. Music sync: the light moves to the beat of whatever's playing, even with the app closed (uses the mic, not during a session).</p>`;
+    <button class="btn small" data-camcolor style="justify-self:start">📷 Color from camera</button>
+    <div class="row between" style="margin-top:4px"><b>🎵 Music sync</b><button class="btn small ${on ? 'primary' : ''}" data-music>${on ? 'On' : 'Off'}</button></div>
+    ${on ? `<div class="mus-viz" id="musViz"><i></i><span id="musBpm">Finding the beat…</span></div>` : ''}
+    <div class="seg" style="display:grid;grid-template-columns:repeat(3,1fr)">${[['beat', 'Every beat'], ['bars', 'Every bar'], ['drops', 'Drops only']].map(([k, n]) => `<button data-mstyle="${k}" aria-pressed="${st === k}">${n}</button>`).join('')}</div>
+    <div class="mus-pals">${Object.entries(MUSIC_PAL).map(([k, v]) => `<button data-mpal="${k}" aria-pressed="${pk === k}"><i style="background:${sw(k)}"></i>${v.n}</button>`).join('')}</div>
+    <label style="display:grid;gap:2px;font-size:13px"><span class="row between"><span>Sensitivity</span><span class="muted">${sens < .8 ? 'Strong beats only' : sens > 1.4 ? 'Every little hit' : 'Balanced'}</span></span><input type="range" data-msens min="0.5" max="2" step="0.1" value="${sens}"></label>
+    <p class="muted" style="margin:0;font-size:13px">Listens with the mic, so play it out loud (not in AirPods). It locks onto the beat, dims on soft parts and flashes white on drops, even with the app closed. Pauses during a session.</p>`;
 }
 document.addEventListener('click', e => {
   if (!e.target.closest) return;
   if (e.target.closest('[data-camcolor]')){ if (S.mode !== 'live') toast(`Connect your ${devWord()} to see it live`); window.EMBER_APP && window.EMBER_APP.post('camera', {}); }
   if (e.target.closest('[data-music]')) musicToggle();
+  const ms = e.target.closest('[data-mstyle]'); if (ms){ store.musicStyle = ms.dataset.mstyle; save(); drawAppLights(); if (IS_APP) window.EMBER_APP.post('music', { style: store.musicStyle }); }
+  const mp = e.target.closest('[data-mpal]'); if (mp){ store.musicPal = mp.dataset.mpal; save(); drawAppLights(); if (IS_APP && store.musicOn) musicSend(true); }
 });
+document.addEventListener('change', e => { const r = e.target.closest && e.target.closest('[data-msens]'); if (r){ store.musicSens = +r.value; save(); drawAppLights(); if (IS_APP) window.EMBER_APP.post('music', { sens: store.musicSens }); } });
 setTimeout(() => { store.musicOn = false; drawAppLights(); }, 0); // a fresh start never has music sync running
 window.emberBgPause = () => {
   const c = appCtx(); BG.on = true; try { hitLoopStop(); } catch(e){} saveOpenSess();
