@@ -351,6 +351,10 @@ html[data-app] #fsRow{display:none!important}
 .mus-pals button[aria-pressed="true"]{border-color:var(--accent)}
 .mus-pals i{width:22px;height:12px;border-radius:6px}
 @media (prefers-reduced-motion:reduce){.mus-viz i{transition:none}.mus-viz.pop i{animation:none}}
+.home-quick{display:flex;justify-content:center;gap:8px;margin-top:10px}
+.home-quick .btn{display:inline-flex;align-items:center;gap:6px}
+.home-quick .btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.home-quick .btn[aria-pressed="true"]{background:color-mix(in srgb,#ffc94a 22%,var(--fill,rgba(255,255,255,.08)));border-color:#ffc94a;color:#ffe08a;box-shadow:0 0 18px rgba(255,201,74,.35)}
 .ish-entry{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;border:0;cursor:pointer;color:#fff!important;background:linear-gradient(110deg,#2d7cf0,#6a1bb5)!important;font:900 italic 20px var(--f-round,system-ui)}
 .ish-entry small{font:700 12px var(--f-body,system-ui);opacity:.85}
 
@@ -2121,6 +2125,7 @@ body.vr-on #dvFrame{display:none}
       </div>
       <div class="spot" id="spot" hidden></div>
       <div class="chips" id="homeChips" style="margin-top:8px"></div>
+      <div class="home-quick" id="homeQuick" hidden><button class="btn small" id="bLantern" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M12 3v2M7 9a5 5 0 0 1 10 0v7a3 3 0 0 1-3 3h-4a3 3 0 0 1-3-3z"/><path d="M10 12.5c0-1.2 1-2 2-3 1 1 2 1.8 2 3a2 2 0 0 1-4 0z"/></svg><span>Lantern</span></button></div>
       <div class="adjust" id="adjustRow" hidden>
         <button class="btn" data-adj="temp:-5">−5°</button><button class="btn" data-adj="temp:5">+5°</button>
         <button class="btn" data-adj="time:-10">−10s</button><button class="btn" data-adj="time:10">+10s</button>
@@ -4232,9 +4237,15 @@ const MUSIC_PAL = { profile:{ n:'Your colors' }, rainbow:{ n:'Rainbow', c:['#ff0
   haze:{ n:'Purple haze', c:['#7300ff','#b05bff','#ff00d4','#4a00b0','#e6c4ff'] }, gold:{ n:'Gold', c:['#ffd23f','#ff9a00','#fff1a8','#e0a000','#ffbf3d'] } };
 const MUSIC = { cols:[], bpm:0, wroteBpm:0, wroteAt:0, wroteKey:'', busy:false, lat:.18, n:0, cur:'#7300ff', i:0 };
 const MUSIC_GAP = 10000; // never rewrite the light more often than this
+// a profile counts as "colors" only with 2+ clearly different hues; one-color profiles (all green on Medium) use Rainbow
+function profHues(){ const p = S.profiles[S.active] || {}, pal = (p.pal || []).filter(h => /^#[0-9a-f]{6}$/i.test(h)), hues = [];
+  pal.forEach(h => { const [r, g, b] = Array.from(hexBytes(h)), mx = Math.max(r, g, b), mn = Math.min(r, g, b); if (mx < 60 || mx - mn < 40) return;
+    const d = mx - mn, hu = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4, deg = (hu * 60 + 360) % 360;
+    if (!hues.some(x => Math.min(Math.abs(x.deg - deg), 360 - Math.abs(x.deg - deg)) < 35)) hues.push({ deg, h }); });
+  return hues.map(x => x.h); }
 function musicCols(){
-  const k = store.musicPal || 'profile';
-  if (k === 'profile'){ const p = S.profiles[S.active] || {}; return (p.pal && p.pal.length > 1 ? p.pal : MUSIC_PAL.rainbow.c).slice(0, 8); }
+  const k = store.musicPal || 'rainbow'; // Rainbow unless you pick something else
+  if (k === 'profile'){ const h = profHues(); return (h.length >= 2 ? h : MUSIC_PAL.rainbow.c).slice(0, 8); }
   return (MUSIC_PAL[k] || MUSIC_PAL.rainbow).c;
 }
 // the mood: P pulses per cycle, one color each. The Peak's speed is whole cycles per 3 minutes, so pick the number of
@@ -4277,7 +4288,8 @@ window.emberBeat = (i, kind) => {
   const vc = MUSIC.moodCols && MUSIC.moodCols.length ? MUSIC.moodCols : musicCols(); MUSIC.i = (MUSIC.i + 1) % vc.length; MUSIC.cur = vc[MUSIC.i];
   if (!store.musicOn || S.mode !== 'live' || (S.state >= 7 && S.state <= 9) || S.api === 2 || isProxy() || MUSIC.busy || !(MUSIC.bpm > 0)) return;
   const key = [store.musicPal, store.musicStyle, S.active].join('|'), moved = !MUSIC.wroteBpm || Math.abs(MUSIC.bpm - MUSIC.wroteBpm) / MUSIC.wroteBpm > .06;
-  if (!(moved || key !== MUSIC.wroteKey) || Date.now() - MUSIC.wroteAt < MUSIC_GAP) return;
+  const since = Date.now() - MUSIC.wroteAt;
+  if (!(moved || key !== MUSIC.wroteKey) || since < (key !== MUSIC.wroteKey && MUSIC.wroteKey ? 3000 : MUSIC_GAP)) return; // you changed a setting: show it soon
   try { if (zoneLive.on) zoneLiveStop(true); } catch(e){}
   MUSIC.busy = true; MUSIC.wroteAt = Date.now(); MUSIC.wroteBpm = MUSIC.bpm; MUSIC.wroteKey = key;
   let blob; try { blob = musicMood(MUSIC.bpm); } catch(e){ MUSIC.busy = false; return; }
@@ -4304,7 +4316,7 @@ function musicToggle(){
 function drawAppLights(){
   const el = $('#appLights'); if (!el) return;
   el.hidden = !IS_APP; if (!IS_APP) return;
-  const on = !!store.musicOn, st = ['beat', 'bars', 'chill'].includes(store.musicStyle) ? store.musicStyle : 'beat', pk = store.musicPal || 'profile', sens = +store.musicSens || 1;
+  const on = !!store.musicOn, st = ['beat', 'bars', 'chill'].includes(store.musicStyle) ? store.musicStyle : 'beat', pk = store.musicPal || 'rainbow', sens = +store.musicSens || 1;
   const sw = k => { const c = k === 'profile' ? musicCols() : MUSIC_PAL[k].c; return `linear-gradient(90deg,${c.concat(c[0]).join(',')})`; };
   el.innerHTML = `<div class="mus-head"><div><b>🎵 Music sync</b><small>${on ? 'Listening' : 'Your Peak pulses in time with the music'}</small></div>
       <label class="toggle" style="margin:0"><input type="checkbox" class="switch" data-music ${on ? 'checked' : ''} aria-label="Music sync"></label></div>
@@ -4942,6 +4954,7 @@ function drawHome(){
   const shownTarget = heatingNow && S.liveTargetC ? S.liveTargetC : target;
   $('#gTarget').textContent = `Target ${fmtT(shownTarget)}${U()} · ${p.time}s · ${vaporName(p.vapor)}`;
   $('#adjustRow').hidden = !heatingNow;
+  { const q = $('#homeQuick'), lb = $('#bLantern'); if (q){ q.hidden = S.mode !== 'live'; if (lb){ lb.setAttribute('aria-pressed', String(!!S.lantern)); lb.disabled = heatingNow; const t = lb.querySelector('span'); const w = S.lantern ? 'Lantern on' : 'Lantern'; if (t.textContent !== w) t.textContent = w; } } } // quick lantern switch
   try { const tc = $('#torchCard'); if (tc && tc.hidden === torchOk()) drawTorch(); } catch(e){} // the Torch dab card (Rich only)
   setHTML($('#bBoost'), `<span class="bst"><span>Boost</span><small>+${store.unit === 'F' ? Math.round(p.boostF) : Math.round(p.boostF * 5 / 9)}° +${p.boostT}s</small></span>`);
   const noCh = S.mode === 'live' && !isProxy() && S.chamber === 0, cb = $('#chamberBanner');
@@ -6057,6 +6070,7 @@ const I = {
     <path d="M24 18c-7 1-12 10-12 22 0 6 4 8 9 6 4-2 5-6 5-12V20c0-1-1-2-2-2z" fill="${c}"/><path d="M36 18c7 1 12 10 12 22 0 6-4 8-9 6-4-2-5-6-5-12V20c0-1 1-2 2-2z" fill="${c}"/>`,
   threeFlames: c => [[-13, .78], [13, .78], [0, 1]].map(([dx, s]) => `<path transform="translate(${30 + dx} ${s === 1 ? 31 : 36}) scale(${s * 1.55}) translate(-12 -11)" d="M12 3c2 3 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.2.3 1.8 1 2.7 2 3.2C11 8.5 11.3 5.6 12 3z" fill="${c}"/>`).join(''),
   crosshair: c => `<circle cx="30" cy="30" r="16" stroke="${c}" stroke-width="3.5" fill="none"/><circle cx="30" cy="30" r="5" fill="${c}"/><path d="M30 6v10M30 44v10M6 30h10M44 30h10" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/>`,
+  droplet: c => `<path d="M30 8C30 8 15 25 15 35a15 15 0 0 0 30 0C45 25 30 8 30 8z" fill="${c}"/><path d="M23 35a7 7 0 0 0 7 7" fill="none" stroke="#120e19" stroke-width="2.5" stroke-linecap="round" opacity=".55"/><path d="M47 10l1.6 4.4 4.4 1.6-4.4 1.6L47 22l-1.6-4.4L41 16l4.4-1.6z" fill="${c}"/><path d="M12 44l1.2 3.3 3.3 1.2-3.3 1.2L12 53l-1.2-3.3L7.5 48.5l3.3-1.2z" fill="${c}" opacity=".8"/><circle cx="49" cy="44" r="2.2" fill="${c}" opacity=".7"/>`,
   sparkle: c => `<path d="M30 8l4.5 13.5L48 26l-13.5 4.5L30 44l-4.5-13.5L12 26l13.5-4.5z" fill="${c}"/><path d="M46 38l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="${c}" opacity=".8"/><circle cx="15" cy="44" r="3" fill="${c}" opacity=".7"/>`,
   calendar: c => `<rect x="12" y="15" width="36" height="32" rx="6" fill="none" stroke="${c}" stroke-width="3.5"/><path d="M12 24h36M21 10v9M39 10v9" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/><text x="30" y="43" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="800" font-size="16" fill="${c}">7</text>`,
   moon: c => `<path d="M38 12a19 19 0 1 0 10 30A16 16 0 0 1 38 12z" fill="${c}"/><path d="M46 14l1.4 3.6L51 19l-3.6 1.4L46 24l-1.4-3.6L41 19l3.6-1.4z" fill="${c}"/><circle cx="51" cy="31" r="1.8" fill="${c}"/>`,
@@ -6100,7 +6114,7 @@ const CATS = [
   { n:'Social', c:'#3ddc84', badges:[
     { id:'squad', name:'Squad Up', req:'Get 3 friends to join Emberline with your invite link or invite code (your username). A friend counts once they make a ranked profile and do 3 sessions.', icon:'squad', col:['#d6ffe6','#3ddc84','#0e5a2e'], rar:'epic' } ]},
   { n:'Weekly', c:'#26c0e0', badges:[
-    { id:'wk-spotless', name:'Spotless', week:'2026-11-02', req:'Clean your device twice this week (Nov 2–8), both before the clean meter turns red. Only during this week.', icon:'sparkle', col:['#d2f7ff','#26c0e0','#0a5566'], rar:'rare' },
+    { id:'wk-spotless', name:'Spotless', week:'2026-11-02', req:'Clean your device twice this week (Nov 2–8), both before the clean meter turns red. Only during this week.', icon:'droplet', col:['#e6fbff','#3fd4f5','#065a73'], rar:'epic' },
     { id:'wk-midas', name:'Midas Touch', week:'2026-11-02', prem:true, req:'Premium members only: land 10 blinkers this week (Nov 2–8). Only during this week.', icon:'crowns', col:['#fff4c9','#ffd23f','#8a6115'], rar:'legendary' } ]},
   { n:'Limited', c:'#c06bff', badges:[
     { id:'founder', name:'Founder', req:'Joined Emberline in its first month. Can never be earned again.', icon:'founder', col:['#f0d9ff','#a24bff','#3a0070'], rar:'legendary' },
@@ -7481,6 +7495,7 @@ $('#connBtn').addEventListener('click', () => {
 });
 $('#bStart').onclick = async () => { if (S.mode !== 'live') return startConnect(false); BOOST.temp = 0; BOOST.time = 0; try { await ble.write('/p/app/hcs', new Uint8Array([S.active])); } catch(e){} modeCmd(7); }; // like the Puffco app: pick the profile, then start
 $('#bStop').onclick = () => modeCmd(8);
+$('#bLantern').onclick = async () => { const b = $('#bLantern'); b.disabled = true; try { await setLantern(!S.lantern); toast(S.lantern ? 'Lantern on' : 'Lantern off'); } finally { b.disabled = false; render(); try { drawLightsState(); } catch(e){} } };
 $('#bBoost').onclick = () => boostCmd();
 $('#shareBtn').onclick = async () => {
   const url = inviteUrl(), data = { title:'Emberline', text:'Emberline: a free, faster app for the Puffco Peak Pro and Proxy. Open it in the Path browser.', url };
