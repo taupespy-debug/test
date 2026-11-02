@@ -5669,7 +5669,7 @@ function supportNudge(force){
 }
 setTimeout(() => { try { supportNudge(); } catch(e){} }, 25000);
 const PREM_PERKS = [['⭐', 'Premium star', 'Next to your name everywhere'], ['🎆', 'Premium moods', 'Rich Plasma, Rich Flourish, Gold Rush, Aurora Drift'],
-  ['💎', 'Limited editions', 'Puffco’s Plasma, Glacier and Flourish lights'], ['🎨', 'Custom banner', 'Styles, your photo or a GIF'],
+  ['💎', 'Limited editions', 'Every limited edition Puffco mood'], ['🎨', 'Custom banner', 'Styles, your photo or a GIF'],
   ['🖼️', 'GIF profile pic', 'Moves everywhere your picture shows'], ['🚀', 'Early access', 'New features before everyone'],
   ['🏅', 'Premium badge', 'Legendary, for your showcase'], ['👑', 'Midas Touch & more', 'Premium-only weekly badges']];
 /* ===== a personal thank-you the first time an account shows up as Premium (again after it lapsed, never on renewals) ===== */
@@ -5731,7 +5731,6 @@ function premInfo(asFree){ // asFree: test tools, see it the way someone without
   el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Emberline Premium" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
     <div class="pm-hero"><i class="pm-rays"></i><div class="pm-star">${premStar(56)}</div><h2>Emberline <span class="pm-gold">Premium</span></h2>${me ? `<span class="label" style="color:#ffd23f">You’re Premium. Thank you!${premEnds(LB.me || lbStore().meCache) ? ' · until ' + new Date(premEnds(LB.me || lbStore().meCache) + 'T12:00').toLocaleDateString([], { month:'short', day:'numeric' }) : ''}</span>` : '<span class="muted" style="font-size:13px">Here’s how your profile would look</span>'}</div>
     ${premPreview()}
-    <p class="muted" style="margin:0;font-size:13px;text-align:center"><b style="color:var(--fg)">Not required.</b> Emberline stays free for everyone. Premium helps pay for the servers that run the leaderboard, profiles and 1v1s.</p>
     <div class="pm-perks">${PREM_PERKS.map(([i, t, d]) => `<div class="pm-perk"><span>${i}</span><b>${t}</b><small>${d}</small></div>`).join('')}</div>
     ${asFree || stripeOn() ? stripeBlock(me) : `<div style="display:grid;gap:4px"><b>How to get it</b>
       <ol style="margin:0;padding-left:20px;color:var(--muted);font-size:14px;display:grid;gap:2px"><li>Join the Emberline Discord.</li><li>Open a ticket.</li><li>Pay with Cash App, Zelle, Venmo or Apple Pay.</li><li>We turn on Premium for your username. It shows the next time you open Emberline.</li></ol></div>
