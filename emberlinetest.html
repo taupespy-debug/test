@@ -6123,6 +6123,8 @@ const I = {
   prism: c => `<path d="M30 10l16 30H14z" fill="none" stroke="${c}" stroke-width="3.5" stroke-linejoin="round"/><path d="M4 30l18 2" stroke="${c}" stroke-width="3" stroke-linecap="round"/><path d="M38 30l18-6M39 33l17 1M38 36l16 7" stroke-width="3" stroke-linecap="round" stroke="url(#spbRainbow)"/>`,
   compass: c => `<circle cx="30" cy="30" r="20" fill="none" stroke="${c}" stroke-width="3.5"/><path d="M38 22l-5 11-11 5 5-11z" fill="${c}"/><circle cx="30" cy="30" r="2.5" fill="#120e19"/>`,
   sliders: c => `<path d="M14 18h32M14 30h32M14 42h32" stroke="${c}" stroke-width="3.5" stroke-linecap="round" opacity=".45"/><circle cx="36" cy="18" r="5.5" fill="${c}"/><circle cx="22" cy="30" r="5.5" fill="${c}"/><circle cx="40" cy="42" r="5.5" fill="${c}"/>`,
+  podium2: c => `<rect x="23" y="20" width="14" height="28" rx="2" fill="${c}" opacity=".55"/><rect x="9" y="30" width="14" height="18" rx="2" fill="${c}"/><rect x="37" y="35" width="14" height="13" rx="2" fill="${c}" opacity=".55"/><text x="16" y="43" text-anchor="middle" font-family="ui-rounded,system-ui" font-weight="800" font-size="11" fill="#1b2230">2</text><path d="M16 16l2 4 4.5.6-3.3 3.1.8 4.5L16 26l-4 2.2.8-4.5-3.3-3.1L14 20z" fill="${c}"/>`,
+  podium3: c => `<rect x="23" y="20" width="14" height="28" rx="2" fill="${c}" opacity=".55"/><rect x="9" y="30" width="14" height="18" rx="2" fill="${c}" opacity=".55"/><rect x="37" y="35" width="14" height="13" rx="2" fill="${c}"/><text x="44" y="45.5" text-anchor="middle" font-family="ui-rounded,system-ui" font-weight="800" font-size="10" fill="#2e1606">3</text><path d="M44 21l2 4 4.5.6-3.3 3.1.8 4.5L44 31l-4 2.2.8-4.5-3.3-3.1L42 25z" fill="${c}"/>`,
   podium: c => `<rect x="23" y="20" width="14" height="28" rx="2" fill="${c}"/><rect x="9" y="30" width="14" height="18" rx="2" fill="${c}" opacity=".7"/><rect x="37" y="35" width="14" height="13" rx="2" fill="${c}" opacity=".55"/><text x="30" y="34" text-anchor="middle" font-family="ui-rounded,system-ui" font-weight="800" font-size="11" fill="#2a1c05">1</text><path d="M30 6l2 4 4.5.6-3.3 3.1.8 4.5L30 16l-4 2.2.8-4.5-3.3-3.1L28 10z" fill="${c}"/>`,
   arrowUp: c => `<path d="M30 9l17 18H37v22H23V27H13z" fill="${c}"/><path d="M14 52h32" stroke="${c}" stroke-width="3" stroke-linecap="round" opacity=".5"/>`,
   crowns: c => [[-9, 0], [9, 7]].map(([dx, dy]) => `<path transform="translate(${dx} ${dy})" d="M14 38l-3-18 9 7 10-12 10 12 9-7-3 18z" fill="${c}" stroke="#120e19" stroke-width="2" stroke-linejoin="round"/>`).join(''),
@@ -6153,7 +6155,10 @@ const CATS = [
     { id:'explorer', name:'Explorer', req:'Use all 4 vapor levels.', icon:'compass', col:['#cdf5ff','#29b6f6','#0b4a6b'], rar:'common' },
     { id:'master', name:'Profile Master', req:'Customize all 4 heat profiles.', icon:'sliders', col:['#dcd6ff','#6b7bff','#1d2580'], rar:'common' } ]},
   { n:'Ranked', c:'#e9bb4f', badges:[
-    { id:'podium', name:'Podium', req:'Finish a month in the top 3 on the leaderboard. Handed out at the start of the next month.', icon:'podium', col:['#fff4c9','#e9bb4f','#8a6115'], rar:'epic' },
+    { id:'podium', name:'Podium', req:'Finish a month in the top 3 on the leaderboard. Handed out automatically when the month ends.', icon:'podium', col:['#fff4c9','#e9bb4f','#8a6115'], rar:'epic' },
+    { id:'podium1', name:'1st Place', req:'Finish a month #1 on the leaderboard.', icon:'podium', col:['#fff6cc','#ffd23f','#8a6115'], rar:'legendary' },
+    { id:'podium2', name:'2nd Place', req:'Finish a month #2 on the leaderboard.', icon:'podium2', col:['#ffffff','#c9d3e0','#4f5a69'], rar:'legendary' },
+    { id:'podium3', name:'3rd Place', req:'Finish a month #3 on the leaderboard.', icon:'podium3', col:['#ffe2c6','#d08a4a','#5c3310'], rar:'legendary' },
     { id:'comeback', name:'Comeback', req:'Finish a month at Ember, then reach Blaze or higher the next month.', icon:'arrowUp', col:['#d6ffd9','#3ddc84','#0e6b34'], rar:'rare' },
     { id:'b2b', name:'Back to Back', req:'Reach Champion (or Legend) two months in a row.', icon:'crowns', col:['#fff4c9','#f3cf6b','#7a5414'], rar:'legendary' } ]},
   { n:'Social', c:'#3ddc84', badges:[
@@ -6249,6 +6254,7 @@ function spbStatus(){
   }
   const me = LB.me || lbStore().meCache, aw = (me && me.awards) || []; // meCache: awards and Founder show before the leaderboard loads
   out.podium = { got: aw.includes('podium') };
+  for (const k of ['podium1', 'podium2', 'podium3']) out[k] = { got: aw.includes(k) }; // handed out by the server when the month ends
   out.comeback = { got: cb };
   out.b2b = { got: b2b };
   const made = me && me.created_at ? new Date(me.created_at) : null;
