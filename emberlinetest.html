@@ -6099,12 +6099,15 @@ const CATS = [
     { id:'b2b', name:'Back to Back', req:'Reach Champion (or Legend) two months in a row.', icon:'crowns', col:['#fff4c9','#f3cf6b','#7a5414'], rar:'legendary' } ]},
   { n:'Social', c:'#3ddc84', badges:[
     { id:'squad', name:'Squad Up', req:'Get 3 friends to join Emberline with your invite link or invite code (your username). A friend counts once they make a ranked profile and do 3 sessions.', icon:'squad', col:['#d6ffe6','#3ddc84','#0e5a2e'], rar:'epic' } ]},
+  { n:'Weekly', c:'#26c0e0', badges:[
+    { id:'wk-spotless', name:'Spotless', week:'2026-11-02', req:'Clean your device twice this week (Nov 2–8), both before the clean meter turns red. Only during this week.', icon:'sparkle', col:['#d2f7ff','#26c0e0','#0a5566'], rar:'rare' },
+    { id:'wk-midas', name:'Midas Touch', week:'2026-11-02', prem:true, req:'Premium members only: land 10 blinkers this week (Nov 2–8). Only during this week.', icon:'crowns', col:['#fff4c9','#ffd23f','#8a6115'], rar:'legendary' } ]},
   { n:'Limited', c:'#c06bff', badges:[
     { id:'founder', name:'Founder', req:'Joined Emberline in its first month. Can never be earned again.', icon:'founder', col:['#f0d9ff','#a24bff','#3a0070'], rar:'legendary' },
     { id:'420', name:'4/20', req:'Have a session on April 20th.', icon:'leaf', col:['#d8ffc9','#4cd964','#145c1c'], rar:'rare' },
     { id:'discord', name:'Discord Member', req:'Join the Emberline Discord and ask a mod for it.', icon:'discord', col:['#dfe3ff','#5865f2','#232a8a'], rar:'common' },
     { id:'bughunter', name:'Bug Hunter', req:'Handed out by the dev for reporting real bugs.', icon:'bug', col:['#ffe9b8','#ffb020','#7a4a00'], rar:'epic' },
-    { id:'premium', name:'Premium', req:'Emberline Premium supporter. Not required, but it helps keep the servers running. Get it in the Discord (open a ticket).', icon:'star', col:['#fff4c9','#ffd23f','#8a6115'], rar:'legendary' } ]},
+    { id:'premium', name:'Premium', req:'Emberline Premium supporter. Not required, but it helps keep the servers running. Get it from the Premium popup (tap any gold star).', icon:'star', col:['#fff4c9','#ffd23f','#8a6115'], rar:'legendary' } ]},
   { n:'Secret', c:'#ff6f91', badges:[
     { id:'secret', name:'???', req:'Nobody knows how to get this one. Yet.', hint:'Started a session at exactly 4:20.', icon:'secret', col:['#5a4a6e','#2a2236','#120e19'], rar:'mystery', secret:true } ]}
 ];
@@ -6196,6 +6199,16 @@ function spbStatus(){
   out.bughunter = { got: aw.includes('bughunter') };
   out.squad = { got: aw.includes('squad'), prog: me && me.username ? `${Math.min(me.invites || 0, 3)} / 3 friends joined` : 'Make a ranked profile to get your invite link' };
   out.secret = { got: ss.some(x => { const d = new Date(x.t); return (d.getHours() % 12) === 4 && d.getMinutes() === 20; }) };
+  // weekly badges: only earnable Monday to Sunday of their week (phone time), then gone (kept once earned, below)
+  SPB_ALL.filter(b => b.week).forEach(b => {
+    const [y, m, d] = b.week.split('-').map(Number), w0 = new Date(y, m - 1, d).getTime(), w1 = w0 + 7 * 864e5, now = Date.now();
+    const inWk = t => t >= w0 && t < w1, left = Math.max(0, Math.ceil((w1 - now) / 864e5)), when = now < w0 ? 'Starts ' + new Date(w0).toLocaleDateString([], { month:'short', day:'numeric' }) : now >= w1 ? 'This week is over' : left + ' day' + (left === 1 ? '' : 's') + ' left';
+    let n = 0, goal = 1;
+    if (b.id === 'wk-spotless'){ goal = 2; n = (store.cleanLog || []).filter(c => inWk(c.t) && c.onTime).length; }
+    if (b.id === 'wk-midas'){ goal = 10; n = ss.filter(x => inWk(x.t)).reduce((a, x) => a + hitsOf(x).filter(h => h >= blinkOf(x)).length, 0); }
+    const ok = n >= goal && (!b.prem || isPremium());
+    out[b.id] = { got: ok, prog: b.prem && !isPremium() ? 'Premium only · ' + when : `${Math.min(n, goal)} / ${goal} · ${when}` };
+  });
   aw.forEach(id => { if (!id.startsWith('premium')) out[id] = Object.assign({}, out[id], { got: true }); }); // badges given by hand in Supabase (players.awards) always count
   out.premium = { got: premAward(aw) }; // Premium can end, so it isn't kept forever below
   // once earned, a badge stays earned (deleting a zone, trimming old sessions or a slow leaderboard load can't take it back)
