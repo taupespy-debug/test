@@ -70,7 +70,8 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             let st = self.tracker.owning ? self.tracker.currentState : self.pageState
             return !(7...9).contains(st) // the preview channel is ignored mid-session anyway
         }
-        MusicLights.shared.onChange = { [weak self] on in self?.ble.js("window.emberMusicState && window.emberMusicState(\(on))") }
+        MusicLights.shared.onChange = { [weak self] on, why in self?.ble.js("window.emberMusicState && window.emberMusicState(\(on), '\(why)')") }
+        MusicLights.shared.onBeat = { [weak self] i in self?.ble.js("window.emberBeat && window.emberBeat(\(i))") }
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(wentAway), name: UIApplication.didEnterBackgroundNotification, object: nil)
         nc.addObserver(self, selector: #selector(cameBack), name: UIApplication.willEnterForegroundNotification, object: nil)

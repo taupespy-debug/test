@@ -4206,7 +4206,22 @@ window.emberCameraColor = hex => {
   if (S.mode === 'live') saveProfile(i).then(() => toast(`${p.name} is now ${hex.toUpperCase()}`)).catch(() => {}); else toast(`Color set. Connect to save it to your ${devWord()}`);
   render(); try { drawProfiles(); } catch(e){}
 };
-window.emberMusicState = on => { store.musicOn = !!on; save(); drawAppLights(); if (!on && store.musicWant) toast('Music sync needs the microphone. Turn it on in Settings > Emberline'); store.musicWant = false; };
+window.emberMusicState = (on, why) => {
+  store.musicOn = !!on; save(); drawAppLights();
+  if (on && store.musicWant) toast('Music sync is on. Play something loud with a beat 🎵');
+  if (!on && store.musicWant) toast(why === 'mic' ? 'Music sync needs the microphone. Turn it on in Settings > Emberline' : 'Music sync couldn’t start the mic. Close other apps using it and try again');
+  store.musicWant = false;
+};
+// a beat from the app (app open): the page writes the color in its own light queue, so it never collides with polling.
+// A write still going when the next beat lands: only the newest color is kept
+const MUSIC = { blobs:[], busy:false, next:null };
+window.emberBeat = i => {
+  if (i < 0){ MUSIC.next = null; ledJob(previewClear); return; } // stopped: put the light back
+  if (S.mode !== 'live' || (S.state >= 7 && S.state <= 9) || !MUSIC.blobs[i]) return;
+  if (MUSIC.busy){ MUSIC.next = i; return; }
+  MUSIC.busy = true;
+  ledJob(() => previewWrite(MUSIC.blobs[i]).catch(() => {})).finally(() => { MUSIC.busy = false; const n = MUSIC.next; MUSIC.next = null; if (n != null) window.emberBeat(n); });
+};
 function musicToggle(){
   if (!IS_APP) return;
   if (store.musicOn){ window.EMBER_APP.post('music', { on:false }); return; }
@@ -4214,6 +4229,7 @@ function musicToggle(){
   const p = S.profiles[S.active] || {}, cols = (p.pal && p.pal.length > 1 ? p.pal : ['#ff0040', '#ff8a00', '#ffe600', '#00ff6a', '#00c8ff', '#7300ff', '#ff00d4']).slice(0, 8);
   const b64 = u8 => { let t = ''; for (const c of u8) t += String.fromCharCode(c); return btoa(t); };
   store.musicWant = true;
+  MUSIC.blobs = cols.map(h => S.api === 2 ? h : solidPayload(h)); // previewWrite takes a hex on the original Peak, light data otherwise
   window.EMBER_APP.post('music', { on:true, api2: S.api === 2, blobs: cols.map(h => b64(S.api === 2 ? rgbt(h) : solidPayload(h))) });
 }
 function drawAppLights(){

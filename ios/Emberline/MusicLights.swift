@@ -2,26 +2,29 @@ import AVFoundation
 import QuartzCore
 
 // Music-reactive lights: listens with the mic and moves the Peak to the next color on each beat.
-// The page hands over the light data for each color (so it's the same light the page would show); writes go
-// through the tracker's light queue to the preview channel, only while the Peak isn't in a session.
-// Keeps going with the app in the background (the mic stays on, the orange dot shows).
+// It only hears the beat: with the app open the page writes the color (its own Bluetooth queue, so nothing collides
+// with its polling), and with the app closed the tracker writes it (nothing else is talking to the Peak then).
+// Beats come from the bass (kicks, 808s) with a threshold that follows how loud the song is, never mid-session.
 final class MusicLights {
     static let shared = MusicLights()
     weak var tracker: BackgroundTracker?
     var idle: () -> Bool = { true }
-    var onChange: ((Bool) -> Void)?
+    var onChange: ((Bool, String) -> Void)?   // on, and why it stopped
+    var onBeat: ((Int) -> Void)?              // the page writes this color (app open)
 
     private(set) var on = false
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private var blobs: [[UInt8]] = []
     private var api2 = false
-    private var avg: Float = 0, lastBeat = 0.0, idx = 0
+    private var lastBeat = 0.0, idx = 0
+    private var mean: Float = 0, dev: Float = 0
+    private var low: Float = 0, lowA: Float = 0.02 // one-pole low-pass state (audio thread only)
 
     func start(blobs: [[UInt8]], api2: Bool) {
         self.blobs = blobs; self.api2 = api2
         guard !on, !blobs.isEmpty else { return }
         AVAudioApplication.requestRecordPermission { ok in
-            DispatchQueue.main.async { if ok { self.begin() } else { self.onChange?(false) } }
+            DispatchQueue.main.async { if ok { self.begin() } else { self.onChange?(false, "mic") } }
         }
     }
 
@@ -30,31 +33,40 @@ final class MusicLights {
         do {
             try s.setCategory(.playAndRecord, mode: .default, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothA2DP])
             try s.setActive(true)
-        } catch { onChange?(false); return }
+        } catch { onChange?(false, "audio"); return }
+        engine = AVAudioEngine() // a fresh one: an engine made before the category change can come up silent
         let input = engine.inputNode
         let fmt = input.outputFormat(forBus: 0)
-        guard fmt.sampleRate > 0 else { onChange?(false); return }
-        input.removeTap(onBus: 0)
+        guard fmt.sampleRate > 0 else { onChange?(false, "mic"); return }
+        lowA = Float(1 - exp(-2 * Double.pi * 150 / fmt.sampleRate)) // keep below ~150 Hz: the kick and bass
+        low = 0; mean = 0; dev = 0
         input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buf, _ in
-            guard let ch = buf.floatChannelData?[0] else { return }
+            guard let self = self, let ch = buf.floatChannelData?[0] else { return }
             let n = Int(buf.frameLength)
-            var sum: Float = 0
-            for i in 0..<n { sum += ch[i] * ch[i] }
-            let rms = (sum / Float(max(n, 1))).squareRoot()
-            DispatchQueue.main.async { self?.level(rms) }
+            var y = self.low, sum: Float = 0
+            for i in 0..<n { y += self.lowA * (ch[i] - y); sum += y * y }
+            self.low = y
+            let e = (sum / Float(max(n, 1))).squareRoot()
+            DispatchQueue.main.async { self.level(e) }
         }
-        do { try engine.start(); on = true; onChange?(true) } catch { input.removeTap(onBus: 0); onChange?(false) }
+        do { try engine.start(); on = true; onChange?(true, "") }
+        catch { input.removeTap(onBus: 0); onChange?(false, "audio") }
     }
 
-    // a beat: clearly louder than the last second or so, and not right after the last one
-    private func level(_ rms: Float) {
+    // a beat: the bass jumps clearly above where it's been for the last second or so
+    private func level(_ e: Float) {
+        guard on else { return }
         let now = CACurrentMediaTime()
-        avg = avg == 0 ? rms : avg * 0.95 + rms * 0.05
-        guard rms > max(0.008, avg * 1.45), now - lastBeat > 0.22 else { return }
+        if mean == 0 { mean = e }
+        let beat = e > mean + 1.5 * dev && e > 0.003 && now - lastBeat > 0.25
+        mean = mean * 0.96 + e * 0.04
+        dev = dev * 0.96 + abs(e - mean) * 0.04
+        guard beat else { return }
         lastBeat = now
         guard idle(), !blobs.isEmpty else { return }
         idx = (idx + 1) % blobs.count
-        tracker?.musicLight(blobs[idx], api2: api2)
+        if tracker?.owning == true { tracker?.musicLight(blobs[idx], api2: api2) } // app closed: we have the Peak
+        else { onBeat?(idx) }                                                      // app open: the page writes it
     }
 
     func stop() {
@@ -62,8 +74,8 @@ final class MusicLights {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         on = false
-        tracker?.musicClear(api2: api2)
+        if tracker?.owning == true { tracker?.musicClear(api2: api2) } else { onBeat?(-1) } // -1: put the light back
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
-        onChange?(false)
+        onChange?(false, "")
     }
 }
