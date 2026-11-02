@@ -4217,48 +4217,64 @@ window.emberCameraColor = hex => {
   render(); try { drawProfiles(); } catch(e){}
 };
 /* ===== iPhone app: music sync =====
-   The app hears the music (bass beats, tempo, how loud) and says when; the page writes the light in its own queue so
-   it never collides with polling. The app fires each color early by how long the Peak takes to show one (measured
-   here), so it lands on the beat. Soft parts get the dim colors, big drops flash white */
+   The app hears the music (bass beats and the tempo) and sends a tick on every beat, early by how long the Peak takes
+   to show a light. The page does NOT write a light per beat: rewriting the light file several times a second made
+   Peaks flash white and reboot. Instead it writes one animated mood (your colors pulsing at the song's BPM) and the
+   Peak plays it smoothly on its own. It's only written again when the tempo really changes or you change a setting,
+   never more than once every 10 seconds, and each write lands on a beat so the pulse starts in time */
 const MUSIC_PAL = { profile:{ n:'Your colors' }, rainbow:{ n:'Rainbow', c:['#ff0040','#ff8a00','#ffe600','#00ff6a','#00c8ff','#7300ff','#ff00d4'] },
   fire:{ n:'Fire', c:['#ff2a00','#ff6a00','#ffb000','#ff3d1f','#ffd000'] }, ice:{ n:'Ice', c:['#00e5ff','#2a7bff','#bff6ff','#0050ff','#7fd7ff'] },
   haze:{ n:'Purple haze', c:['#7300ff','#b05bff','#ff00d4','#4a00b0','#e6c4ff'] }, gold:{ n:'Gold', c:['#ffd23f','#ff9a00','#fff1a8','#e0a000','#ffbf3d'] } };
-const MUSIC = { blobs:[], dims:[], flash:null, cols:[], busy:false, next:null, lat:.18, n:0, cur:'#7300ff' };
-const dimHex = (h, f) => '#' + Array.from(hexBytes(h)).map(v => Math.round(v * f).toString(16).padStart(2, '0')).join('');
+const MUSIC = { cols:[], bpm:0, wroteBpm:0, wroteAt:0, wroteKey:'', busy:false, lat:.18, n:0, cur:'#7300ff', i:0 };
+const MUSIC_GAP = 10000; // never rewrite the light more often than this
 function musicCols(){
   const k = store.musicPal || 'profile';
   if (k === 'profile'){ const p = S.profiles[S.active] || {}; return (p.pal && p.pal.length > 1 ? p.pal : MUSIC_PAL.rainbow.c).slice(0, 8); }
   return (MUSIC_PAL[k] || MUSIC_PAL.rainbow).c;
 }
-function musicSend(on){ // the light data for the app: bright, dim and the white flash, the same lights the page writes
-  const cols = musicCols(), a2 = S.api === 2, light = h => a2 ? h : solidPayload(h);
-  const b64 = u8 => { let t = ''; for (const c of u8) t += String.fromCharCode(c); return btoa(t); }, raw = h => b64(a2 ? rgbt(h) : solidPayload(h));
-  MUSIC.cols = cols; MUSIC.blobs = cols.map(light); MUSIC.dims = cols.map(h => light(dimHex(h, .3))); MUSIC.flash = light('#ffffff');
-  window.EMBER_APP.post('music', Object.assign({ api2: a2, style: store.musicStyle || 'beat', sens: +store.musicSens || 1, lat: MUSIC.lat,
-    blobs: cols.map(raw), dims: cols.map(h => raw(dimHex(h, .3))), flash: [raw('#ffffff')] }, on == null ? {} : { on }));
+// the mood: P pulses per cycle, one color each. The Peak's speed is whole cycles per 3 minutes, so pick the number of
+// pulses that gets closest to the real tempo
+function musicMood(bpm){
+  const st = store.musicStyle || 'beat', rate = st === 'chill' ? bpm / 8 : st === 'bars' ? bpm / 4 : bpm; // pulses a minute
+  let best = null;
+  for (let P = 1; P <= 4; P++){ const sp = clamp(Math.round(rate / (3 * P)), 1, 255), err = Math.abs(sp * 3 * P - rate); if (!best || err < best.err - .5) best = { P, sp, err }; }
+  const all = musicCols(), cols = Array.from({ length: best.P }, (_, k) => all[Math.floor(k * all.length / best.P) % all.length]);
+  const shape = st === 'beat' ? [1, .62, .38, .22, .12, .06, .02, 0] : [.08, .35, .75, 1, .8, .5, .25, .1]; // a punch on the beat, or a smooth swell
+  const arr = []; cols.forEach(c => shape.forEach(v => arr.push(mixL('#000000', c.toLowerCase(), v))));
+  const lamp = { name:'pikaled2', param:{ bright:255, speed: best.sp, speedDi0: Math.min(best.sp * 2, 255) / 8, speedDi1: Math.min(best.sp * 2, 255), anim:1, plNum:0, plDenom:0,
+    offset: Array(ledCount()).fill(0), color: MoodEngine.packRgb(arr), colorLen: arr.length, diFrac:0 } };
+  return cbor({ lamp, meta:{ version:1, moodName:'Music sync' } });
+}
+function musicSend(on){ // the app only needs to listen; the light data stays here
+  window.EMBER_APP.post('music', Object.assign({ api2:false, style:'beat', sens: +store.musicSens || 1, lat: MUSIC.lat, blobs:['AA=='], dims:['AA=='], flash:['AA=='] }, on == null ? {} : { on }));
 }
 window.emberMusicState = (on, why) => {
   store.musicOn = !!on; save(); drawAppLights();
+  if (on){ MUSIC.wroteBpm = 0; MUSIC.wroteKey = ''; MUSIC.wroteAt = 0; }
   if (on && store.musicWant) toast('Music sync is on. Play something with a beat 🎵');
   if (!on && store.musicWant) toast(why === 'mic' ? 'Music sync needs the microphone. Turn it on in Settings > Emberline' : 'Music sync couldn’t start the mic. Close other apps using it and try again');
   store.musicWant = false;
 };
+// a beat tick from the app (already early by the Peak's delay). Usually nothing is written: only when the tempo moved,
+// a setting changed, or it's the first lock, and never within 10 s of the last write
 window.emberBeat = (i, kind) => {
-  if (i === -1){ MUSIC.next = null; ledJob(previewClear); return; } // stopped: put the light back
-  if (S.mode !== 'live' || (S.state >= 7 && S.state <= 9)) return;
-  const blob = i === -2 ? MUSIC.flash : (kind === 0 ? MUSIC.dims : MUSIC.blobs)[i]; if (!blob) return;
-  MUSIC.cur = i === -2 ? '#ffffff' : kind === 0 ? dimHex(MUSIC.cols[i], .45) : MUSIC.cols[i];
-  if (MUSIC.busy){ MUSIC.next = [i, kind]; return; } // still showing the last one: only the newest matters
-  MUSIC.busy = true; const t0 = performance.now();
+  if (i === -1){ MUSIC.wroteBpm = 0; ledJob(previewClear); return; } // stopped: put the light back
+  MUSIC.i = (MUSIC.i + 1) % Math.max(1, musicCols().length); MUSIC.cur = musicCols()[MUSIC.i];
+  if (!store.musicOn || S.mode !== 'live' || (S.state >= 7 && S.state <= 9) || S.api === 2 || isProxy() || MUSIC.busy || !(MUSIC.bpm > 0)) return;
+  const key = [store.musicPal, store.musicStyle, S.active].join('|'), moved = !MUSIC.wroteBpm || Math.abs(MUSIC.bpm - MUSIC.wroteBpm) / MUSIC.wroteBpm > .06;
+  if (!(moved || key !== MUSIC.wroteKey) || Date.now() - MUSIC.wroteAt < MUSIC_GAP) return;
+  try { if (zoneLive.on) zoneLiveStop(true); } catch(e){}
+  MUSIC.busy = true; MUSIC.wroteAt = Date.now(); MUSIC.wroteBpm = MUSIC.bpm; MUSIC.wroteKey = key;
+  let blob; try { blob = musicMood(MUSIC.bpm); } catch(e){ MUSIC.busy = false; return; }
+  const t0 = performance.now();
   ledJob(() => previewWrite(blob).catch(() => {})).finally(() => {
-    // how long the Peak takes to show a light: the app fires that much early so it lands on the beat
-    const dt = (performance.now() - t0) / 1000; if (dt > .03 && dt < 1) MUSIC.lat = MUSIC.lat * .8 + dt * .2;
-    if (++MUSIC.n % 8 === 0) window.EMBER_APP.post('music', { lat: MUSIC.lat });
-    MUSIC.busy = false; const n = MUSIC.next; MUSIC.next = null; if (n) window.emberBeat(n[0], n[1]);
+    const dt = (performance.now() - t0) / 1000; if (dt > .03 && dt < 1.5){ MUSIC.lat = MUSIC.lat * .6 + dt * .4; window.EMBER_APP.post('music', { lat: MUSIC.lat }); }
+    MUSIC.busy = false;
   });
 };
-// the visualizer: a circle that breathes with the bass and pops on each beat, in the color the Peak is showing
+// the visualizer: a circle that breathes with the bass and pops on each beat
 window.emberMusicMeter = (lv, bpm, beat) => {
+  MUSIC.bpm = bpm || 0;
   const c = $('#musViz'); if (!c) return;
   c.style.setProperty('--mc', MUSIC.cur || '#7300ff'); c.style.setProperty('--ml', Math.min(1, lv).toFixed(3));
   if (beat){ c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop'); }
@@ -4267,29 +4283,29 @@ window.emberMusicMeter = (lv, bpm, beat) => {
 function musicToggle(){
   if (!IS_APP) return;
   if (store.musicOn){ window.EMBER_APP.post('music', { on:false }); return; }
-  if (isProxy()) return toast('Music sync works on the Peak for now');
-  store.musicWant = true; musicSend(true);
+  if (isProxy() || S.api === 2) return toast('Music sync works on the Peak Pro for now');
+  store.musicWant = true; try { zoneLiveStop(true); } catch(e){} musicSend(true); // the music mood owns the light now
 }
 function drawAppLights(){
   const el = $('#appLights'); if (!el) return;
   el.hidden = !IS_APP; if (!IS_APP) return;
-  const on = !!store.musicOn, st = store.musicStyle || 'beat', pk = store.musicPal || 'profile', sens = +store.musicSens || 1;
+  const on = !!store.musicOn, st = ['beat', 'bars', 'chill'].includes(store.musicStyle) ? store.musicStyle : 'beat', pk = store.musicPal || 'profile', sens = +store.musicSens || 1;
   const sw = k => { const c = k === 'profile' ? musicCols() : MUSIC_PAL[k].c; return `linear-gradient(90deg,${c.concat(c[0]).join(',')})`; };
   el.innerHTML = `<div class="row between"><span class="label">iPhone app</span><span class="muted" style="font-size:12px">Only in the app</span></div>
     <button class="btn small" data-camcolor style="justify-self:start">📷 Color from camera</button>
     <div class="row between" style="margin-top:4px"><b>🎵 Music sync</b><button class="btn small ${on ? 'primary' : ''}" data-music>${on ? 'On' : 'Off'}</button></div>
     ${on ? `<div class="mus-viz" id="musViz"><i></i><span id="musBpm">Finding the beat…</span></div>` : ''}
-    <div class="seg" style="display:grid;grid-template-columns:repeat(3,1fr)">${[['beat', 'Every beat'], ['bars', 'Every bar'], ['drops', 'Drops only']].map(([k, n]) => `<button data-mstyle="${k}" aria-pressed="${st === k}">${n}</button>`).join('')}</div>
+    <div class="seg" style="display:grid;grid-template-columns:repeat(3,1fr)">${[['beat', 'Pulse'], ['bars', 'Every bar'], ['chill', 'Chill']].map(([k, n]) => `<button data-mstyle="${k}" aria-pressed="${st === k}">${n}</button>`).join('')}</div>
     <div class="mus-pals">${Object.entries(MUSIC_PAL).map(([k, v]) => `<button data-mpal="${k}" aria-pressed="${pk === k}"><i style="background:${sw(k)}"></i>${v.n}</button>`).join('')}</div>
     <label style="display:grid;gap:2px;font-size:13px"><span class="row between"><span>Sensitivity</span><span class="muted">${sens < .8 ? 'Strong beats only' : sens > 1.4 ? 'Every little hit' : 'Balanced'}</span></span><input type="range" data-msens min="0.5" max="2" step="0.1" value="${sens}"></label>
-    <p class="muted" style="margin:0;font-size:13px">Listens with the mic, so play it out loud (not in AirPods). It locks onto the beat, dims on soft parts and flashes white on drops, even with the app closed. Pauses during a session.</p>`;
+    <p class="muted" style="margin:0;font-size:13px">Listens with the mic, so play it out loud (not in AirPods). Once it finds the beat, your Peak pulses your colors in time with the song by itself, and keeps going with the app closed. It only updates the light when the tempo changes (at most every 10 seconds), so it's gentle on your Peak. Pauses during a session.</p>`;
 }
 document.addEventListener('click', e => {
   if (!e.target.closest) return;
   if (e.target.closest('[data-camcolor]')){ if (S.mode !== 'live') toast(`Connect your ${devWord()} to see it live`); window.EMBER_APP && window.EMBER_APP.post('camera', {}); }
   if (e.target.closest('[data-music]')) musicToggle();
-  const ms = e.target.closest('[data-mstyle]'); if (ms){ store.musicStyle = ms.dataset.mstyle; save(); drawAppLights(); if (IS_APP) window.EMBER_APP.post('music', { style: store.musicStyle }); }
-  const mp = e.target.closest('[data-mpal]'); if (mp){ store.musicPal = mp.dataset.mpal; save(); drawAppLights(); if (IS_APP && store.musicOn) musicSend(true); }
+  const ms = e.target.closest('[data-mstyle]'); if (ms){ store.musicStyle = ms.dataset.mstyle; save(); drawAppLights(); } // applied on the next beat (at most every 10 s)
+  const mp = e.target.closest('[data-mpal]'); if (mp){ store.musicPal = mp.dataset.mpal; save(); drawAppLights(); }
 });
 document.addEventListener('change', e => { const r = e.target.closest && e.target.closest('[data-msens]'); if (r){ store.musicSens = +r.value; save(); drawAppLights(); if (IS_APP) window.EMBER_APP.post('music', { sens: store.musicSens }); } });
 setTimeout(() => { store.musicOn = false; drawAppLights(); }, 0); // a fresh start never has music sync running
@@ -7841,6 +7857,7 @@ const zoneLive = { on:false, meta:null, timer:null, busy:false, t0:0 };
 const ZFX_ANIM = ['pulse','fade','rainbow','flicker','strobe'];
 function zoneLiveStart(meta, quiet){
   if (S.mode !== 'live'){ if (!quiet) needLive('preview zones'); return false; }
+  if (store.musicOn){ if (!quiet) toast('Turn off Music sync first'); return false; } // two things animating the same light fight (and it's a lot of writes)
   if (S.api === 2) return false;
   zoneLive.meta = meta; zoneLive.t0 = performance.now(); clearTimeout(previewTimer);
   if (zoneLive.on) return true;

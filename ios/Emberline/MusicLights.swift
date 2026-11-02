@@ -5,9 +5,8 @@ import QuartzCore
 // - Beats come from the bass (kicks, 808s) with a threshold that follows the song's loudness.
 // - It learns the tempo, and fires each color a little early (by how long the Peak takes to show a light, measured
 //   by the page) so it lands on the beat, and keeps the rhythm through quiet bits.
-// - Soft parts get the dim colors, big drops flash white.
-// It only decides what and when: with the app open the page writes the light (its own Bluetooth queue, so nothing
-// collides with its polling); with the app closed the tracker writes it. Never mid-session.
+// It only listens and keeps time: the page writes one animated mood at the song's tempo (at most every 10 s), never a
+// light per beat. With the app closed the Peak keeps playing the last one. Never mid-session.
 final class MusicLights {
     static let shared = MusicLights()
     weak var tracker: BackgroundTracker?
@@ -128,9 +127,10 @@ final class MusicLights {
         if style == "bars" && count % 4 != 1 && kind < 2 { return }
         guard idle(), !blobs.isEmpty else { return }
         if kind != 2 { idx = (idx + 1) % blobs.count }
-        let blob = kind == 2 ? flash : kind == 0 ? dims[idx] : blobs[idx]
-        if tracker?.owning == true { tracker?.musicLight(blob, api2: api2) } // app closed: we have the Peak
-        else { onBeat?(kind == 2 ? -2 : idx, kind) }                         // app open: the page writes it (-2 = flash)
+        // never a light per beat: rewriting the light file several times a second made Peaks flash white and reboot.
+        // The page writes one tempo-matched mood (rarely); with the app closed the Peak keeps playing the last one
+        if tracker?.owning == true { return }
+        onBeat?(idx, kind)
     }
 
     private func meter(_ now: Double) {
