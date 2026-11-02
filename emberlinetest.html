@@ -3736,7 +3736,7 @@ async function switchToDevice(d){
   toggleDevMenu(false);
   if (currentDevId() === d.id) return;
   // let go of the current device quietly, then go straight to the chosen one
-  if (S.mode === 'live' || ble.connected){ manualDisconnect = true; reconnectRun++; stopPolling(); try { ble.disconnect(true); } catch(e){} S.mode = 'off'; await sleep(250); }
+  appAuto(false); if (S.mode === 'live' || ble.connected){ manualDisconnect = true; reconnectRun++; stopPolling(); try { ble.disconnect(true); } catch(e){} S.mode = 'off'; await sleep(250); }
   zoneLiveStop(true);
   store.lastDeviceId = d.id; store.lastDeviceName = d.name; save();
   ble.dev = null; manualDisconnect = false;
@@ -3749,7 +3749,7 @@ async function switchToDevice(d){
 }
 async function addDevice(){
   toggleDevMenu(false);
-  if (S.mode === 'live' || ble.connected){ manualDisconnect = true; reconnectRun++; stopPolling(); try { ble.disconnect(true); } catch(e){} S.mode = 'off'; await sleep(250); }
+  appAuto(false); if (S.mode === 'live' || ble.connected){ manualDisconnect = true; reconnectRun++; stopPolling(); try { ble.disconnect(true); } catch(e){} S.mode = 'off'; await sleep(250); }
   ble.dev = null; manualDisconnect = false; setConnUI('idle');
   startConnect(true, false);
 }
@@ -3806,7 +3806,7 @@ async function autoReconnect(){
     if (await connectLast({ scan: n >= 3 ? 4000 : 0 })) return;
   }
   if (run === reconnectRun) clog('gave up reconnecting');
-  if (run === reconnectRun) setConnUI('error', { title:'Lost connection to your Peak', msg:'It may have gone to sleep, moved out of range, or connected to the Puffco app. Wake it and tap Try again.' });
+  if (run === reconnectRun) setConnUI('error', { title:'Lost connection to your Peak', msg: IS_APP ? 'It may have gone to sleep, moved out of range, or connected to the Puffco app. Wake it and Emberline reconnects on its own.' : 'It may have gone to sleep, moved out of range, or connected to the Puffco app. Wake it and tap Try again.' });
 }
 // background scan used for instant reconnects (Path browser supports this)
 async function scanForPeak(name, ms, id){
@@ -3837,7 +3837,18 @@ function armTapReconnect(){
   };
   document.addEventListener('pointerup', go, true);
 }
-function userDisconnect(){ manualDisconnect = true; reconnectRun++; ble.disconnect(); if (!ble.connected) onDropped(); }
+/* iPhone app: the app keeps a standing connect to your Peak, so it reconnects the moment the Peak wakes up or comes
+   back in range (however long it was gone). Tapping Disconnect, switching or forgetting the device turns that off */
+function appAuto(on){ if (IS_APP) window.EMBER_APP.post('auto', { on: !!on }); }
+let bleBackAt = 0;
+window.emberBleBack = id => { // the app reconnected the Peak on its own: attach to it now
+  if (S.mode === 'live' || C.state === 'connecting' || manualDisconnect || store.autoConnect === false) return;
+  if (store.lastDeviceId && id && store.lastDeviceId !== id) return;
+  if (Date.now() - bleBackAt < 4000) return; bleBackAt = Date.now();
+  try { clog('app: Peak is back, reconnecting'); } catch(e){}
+  autoReconnect();
+};
+function userDisconnect(){ appAuto(false); manualDisconnect = true; reconnectRun++; ble.disconnect(); if (!ble.connected) onDropped(); }
 
 // pause polling in the background, resume (or reconnect) when back
 function forceReconnect(why){
@@ -7323,7 +7334,7 @@ document.addEventListener('pointerdown', e => {
 }, true);
 $('#connBtn').addEventListener('click', () => {
   if (S.mode === 'live') return; // connected: tapping the pill does nothing (disconnect is in the device menu)
-  if (C.state === 'reconnecting'){ manualDisconnect = true; reconnectRun++; setConnUI('idle'); return; }
+  if (C.state === 'reconnecting'){ appAuto(false); manualDisconnect = true; reconnectRun++; setConnUI('idle'); return; }
   if (C.state === 'unsupported'){ show('home'); return; }
   startConnect(false);
 });
@@ -9199,7 +9210,7 @@ $('#devMenu').addEventListener('click', e => {
   e.stopPropagation();
   const d = e.target.closest('[data-dev]'), f = e.target.closest('[data-forget]');
   if (f){ const list = devList(), x = list[+f.dataset.forget]; list.splice(+f.dataset.forget, 1);
-    if (x && x.id === store.lastDeviceId){ const n = list[0]; store.lastDeviceId = n ? n.id : null; store.lastDeviceName = n ? n.name : null; }
+    if (x && x.id === store.lastDeviceId){ appAuto(false); const n = list[0]; store.lastDeviceId = n ? n.id : null; store.lastDeviceName = n ? n.name : null; }
     save(); drawDevMenu(); toast(`Forgot ${x ? (x.label || x.name) : 'device'}`); return; }
   if (d){ switchToDevice(devList()[+d.dataset.dev]); return; }
   if (e.target.closest('#dmAdd')){ addDevice(); return; }
@@ -9278,7 +9289,7 @@ $('#connectCard').addEventListener('click', async e => {
     catch(err){ toast(location.href); }
     return;
   }
-  if (C.state === 'reconnecting'){ manualDisconnect = true; reconnectRun++; setConnUI('idle'); return; }
+  if (C.state === 'reconnecting'){ appAuto(false); manualDisconnect = true; reconnectRun++; setConnUI('idle'); return; }
   startConnect(false);
 });
 
