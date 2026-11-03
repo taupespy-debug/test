@@ -99,6 +99,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         case "haptic": Haptics.play(body["kind"] as? String ?? "light")
         case "live": LiveSession.shared.handle(body)
         case "notify": Notify.shared.send(body["title"] as? String ?? "Emberline", body["body"] as? String ?? "")
+        case "http": http(body)
         case "share": share(body)
         case "camera": camera()
         case "music":
@@ -264,6 +265,29 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     @available(iOS 15.0, *)
     func webView(_ w: WKWebView, requestMediaCapturePermissionFor o: WKSecurityOrigin, initiatedByFrame f: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         decisionHandler(WebViewController.hosts.contains(o.host) ? .grant : .prompt)
+    }
+}
+
+// MARK: - Puffco API without browser limits
+
+extension WebViewController {
+    // the page's Puffco sign-in and sync, sent by the app itself (a website can be blocked by Puffco, the app isn't).
+    // Only api.puffco.app; the answer goes back to window.__emberHttp
+    func http(_ b: [String: Any]) {
+        let id = b["id"] as? Int ?? 0
+        guard let s = b["url"] as? String, let url = URL(string: s), url.scheme == "https", url.host == "api.puffco.app" else {
+            ble.js("window.__emberHttp && window.__emberHttp(\(id), 0, 'blocked')"); return
+        }
+        var r = URLRequest(url: url, timeoutInterval: 20)
+        r.httpMethod = (b["method"] as? String) == "POST" ? "POST" : "GET"
+        for (k, v) in b["headers"] as? [String: String] ?? [:] { r.setValue(v, forHTTPHeaderField: k) }
+        if let body = b["body"] as? String { r.httpBody = body.data(using: .utf8) }
+        URLSession.shared.dataTask(with: r) { [weak self] d, resp, err in
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            let text = String(data: d ?? Data(), encoding: .utf8) ?? ""
+            let q = (try? JSONSerialization.data(withJSONObject: [status == 0 ? (err?.localizedDescription ?? "Network error") : text])).flatMap { String(data: $0, encoding: .utf8) }.map { String($0.dropFirst().dropLast()) } ?? "''"
+            DispatchQueue.main.async { self?.ble.js("window.__emberHttp && window.__emberHttp(\(id), \(status), \(q))") }
+        }.resume()
     }
 }
 

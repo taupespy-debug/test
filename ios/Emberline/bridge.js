@@ -78,5 +78,11 @@
   };
   try { Object.defineProperty(navigator, 'bluetooth', { value: bt, configurable: true }); } catch(e){ navigator.bluetooth = bt; }
   const A = window.webkit.messageHandlers.app;
-  window.EMBER_APP = { native: true, post: (op, args) => { try { A.postMessage(Object.assign({ op }, args || {})); } catch(e){} } };
+  // Puffco's API straight from the app (no browser CORS limits): returns a real Response, like fetch
+  let httpId = 1; const httpWaits = new Map();
+  window.__emberHttp = (id, status, body) => { const w = httpWaits.get(id); if (!w) return; httpWaits.delete(id); status ? w.res(new Response(body, { status, headers:{ 'Content-Type':'application/json' } })) : w.rej(new TypeError(body || 'Network error')); };
+  window.EMBER_APP = { native: true, post: (op, args) => { try { A.postMessage(Object.assign({ op }, args || {})); } catch(e){} },
+    http: (url, opts) => new Promise((res, rej) => { const id = httpId++; httpWaits.set(id, { res, rej }); opts = opts || {};
+      try { A.postMessage({ op:'http', id, url: String(url), method: opts.method || 'GET', headers: opts.headers || {}, body: typeof opts.body === 'string' ? opts.body : null }); } catch(e){ httpWaits.delete(id); rej(e); }
+      setTimeout(() => { if (httpWaits.has(id)){ httpWaits.delete(id); rej(new TypeError('Timed out')); } }, 25000); }) };
 })();

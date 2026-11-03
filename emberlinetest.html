@@ -8793,11 +8793,28 @@ function applyAccount(){
   if (a.data.user && a.data.user.firstName && (!store.name || store.name === 'Chase')) store.name = a.data.user.firstName;
 }
 class AcctError extends Error { constructor(kind, msg){ super(msg); this.kind = kind; } }
+// straight to Puffco. The iPhone app goes natively (no browser limits); once a browser has needed the relay, it
+// keeps using it for a day instead of failing first every time
+async function puffcoDirect(path, opts){
+  if (window.EMBER_APP && window.EMBER_APP.http) return window.EMBER_APP.http(PUFFCO_API + path, opts);
+  if (store.puffcoRelay && Date.now() - store.puffcoRelay < 864e5) throw new Error('use relay');
+  return fetch(PUFFCO_API + path, Object.assign({ mode:'cors', credentials:'omit' }, opts));
+}
+async function puffcoRelay(path, opts){
+  const r = await fetch(SB_URL + '/functions/v1/player', { method:'POST', headers:{ apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type':'application/json' },
+    body: JSON.stringify({ action:'puffco', path, method: opts.method || 'GET', headers: opts.headers || {}, body: typeof opts.body === 'string' ? opts.body : undefined }) });
+  const j = await r.json(); if (!j || !j.status) throw new Error('relay: ' + ((j && (j.body || j.error)) || r.status));
+  return new Response(j.body, { status: j.status, headers:{ 'Content-Type':'application/json' } });
+}
 async function apiFetch(path, opts = {}){
   let res;
   opts = Object.assign({}, opts, { headers: Object.assign({ 'x-app-type':'puffco-app', 'x-app-platform':'Web', 'x-app-version':'3.13.31' }, opts.headers || {}) });
-  try { res = await fetch(PUFFCO_API + path, Object.assign({ mode:'cors', credentials:'omit' }, opts)); }
-  catch(e){ throw new AcctError('blocked', 'This browser couldn’t reach Puffco’s servers. They may only accept requests from Puffco’s own app.'); }
+  try { res = await puffcoDirect(path, opts); }
+  catch(e){
+    // the browser couldn't reach Puffco (Puffco blocks some websites): go through Emberline's server instead
+    try { res = await puffcoRelay(path, opts); store.puffcoRelay = Date.now(); }
+    catch(e2){ throw new AcctError('blocked', 'Couldn’t reach Puffco’s servers right now. Check your internet and try again in a minute.'); }
+  }
   if (res.status === 401 || res.status === 403) throw new AcctError('auth', 'Puffco rejected the sign-in.');
   if (!res.ok){
     // show what Puffco actually said (same messages as their app)
@@ -8901,7 +8918,7 @@ function acctFormHtml(prefix){
       <p class="muted acct-err" id="${prefix}Err" hidden></p>
       <div class="shop-actions"><button class="btn primary" type="submit" id="${prefix}Go">Sign in</button>
       <label class="btn small" for="${prefix}File" hidden>Import from file<input type="file" id="${prefix}File" accept=".har,application/json" hidden></label></div>
-      <p class="muted" style="margin:0;font-size:12px">Your password goes only to Puffco&#8217;s server (api.puffco.app). Emberline keeps the sign-in token on this phone so it can sync again later.</p>
+      <p class="muted" style="margin:0;font-size:12px">Your password goes to Puffco&#8217;s server (api.puffco.app), through Emberline&#8217;s server if your browser can&#8217;t reach Puffco, and is never saved. Emberline keeps the sign-in token on this phone so it can sync again later.</p>
     </form>`;
 }
 function drawAccount(){
