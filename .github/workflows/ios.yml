@@ -69,9 +69,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete ios-latest --yes --cleanup-tag || true
-          gh release create ios-latest ios/Emberline.ipa ios/source.json --title "Emberline iPhone app (test)" \
-            --notes "Built from ${GITHUB_SHA::7}. Install with Sideloadly. See ios/README.md." --prerelease
+          # GitHub sometimes answers 500 for a moment: try a few times so the download link is never left missing
+          for n in 1 2 3 4 5; do
+            gh release delete ios-latest --yes --cleanup-tag || true
+            if gh release create ios-latest ios/Emberline.ipa ios/source.json --title "Emberline iPhone app (test)" \
+              --notes "Built from ${GITHUB_SHA::7}. Install with Sideloadly. See ios/README.md." --prerelease; then exit 0; fi
+            echo "release failed (try $n), waiting"; sleep $((n * 15))
+          done
+          exit 1
       - uses: actions/upload-artifact@v4
         with:
           name: Emberline-ipa
