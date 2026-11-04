@@ -44,11 +44,12 @@ final class MultiDevices {
             if api != 2, let f = fx[proxy ? "proxy" : "peak"] {
                 let bytes = { (k: String) -> [UInt8]? in (f[k] as? String).flatMap { Data(base64Encoded: $0) }.map { [UInt8]($0) } }
                 c.disco = bytes("disco"); c.warn = bytes("warn"); c.warnSecs = f["warnSecs"] as? Double ?? 15
+                for (k, v) in f["ph"] as? [String: String] ?? [:] { if let i = Int(k), let d = Data(base64Encoded: v) { c.preheatBy[i] = [UInt8](d) } }
             }
             list.append(Dev(id: u, name: c.name, proxy: proxy, api: api, ctx: c))
         }
         devs = list
-        for (_, t) in trackers { if let d = devs.first(where: { $0.id == t.devId }) { t.ctx.disco = d.ctx.disco; t.ctx.warn = d.ctx.warn; t.ctx.warnSecs = d.ctx.warnSecs; t.ctx.name = d.name; t.ctx.blk = d.ctx.blk } }
+        for (_, t) in trackers { if let d = devs.first(where: { $0.id == t.devId }) { t.ctx.disco = d.ctx.disco; t.ctx.warn = d.ctx.warn; t.ctx.preheatBy = d.ctx.preheatBy; t.ctx.warnSecs = d.ctx.warnSecs; t.ctx.name = d.name; t.ctx.blk = d.ctx.blk } }
         if on && timer == nil {
             timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.sync() }
         }

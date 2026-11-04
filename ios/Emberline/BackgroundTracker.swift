@@ -25,6 +25,7 @@ final class BackgroundTracker {
         var name = "Session"; var color = "#8a2bff"; var targetF = 0; var blk = 8.0 // for the Live Activity and the blinker ping
         var p = 0                       // active profile
         var preheat: [UInt8]? = nil     // light while heating (page's preheat color or mood)
+        var preheatBy: [Int: [UInt8]] = [:] // side devices: the preheat light for each profile (picked once we know which one is heating)
         var disco: [UInt8]? = nil       // light for 10s after a blinker
         var warn: [UInt8]? = nil        // warning flash color near the end
         var warnSecs = 15.0
@@ -203,8 +204,24 @@ final class BackgroundTracker {
         return nil
     }
     private func showLight(_ blob: [UInt8]) async throws {
-        if ctx.proxy, (try? await writeA("/p/app/thc/colr", blob, flags: 4)) != nil { return } // a Proxy takes it in one go
+        if ctx.proxy { try await proxyWrite("/p/app/thc/colr", blob); return }
         try await writeBlob("/p/app/thc/colr", blob)
+    }
+    // a Proxy sometimes says OK to a light write without changing anything: try each way until reading it back matches
+    // (the same steps as proxyColr in the page)
+    private func proxyWrite(_ path: String, _ blob: [UInt8]) async throws {
+        for way in 0..<4 {
+            do {
+                switch way {
+                case 0: _ = try await writeA(path, blob, flags: 4)
+                case 1: try await writeBlob(path, blob)
+                case 2: _ = try await writeA(path, blob, flags: 1)
+                default: _ = try await writeA(path, blob, flags: 0)
+                }
+            } catch { continue }
+            if let back = try? await readAll(path), back == blob { return }
+        }
+        throw TrackErr.status(0xfe)
     }
 
     private func preheatStart() {
@@ -518,11 +535,16 @@ final class BackgroundTracker {
         let now = Date()
         if st == 7 && prev != 7 && cur == nil {
             proxyOn = false
-            preheatStart()
+            if ctx.preheatBy.isEmpty { preheatStart() }
             torchTe = 0; torchSent = -1; torchAt = 0
             cur = Sess(t: now, p: 0)
             hit = HitCounter()
-            read("/p/app/hcs", 1) { [weak self] r in if case .success(let b) = r, let i = b.first, i <= 3 { self?.cur?.p = Int(i) } }
+            read("/p/app/hcs", 1) { [weak self] r in
+                guard let self = self else { return }
+                var p = 0
+                if case .success(let b) = r, let i = b.first, i <= 3 { p = Int(i); self.cur?.p = p }
+                if !self.ctx.preheatBy.isEmpty, let ph = self.ctx.preheatBy[p] { self.ctx.preheat = ph; self.preheatStart() } // the preheat light for the profile that's heating
+            }
         }
         if st == 8 && prev != 8 && prev != 7 && prev != 9 && cur?.readyAt == nil { hit = HitCounter() }
         if st == 8 && cur == nil { cur = Sess(t: now, p: 0) } // already Ready when we started watching

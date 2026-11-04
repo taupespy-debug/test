@@ -4385,12 +4385,13 @@ const SIDE = { st:{}, open:null };
 function multiOn(){ return IS_APP && store.multiDev !== false; }
 // the light data for each kind of device (the app plays it on the Peaks and Proxies that aren't on screen)
 function multiFx(){
-  const k = [store.warnColor, store.warnOn, store.warnSecs, store.bigHit, MOODS.excl.length].join('|'); if (multiFx.k === k) return multiFx.v;
+  const k = [store.warnColor, store.warnOn, store.warnSecs, store.bigHit, MOODS.excl.length, JSON.stringify(store.preheat || [])].join('|'); if (multiFx.k === k) return multiFx.v;
   const b64 = u8 => { let x = ''; for (const c of u8) x += String.fromCharCode(c); return btoa(x); }, out = {}, sv = S.series, se = S.edition;
   for (const [name, ser] of [['peak', 'peach'], ['proxy', 'toad']]){
     const v = {}; S.series = ser; S.edition = null;
     try { if (store.bigHit !== false){ const d = MOODS.excl.find(x => /disco/i.test(x.name)); if (d) v.disco = b64(moodPayload({ kind:'excl', id:d.id, name:d.name })); } } catch(e){}
     try { if (store.warnOn !== false){ v.warn = b64(solidPayload(store.warnColor || '#ffffff')); v.warnSecs = clamp(+store.warnSecs || 15, 3, 110); } } catch(e){}
+    v.ph = {}; for (let i = 0; i < 4; i++){ try { const ph = phVal(i); if (ph) v.ph[i] = b64(typeof ph === 'string' ? solidPayload(ph) : moodPayload(ph)); } catch(e){} } // the preheat light for each profile
     out[name] = v;
   }
   S.series = sv; S.edition = se;
