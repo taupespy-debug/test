@@ -14,7 +14,7 @@ A free Apple ID signs it for 7 days. Turn on Sideloadly's auto-refresh, or drag 
 stops opening. Your account and RP are on the server, so nothing is lost.
 
 ## How it works
-- The app opens the test build (emberlinetest.html) from GitHub Pages, so site updates show up right away.
+- The app opens the live site (emberlineapp.github.io/emberline) from GitHub Pages, so site updates show up right away.
   Only changes in this ios/ folder need a new .ipa.
 - `bridge.js` gives the page `navigator.bluetooth`, backed by CoreBluetooth in `BLEBridge.swift`.
 - When the app goes to the background, `BackgroundTracker.swift` takes over the Peak: it reads the state and

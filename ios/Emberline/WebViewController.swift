@@ -4,8 +4,8 @@ import WebKit
 // The app is the Emberline site in a full-screen web view, with Bluetooth from the app (BLEBridge) instead of Path's.
 // Updates still come from GitHub Pages: push to the site and the app has it on the next open.
 final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
-    // the test build for now; switch to https://emberlineapp.github.io/emberline/ for live
-    static let startURL = URL(string: "https://taupespy-debug.github.io/test/emberlinetest.html")!
+    // the live app (the same page Path users get). Test build: https://taupespy-debug.github.io/test/emberlinetest.html
+    static let startURL = URL(string: "https://emberlineapp.github.io/emberline/")!
     static let hosts: Set<String> = ["taupespy-debug.github.io", "emberlineapp.github.io"]
 
     private var web: WKWebView!
