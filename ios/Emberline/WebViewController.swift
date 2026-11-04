@@ -88,6 +88,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         nc.addObserver(self, selector: #selector(wentAway), name: UIApplication.didEnterBackgroundNotification, object: nil)
         nc.addObserver(self, selector: #selector(cameBack), name: UIApplication.willEnterForegroundNotification, object: nil)
         load()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in if let s = self { UpdateCheck.run(from: s) } } // a newer build on GitHub?
     }
 
     private func load() { web.load(URLRequest(url: WebViewController.startURL)) }
@@ -204,6 +205,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         if needsReload { needsReload = false; pendingResume = arg; load(); return }
         resume(arg)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.multi.sync() } // sessions from your other devices
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in if let s = self { UpdateCheck.run(from: s) } }
     }
 
     // hand the sessions to the page; if it isn't ready yet, try again shortly (they're never dropped)

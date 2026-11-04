@@ -13,6 +13,14 @@ tracking sessions (RP, hits, blinkers) while the app is closed.
 A free Apple ID signs it for 7 days. Turn on Sideloadly's auto-refresh, or drag the .ipa in again when it
 stops opening. Your account and RP are on the server, so nothing is lost.
 
+## Updates from GitHub
+- Every build has its own number, and the release also has an update feed:
+  https://github.com/taupespy-debug/test/releases/download/ios-latest/source.json
+- The app checks it when it opens (at most every 6 hours). When GitHub has a newer build, it asks once if you want to
+  download it. iOS doesn't let an app install itself, so you still install it with Sideloadly, or:
+- **SideStore** (free, installs on the iPhone, no computer after setup): add the feed URL above as a Source.
+  SideStore then shows Emberline updates and installs them on the phone.
+
 ## How it works
 - The app opens the live site (emberlineapp.github.io/emberline) from GitHub Pages, so site updates show up right away.
   Only changes in this ios/ folder need a new .ipa.

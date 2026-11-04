@@ -26,7 +26,8 @@ jobs:
           set -o pipefail
           xcodebuild -project Emberline.xcodeproj -scheme Emberline -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 | tee build.log
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} build 2>&1 | tee build.log
       - name: Package Emberline.ipa
         working-directory: ios
         run: |
@@ -39,12 +40,37 @@ jobs:
           codesign -dv Payload/Emberline.app 2>&1 | head -5
           zip -qry Emberline.ipa Payload
           ls -la Emberline.ipa
+      - name: Make the update feed (source.json, for the app's update check and SideStore / AltStore)
+        working-directory: ios
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          python3 - <<'PY'
+          import json, os, plistlib, datetime
+          info = plistlib.load(open("Payload/Emberline.app/Info.plist", "rb"))
+          base = "https://github.com/taupespy-debug/test/releases/download/ios-latest/"
+          note = (os.environ.get("MSG") or "").split("\n")[0][:200]
+          ver = {"version": info["CFBundleShortVersionString"], "buildVersion": str(info["CFBundleVersion"]),
+                 "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                 "localizedDescription": note, "downloadURL": base + "Emberline.ipa",
+                 "size": os.path.getsize("Emberline.ipa"), "minOSVersion": info.get("MinimumOSVersion", "18.0")}
+          src = {"name": "Emberline", "identifier": "app.emberline.source", "subtitle": "The Emberline iPhone app",
+                 "website": "https://emberlineapp.github.io/emberline/",
+                 "apps": [{"name": "Emberline", "bundleIdentifier": info["CFBundleIdentifier"], "developerName": "Emberline",
+                           "subtitle": "Puffco Peak Pro, Peak and Proxy", "localizedDescription": "Emberline for your Puffco, with background tracking, widgets and more.",
+                           "iconURL": "https://raw.githubusercontent.com/taupespy-debug/test/main/ios/Emberline/Assets.xcassets/AppIcon.appiconset/icon-1024.png",
+                           "tintColor": "7300ff", "category": "lifestyle", "versions": [ver],
+                           "appPermissions": {"entitlements": [], "privacy": {}}}],
+                 "news": []}
+          json.dump(src, open("source.json", "w"), indent=1)
+          print(json.dumps(ver))
+          PY
       - name: Publish to Releases (ios-latest)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete ios-latest --yes --cleanup-tag || true
-          gh release create ios-latest ios/Emberline.ipa --title "Emberline iPhone app (test)" \
+          gh release create ios-latest ios/Emberline.ipa ios/source.json --title "Emberline iPhone app (test)" \
             --notes "Built from ${GITHUB_SHA::7}. Install with Sideloadly. See ios/README.md." --prerelease
       - uses: actions/upload-artifact@v4
         with:
