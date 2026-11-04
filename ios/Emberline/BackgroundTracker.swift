@@ -18,6 +18,7 @@ final class BackgroundTracker {
     var onFinished: (([String: Any]) -> Void)? // side trackers: a finished session goes straight here
     private var target: UUID? { devId ?? bridge?.activeId }
     private var liveShown = false
+    private var introDone = false
 
     // what the page told us before it froze (window.emberBgPause / the heartbeat)
     struct Ctx {
@@ -25,6 +26,7 @@ final class BackgroundTracker {
         var name = "Session"; var color = "#8a2bff"; var targetF = 0; var blk = 8.0 // for the Live Activity and the blinker ping
         var p = 0                       // active profile
         var preheat: [UInt8]? = nil     // light while heating (page's preheat color or mood)
+        var intro: [UInt8]? = nil       // side devices: the Emberline intro light, played once when it connects
         var preheatBy: [Int: [UInt8]] = [:] // side devices: the preheat light for each profile (picked once we know which one is heating)
         var disco: [UInt8]? = nil       // light for 10s after a blinker
         var warn: [UInt8]? = nil        // warning flash color near the end
@@ -80,6 +82,7 @@ final class BackgroundTracker {
     func takeOver(_ c: Ctx, authed fromPage: Bool? = nil) {
         guard !owning else { return }
         ctx = c; owning = true; busy = false; liveShown = false
+        introDone = fromPage == true // the page already played it on a device it hands over
         authed = fromPage ?? (bridge?.isConnected(target) ?? false) // a link the page made is already unlocked
         lastState = -1; lastStateRead = 0; hitOK = c.api != 2 // the original Peak times hits from the heater: sessions still count, hits don't
         finished = []; hit = HitCounter(); cur = nil; shownHits = 0; endsAt = nil
@@ -557,6 +560,21 @@ final class BackgroundTracker {
         }
         if st == 9 || st <= 6 { endSession(now) }
         if st != prev { emitLive() }
+        if !introDone, let b = ctx.intro, st >= 0, !(7...9).contains(st) { introDone = true; playIntro(b) }
+    }
+
+    // the Emberline intro on the preview channel for 5 s, then the device's own light again (like connectIntro in the page)
+    private func playIntro(_ blob: [UInt8]) {
+        led { [weak self] in
+            guard let self = self else { return }
+            guard (try? await self.writeBlob("/p/app/led/pclr", blob)) != nil else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                self?.led { [weak self] in
+                    guard let self = self else { return }
+                    if (try? await self.writeA("/p/app/led/pclr", [], flags: 4)) == nil { _ = try? await self.writeA("/p/app/led/pclr", []) }
+                }
+            }
+        }
     }
 
     // a hit just ended: update the Live Activity, and ping for a blinker

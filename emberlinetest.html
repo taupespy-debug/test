@@ -4391,6 +4391,12 @@ function multiFx(){
     const v = {}; S.series = ser; S.edition = null;
     try { if (store.bigHit !== false){ const d = MOODS.excl.find(x => /disco/i.test(x.name)); if (d) v.disco = b64(moodPayload({ kind:'excl', id:d.id, name:d.name })); } } catch(e){}
     try { if (store.warnOn !== false){ v.warn = b64(solidPayload(store.warnColor || '#ffffff')); v.warnSecs = clamp(+store.warnSecs || 15, 3, 110); } } catch(e){}
+    try { // the Emberline intro light, played once on your other devices when they connect (the page plays it on the one on screen)
+      if (ser === 'toad') v.intro = b64(lampBlob(moodLamp({ kind:'tpl', tag:'pikaled2-spin-mood-light', name:'Intro', meta:{ userColors:['#b4148c', '#ffffff'], tempoFrac:.42, dynamicInhale:0 } })));
+      else { let blob = null; try { blob = moodPayload({ tag: ZONE_TAG, name:'Intro', meta: JSON.parse(JSON.stringify(INTRO_ZONES)) }); } catch(e){}
+        if (!blob) blob = moodPayload({ kind:'tpl', tag:'pikaled2-spin-mood-light', name:'Intro', meta:{ userColors:['#5b009c', '#0a84ff'], tempoFrac:.42, dynamicInhale:0 } });
+        v.intro = b64(blob); }
+    } catch(e){}
     v.ph = {}; for (let i = 0; i < 4; i++){ try { const ph = phVal(i); if (ph) v.ph[i] = b64(typeof ph === 'string' ? solidPayload(ph) : moodPayload(ph)); } catch(e){} } // the preheat light for each profile
     out[name] = v;
   }
