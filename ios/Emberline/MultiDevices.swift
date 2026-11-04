@@ -117,6 +117,12 @@ final class MultiDevices {
         flush()
     }
 
+    // right away (a device just connected): the startup screen lights its icon without waiting for the next tick
+    func pushStatus() {
+        guard on, bridge?.away == false else { return }
+        send(["type": "status", "devs": trackers.values.map { $0.status }])
+    }
+
     private func stopAll() {
         timer?.invalidate(); timer = nil
         for (u, t) in trackers { _ = t.release(); bridge?.letGo(u) }

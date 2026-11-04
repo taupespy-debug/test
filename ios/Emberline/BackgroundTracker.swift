@@ -286,7 +286,7 @@ final class BackgroundTracker {
 
     var currentState: Int { lastState }
     var status: [String: Any] {
-        var d: [String: Any] = ["id": target?.uuidString ?? "", "conn": bridge?.isConnected(target) == true && linkChars() != nil, "st": lastState,
+        var d: [String: Any] = ["id": target?.uuidString ?? "", "conn": bridge?.isConnected(target) == true && linkChars() != nil, "link": bridge?.isConnected(target) == true, "st": lastState,
                                 "hits": hit.hits.count, "best": hit.hits.max() ?? 0, "last": hit.hits.last ?? 0, "on": hit.on]
         if let r = cur?.readyAt { d["readyAt"] = r.timeIntervalSince1970 * 1000 }
         if let e = endsAt { d["endsAt"] = e.timeIntervalSince1970 * 1000 }

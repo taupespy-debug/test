@@ -4443,7 +4443,7 @@ window.emberSide = json => {
   }
 };
 function sideWord(x){
-  if (!x || !x.conn) return 'Waiting for it';
+  if (!x || !x.conn) return x && x.link ? 'Connecting…' : 'Waiting for it';
   if (x.st === 7) return 'Heating';
   if (x.st === 8){ const left = x.endsAt ? Math.max(0, Math.round((x.endsAt - Date.now()) / 1000)) : 0; return `Ready${x.hits ? ` · ${x.hits} hit${x.hits > 1 ? 's' : ''}` : ''}${left ? ` · ${left}s left` : ''}`; }
   return 'Connected';
@@ -4462,16 +4462,16 @@ document.addEventListener('change', e => { const t = e.target.closest && e.targe
 // at launch), and it waits a moment longer (up to 5 s) so they're all on when it opens
 if (IS_APP && multiOn()) (() => {
   const spl = $('#spl'), ds = multiDevs(); if (!spl || ds.length < 2) return;
-  window.emberSplashCap = 5000;
+  window.emberSplashCap = 6000; // the Proxy can take a few seconds to wake up
   const box = document.createElement('div'); box.className = 'spl-devs';
   box.innerHTML = ds.map(d => `<i data-sid="${esc(d.id)}" title="${esc(d.label || d.name)}"><img alt="" src="${d.series === 'toad' ? DEV_IMG.proxy : DEV_IMG.peak}"></i>`).join('');
   const note = $('#splNote'); note.parentNode.insertBefore(box, note);
   window.emberSplashNote('Connecting ' + ds.map(d => d.label || d.name).join(' + ') + '…');
   const orig = window.emberSplashReady; let pageReady = false;
-  const allOn = () => ds.every(d => (S.mode === 'live' && ble.dev && ble.dev.id === d.id) || (SIDE.st[d.id] && SIDE.st[d.id].conn));
+  const allOn = () => ds.every(d => (S.mode === 'live' && ble.dev && ble.dev.id === d.id) || (SIDE.st[d.id] && (SIDE.st[d.id].conn || SIDE.st[d.id].link)));
   const t = setInterval(() => {
     if (!document.getElementById('spl')){ clearInterval(t); return; }
-    box.querySelectorAll('[data-sid]').forEach(el => { const id = el.dataset.sid; el.classList.toggle('on', (S.mode === 'live' && ble.dev && ble.dev.id === id) || !!(SIDE.st[id] && SIDE.st[id].conn)); });
+    box.querySelectorAll('[data-sid]').forEach(el => { const id = el.dataset.sid; el.classList.toggle('on', (S.mode === 'live' && ble.dev && ble.dev.id === id) || !!(SIDE.st[id] && (SIDE.st[id].conn || SIDE.st[id].link))); });
     if (pageReady && allOn()){ clearInterval(t); orig && orig(); }
   }, 150);
   window.emberSplashReady = () => { pageReady = true; if (allOn()){ clearInterval(t); orig && orig(); } };

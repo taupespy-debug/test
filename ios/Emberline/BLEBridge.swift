@@ -249,6 +249,7 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         if away { onAwayConnect?() }
         else if (connectWaits[p.identifier] ?? []).isEmpty && multi?.tracker(p.identifier) == nil { backPending.insert(p.identifier) } // our standing connect finished, not the page's
         p.discoverServices([LORAX_SVC, PIKACHU_SVC, PUP_SVC]) // never the firmware update service
+        if multi?.tracker(p.identifier) != nil { multi?.pushStatus() }
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) {
@@ -403,6 +404,7 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     }
 
     func peripheral(_ p: CBPeripheral, didUpdateNotificationStateFor ch: CBCharacteristic, error: Error?) {
+        if multi?.tracker(p.identifier) != nil { multi?.pushStatus(); return } // one of your other devices is ready
         let k = key(p, ch)
         guard var ids = notifyWaits[k], !ids.isEmpty else { return }
         let id = ids.removeFirst(); notifyWaits[k] = ids.isEmpty ? nil : ids
