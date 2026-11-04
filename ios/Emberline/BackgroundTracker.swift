@@ -568,12 +568,16 @@ final class BackgroundTracker {
         led { [weak self] in
             guard let self = self else { return }
             guard (try? await self.writeBlob("/p/app/led/pclr", blob)) != nil else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-                self?.led { [weak self] in
-                    guard let self = self else { return }
-                    if (try? await self.writeA("/p/app/led/pclr", [], flags: 4)) == nil { _ = try? await self.writeA("/p/app/led/pclr", []) }
-                }
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in self?.led { [weak self] in await self?.clearPreview() } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 9) { [weak self] in self?.led { [weak self] in await self?.clearPreview() } } // once more, in case it didn't take
+        }
+    }
+    // put the device's own light back. A Proxy can ignore a clear, so check it took and try again
+    private func clearPreview() async {
+        for _ in 0..<3 {
+            if (try? await writeA("/p/app/led/pclr", [], flags: 4)) == nil { _ = try? await writeA("/p/app/led/pclr", []) }
+            if let r = try? await readAll("/p/app/led/pclr"), r.isEmpty { return }
+            await pause(400)
         }
     }
 

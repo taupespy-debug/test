@@ -4426,7 +4426,15 @@ function sideLog(s){
   return true;
 }
 // switched to a device in the middle of its session: carry on with it here (the hits so far count)
+// a device the app had: if its intro light didn't clear, clear it now that it's on screen (once per device per launch)
+function sideClean(){
+  if (S.mode !== 'live' || !ble.dev || !isProxy() || (S.state >= 7 && S.state <= 9)) return;
+  sideClean.done = sideClean.done || {}; const id = ble.dev.id; if (sideClean.done[id] || !SIDE.seen || !SIDE.seen[id]) return;
+  sideClean.done[id] = true; if (zoneLive.on || store.musicOn) return;
+  setTimeout(() => { if (S.mode === 'live' && ble.dev && ble.dev.id === id && !(S.state >= 7 && S.state <= 9) && !zoneLive.on){ pvOn = true; ledJob(previewClear); } }, 6000); // after its own intro
+}
 function sideCarry(){
+  sideClean();
   const c = SIDE.open; if (!c) return;
   if (Date.now() - c.at > 60000){ SIDE.open = null; return; }
   if (S.mode !== 'live' || !ble.dev || ble.dev.id !== c.dev) return;
@@ -4441,7 +4449,7 @@ function sideCarry(){
 }
 window.emberSide = json => {
   let m = {}; try { m = JSON.parse(json) || {}; } catch(e){ return; }
-  if (m.type === 'status'){ SIDE.st = {}; (m.devs || []).forEach(d => { if (d && d.id) SIDE.st[d.id] = d; }); drawSide(); const dm = $('#devMenu'); if (dm && !dm.hidden) drawDevMenu(); return; }
+  if (m.type === 'status'){ SIDE.st = {}; SIDE.seen = SIDE.seen || {}; (m.devs || []).forEach(d => { if (d && d.id){ SIDE.st[d.id] = d; if (d.conn) SIDE.seen[d.id] = true; } }); drawSide(); const dm = $('#devMenu'); if (dm && !dm.hidden) drawDevMenu(); return; }
   if (m.type === 'open'){ SIDE.open = { dev:m.dev, o:m.open, at:Date.now() }; return; }
   if (m.type === 'sessions'){
     let n = 0; (m.sessions || []).slice().sort((a, b) => a.t - b.t).forEach(s => { if (sideLog(s)) n++; });
