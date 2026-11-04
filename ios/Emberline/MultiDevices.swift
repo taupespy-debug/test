@@ -27,6 +27,17 @@ final class MultiDevices {
 
     func configure(_ b: [String: Any]) {
         if let k = b["keep"] as? String { keepNext = UUID(uuidString: k); return }
+        // Heat both / Stop: the same Start and Stop the device's own button does, on your other devices
+        if let c = b["cmd"] as? String {
+            for u in (b["ids"] as? [String] ?? []).compactMap({ UUID(uuidString: $0) }) {
+                guard let t = trackers[u] else { send(["type": "cmd", "dev": u.uuidString, "cmd": c, "ok": false]); continue }
+                t.command(c == "stop" ? .stop : .start) { [weak self] r in
+                    self?.send(["type": "cmd", "dev": u.uuidString, "cmd": c, "ok": r == .ok])
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self?.pushStatus() }
+                }
+            }
+            return
+        }
         var saved = b; saved.removeValue(forKey: "op"); saved.removeValue(forKey: "id")
         if JSONSerialization.isValidJSONObject(saved), let d = try? JSONSerialization.data(withJSONObject: saved) { UserDefaults.standard.set(d, forKey: "multiCfg") } // for the next launch
         let wasOn = on
