@@ -4449,7 +4449,7 @@ function sideCarry(){
 }
 window.emberSide = json => {
   let m = {}; try { m = JSON.parse(json) || {}; } catch(e){ return; }
-  if (m.type === 'status'){ SIDE.st = {}; SIDE.seen = SIDE.seen || {}; (m.devs || []).forEach(d => { if (d && d.id){ SIDE.st[d.id] = d; if (d.conn) SIDE.seen[d.id] = true; } }); drawSide(); const dm = $('#devMenu'); if (dm && !dm.hidden) drawDevMenu(); return; }
+  if (m.type === 'status'){ SIDE.st = {}; SIDE.seen = SIDE.seen || {}; (m.devs || []).forEach(d => { if (d && d.id){ SIDE.st[d.id] = d; if (d.conn) SIDE.seen[d.id] = true; if (d.name && !sideDev(d.id)){ devList().push({ id:d.id, name:d.name, label:d.name, series: d.proxy ? 'toad' : 'peach', last:0 }); save(); } } }); /* a device the app knows from the other site */ drawSide(); const dm = $('#devMenu'); if (dm && !dm.hidden) drawDevMenu(); return; }
   if (m.type === 'open'){ SIDE.open = { dev:m.dev, o:m.open, at:Date.now() }; return; }
   if (m.type === 'cmd'){ if (!m.ok){ const d = sideDev(m.dev) || {}; toast(`Couldn’t ${m.cmd === 'stop' ? 'stop' : 'start'} ${d.label || d.name || 'your other device'}. Is it nearby and awake?`); } return; }
   if (m.type === 'sessions'){
@@ -4481,7 +4481,8 @@ async function heatBoth(){
   if (!IS_APP) return toast('Only in the iPhone app');
   if (S.mode !== 'live') return toast(`Connect your ${devWord()} first`);
   const ids = Object.values(SIDE.st).filter(x => x.conn && !(x.st >= 7 && x.st <= 9) && x.id !== currentDevId()).map(x => x.id);
-  if (!ids.length) return toast('No other device connected right now');
+  if (!ids.length){ const w = Object.values(SIDE.st).find(x => x.link && !x.conn && x.id !== currentDevId()), d = w && sideDev(w.id);
+    return toast(w ? `${(d && (d.label || d.name)) || 'Your other device'} is still connecting. Try again in a few seconds` : 'No other device connected. Wake it up (press its button) and give it a few seconds'); }
   sideCmd(ids, 'start');
   if (!(S.state >= 7 && S.state <= 9)) $('#bStart').click(); // this one, the normal way (picks the profile on screen)
   buzz(20); toast(`Heating ${ids.length + 1} devices 🔥`);
@@ -9599,6 +9600,7 @@ $('#devMenu').addEventListener('click', e => {
   e.stopPropagation();
   const d = e.target.closest('[data-dev]'), f = e.target.closest('[data-forget]');
   if (f){ const list = devList(), x = list[+f.dataset.forget]; list.splice(+f.dataset.forget, 1);
+    if (x && IS_APP) window.EMBER_APP.post('multi', { forget: x.id }); // the app forgets it too
     if (x && x.id === store.lastDeviceId){ appAuto(false); const n = list[0]; store.lastDeviceId = n ? n.id : null; store.lastDeviceName = n ? n.name : null; }
     save(); drawDevMenu(); toast(`Forgot ${x ? (x.label || x.name) : 'device'}`); return; }
   if (d){ switchToDevice(devList()[+d.dataset.dev]); return; }

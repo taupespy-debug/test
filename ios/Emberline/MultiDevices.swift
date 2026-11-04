@@ -27,6 +27,11 @@ final class MultiDevices {
 
     func configure(_ b: [String: Any]) {
         if let k = b["keep"] as? String { keepNext = UUID(uuidString: k); return }
+        if let f = b["forget"] as? String { // forgotten on the page: the app forgets it too
+            var reg = UserDefaults.standard.array(forKey: "multiReg") as? [[String: Any]] ?? []
+            reg.removeAll { ($0["id"] as? String) == f }; UserDefaults.standard.set(reg, forKey: "multiReg")
+            return
+        }
         // Heat both / Stop: the same Start and Stop the device's own button does, on your other devices
         if let c = b["cmd"] as? String {
             for u in (b["ids"] as? [String] ?? []).compactMap({ UUID(uuidString: $0) }) {
@@ -44,7 +49,15 @@ final class MultiDevices {
         on = b["on"] as? Bool ?? false
         var list: [Dev] = []
         let fx = b["fx"] as? [String: [String: Any]] ?? [:]
-        for d in (b["devs"] as? [[String: Any]] ?? []).prefix(MultiDevices.limit) {
+        // the live and test sites each keep their own device list, so the app keeps one of its own (every device the
+        // page has told it about) and fills in from it: a site that doesn't know a device yet never drops it
+        var reg = UserDefaults.standard.array(forKey: "multiReg") as? [[String: Any]] ?? []
+        let fromPage = b["devs"] as? [[String: Any]] ?? []
+        for d in fromPage.reversed() { guard let id = d["id"] as? String else { continue }; reg.removeAll { ($0["id"] as? String) == id }; reg.insert(d, at: 0) }
+        reg = Array(reg.prefix(8)); UserDefaults.standard.set(reg, forKey: "multiReg")
+        var all = fromPage
+        for d in reg where !all.contains(where: { ($0["id"] as? String) == (d["id"] as? String) }) { all.append(d) }
+        for d in all.prefix(MultiDevices.limit) {
             guard let s = d["id"] as? String, let u = UUID(uuidString: s) else { continue }
             let proxy = d["proxy"] as? Bool ?? false, api = d["api"] as? Int ?? 3
             var c = BackgroundTracker.Ctx()
@@ -126,14 +139,21 @@ final class MultiDevices {
             _ = trackers.removeValue(forKey: u)?.release()
             br.letGo(u)
         }
-        if !br.away { send(["type": "status", "devs": trackers.values.map { $0.status }]) }
+        if !br.away { send(["type": "status", "devs": trackers.values.map { statusOf($0) }]) }
         flush()
     }
 
     // right away (a device just connected): the startup screen lights its icon without waiting for the next tick
     func pushStatus() {
         guard on, bridge?.away == false else { return }
-        send(["type": "status", "devs": trackers.values.map { $0.status }])
+        send(["type": "status", "devs": trackers.values.map { statusOf($0) }])
+    }
+
+    // what the page shows: the tracker's state, plus the device's name and kind (the page may not have it saved)
+    private func statusOf(_ t: BackgroundTracker) -> [String: Any] {
+        var s = t.status
+        if let d = devs.first(where: { $0.id == t.devId }) { s["name"] = d.name; s["proxy"] = d.proxy }
+        return s
     }
 
     private func stopAll() {
