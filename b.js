@@ -1,0 +1,9285 @@
+window.LOAD_ERR = []; addEventListener('error', e => { if (window.LOAD_ERR.length < 5) window.LOAD_ERR.push((e.message || 'error') + ' @ line ' + e.lineno + ':' + e.colno); }); // test build: what broke while loading (the notifications test shows it)
+window.EMBER_TEST = true; // this file is the test build: shows the test tools
+"use strict";
+/* ================= mood engine: compiles Puffco mood templates into lamp programs ================= */
+const MoodEngine = (() => {
+  // ---- tiny expression evaluator for template mappings ----
+  function tokenize(src){
+    const t = []; let i = 0;
+    while (i < src.length){
+      const c = src[i];
+      if (/\s/.test(c)){ i++; continue; }
+      if (/[0-9]/.test(c) || (c === '.' && /[0-9]/.test(src[i+1] || ''))){ let j = i; while (j < src.length && /[0-9.eE]/.test(src[j])) j++; t.push({k:'n', v:parseFloat(src.slice(i,j))}); i = j; continue; }
+      if (/[A-Za-z_]/.test(c)){ let j = i; while (j < src.length && /[A-Za-z0-9_]/.test(src[j])) j++; t.push({k:'id', v:src.slice(i,j)}); i = j; continue; }
+      if (c === "'" || c === '"'){ let j = i + 1; while (j < src.length && src[j] !== c) j++; t.push({k:'s', v:src.slice(i+1,j)}); i = j + 1; continue; }
+      const two = src.slice(i, i+2);
+      if (['==','!=','<=','>=','&&','||'].includes(two)){ t.push({k:'op', v:two}); i += 2; continue; }
+      t.push({k:'op', v:c}); i++;
+    }
+    return t;
+  }
+  const BIN = { '||':1, '&&':2, '==':3, '!=':3, '<':4, '>':4, '<=':4, '>=':4, '+':5, '-':5, '*':6, '/':6, '^':8 };
+  function parse(src){
+    const t = tokenize(src); let p = 0;
+    const peek = () => t[p], next = () => t[p++];
+    const expect = v => { const x = next(); if (!x || x.v !== v) throw new Error(`Expected ${v} in ${src}`); };
+    function primary(){
+      const x = next();
+      if (!x) throw new Error('Unexpected end in ' + src);
+      let node;
+      if (x.k === 'n') node = {t:'num', v:x.v};
+      else if (x.k === 's') node = {t:'str', v:x.v};
+      else if (x.k === 'id'){
+        if (x.v === 'true' || x.v === 'false') node = {t:'num', v: x.v === 'true' ? 1 : 0, bool:true};
+        else if (peek() && peek().v === '('){ next(); const args = []; if (peek().v !== ')'){ do { args.push(expr()); } while (peek().v === ',' && next()); } expect(')'); node = {t:'call', f:x.v, args}; }
+        else node = {t:'var', v:x.v};
+      }
+      else if (x.v === '('){ node = expr(); expect(')'); }
+      else if (x.v === '['){ const items = []; if (peek().v !== ']'){ do { items.push(expr()); } while (peek().v === ',' && next()); } expect(']'); node = {t:'arr', items}; }
+      else if (x.v === '{'){ const props = {}; if (peek().v !== '}'){ do { const key = next().v; expect(':'); props[key] = expr(); } while (peek().v === ',' && next()); } expect('}'); node = {t:'obj', props}; }
+      else if (x.v === '-'){ node = {t:'neg', a:unary()}; }
+      else throw new Error(`Unexpected ${x.v} in ${src}`);
+      while (peek() && peek().v === '.'){ next(); const prop = next().v; node = {t:'prop', a:node, prop}; }
+      return node;
+    }
+    function unary(){ if (peek() && peek().v === '-' ){ next(); return {t:'neg', a:unary()}; } return primary(); }
+    function bin(minPrec){
+      let left = unary();
+      for (;;){
+        const x = peek(); if (!x || x.k !== 'op' || !(x.v in BIN) || BIN[x.v] < minPrec) break;
+        next(); const prec = BIN[x.v];
+        const right = bin(x.v === '^' ? prec : prec + 1);
+        left = {t:'bin', op:x.v, a:left, b:right};
+      }
+      return left;
+    }
+    function expr(){
+      const c = bin(1);
+      if (peek() && peek().v === '?'){ next(); const a = expr(); expect(':'); const b = expr(); return {t:'tern', c, a, b}; }
+      return c;
+    }
+    const e = expr(); if (p < t.length) throw new Error('Trailing tokens in ' + src); return e;
+  }
+  const isArr = Array.isArray;
+  const map2 = (a, b, f) => isArr(a) ? (isArr(b) ? a.map((x,i) => map2(x, b[i], f)) : a.map(x => map2(x, b, f))) : (isArr(b) ? b.map(y => map2(a, y, f)) : f(a, b));
+  const map1 = (a, f) => isArr(a) ? a.map(x => map1(x, f)) : f(a);
+  const flat = a => isArr(a) ? a.reduce((o, x) => o.concat(flat(x)), []) : [a];
+  const FN = {
+    pow: (a, b) => map2(a, b, Math.pow), min: (...a) => Math.min(...flat(a)), max: (...a) => Math.max(...flat(a)),
+    round: a => map1(a, Math.round), floor: a => map1(a, Math.floor), ceil: a => map1(a, Math.ceil), abs: a => map1(a, Math.abs),
+    sqrt: a => map1(a, Math.sqrt), len: a => a.length, flatten: a => flat(a), row: (m, i) => [m[i]], equalText: (a, b) => String(a) === String(b) ? 1 : 0,
+    lchycle: o => lchycle(o).map(rgb => '#' + rgb.map(v => Math.round(255 * v).toString(16).padStart(2, '0')).join(''))
+  };
+  function ev(n, env){
+    switch (n.t){
+      case 'num': return n.v; case 'str': return n.v;
+      case 'var': if (!(n.v in env)) throw new Error('Unknown variable ' + n.v); return env[n.v];
+      case 'arr': return n.items.map(x => ev(x, env));
+      case 'obj': { const o = {}; for (const k in n.props) o[k] = ev(n.props[k], env); return o; }
+      case 'neg': return map1(ev(n.a, env), x => -x);
+      case 'prop': { const v = ev(n.a, env); if (n.prop === 'length') return v.length; return v[n.prop]; }
+      case 'tern': return ev(n.c, env) ? ev(n.a, env) : ev(n.b, env);
+      case 'call': { const f = FN[n.f]; if (!f) throw new Error('Unknown function ' + n.f); return f(...n.args.map(a => ev(a, env))); }
+      case 'bin': {
+        const a = ev(n.a, env), b = ev(n.b, env);
+        switch (n.op){
+          case '+': return map2(a, b, (x,y) => x + y); case '-': return map2(a, b, (x,y) => x - y);
+          case '*': return map2(a, b, (x,y) => x * y); case '/': return map2(a, b, (x,y) => x / y);
+          case '^': return map2(a, b, Math.pow);
+          case '==': return a == b ? 1 : 0; case '!=': return a != b ? 1 : 0;
+          case '<': return a < b ? 1 : 0; case '>': return a > b ? 1 : 0; case '<=': return a <= b ? 1 : 0; case '>=': return a >= b ? 1 : 0;
+          case '&&': return a && b ? 1 : 0; case '||': return a || b ? 1 : 0;
+        }
+      }
+    }
+    throw new Error('Bad node');
+  }
+  const cache = new Map();
+  const evalExpr = (src, env) => { let ast = cache.get(src); if (!ast){ ast = parse(src); cache.set(src, ast); } return ev(ast, env); };
+
+  // ---- color science: CIE LCh(uv) cycles with monotone cubic interpolation ----
+  const lin = c => c <= 0.0404482362771076 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  const gam = c => c <= 0.0031306684425005883 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+  const fL = t => t < 0.008856451679035631 ? (903.2962962962963 * t + 16) / 116 : Math.cbrt(t);
+  const fLi = t => t < 0.20689655172413793 ? 27 * (116 * t - 16) / 24389 : t * t * t;
+  const UN = 0.197839824821408, VN = 0.46833630293241;
+  function maxChroma(L, H){
+    const l = Math.min(Math.max(L, 0), 100), h = H * Math.PI / 180; if (l === 0) return 0;
+    const sh = Math.sin(h), ch = Math.cos(h), s1 = Math.pow(l + 16, 3) / 1560896, s = s1 > 0.008856451679035631 ? s1 : 27 * l / 24389;
+    const A = [-1836216.146601413, -3205832.374331522, 10550402.85844013], B = [-14729646.91512916, 4250821.495452787, 1283157.104404885];
+    let best = Number.MAX_VALUE;
+    for (let k = 0; k < 3; k++){
+      const top = 11700000 * s, bot = (A[k] * sh + B[k] * ch) * s;
+      for (const c of [l * top / bot, l * (top - 11700000) / (bot + 1921696 * sh)]) if (c > 0) best = Math.min(best, c);
+    }
+    return Math.min(best, 175.2);
+  }
+  function rgbToLch(rgb){
+    const [r,g,b] = rgb.map(lin);
+    const X = .412456439089691*r + .357576077643907*g + .180437483266397*b, Y = .212672851405621*r + .715152155287816*g + .072174993306558*b, Z = .019333895582328*r + .1191920258813*g + .950304078536368*b;
+    const d = X + 15*Y + 3*Z || 1, L = 116 * fL(Y) - 16, u = 13*L*(4*X/d - UN), v = 13*L*(9*Y/d - VN);
+    const H = (180 * Math.atan2(v, u) / Math.PI + 360) % 360, C = Math.sqrt(u*u + v*v);
+    return [L, Math.min(Math.max(C, 0), maxChroma(L, H)), H];
+  }
+  function lchToRgb([L, C0, H]){
+    if (L <= 0) return [0,0,0];
+    const C = Math.min(Math.max(C0, 0), maxChroma(L, H)), Y = fLi((L + 16) / 116);
+    const u = Math.cos(H*Math.PI/180) * C / (13*L) + UN, v = Math.sin(H*Math.PI/180) * C / (13*L) + VN;
+    const X = -9*Y*u / ((u - 4)*v - u*v), Z = (9*Y - 15*v*Y - v*X) / (3*v);
+    return [3.240454162114103*X - 1.537138512797715*Y - .49853140955601*Z, -.96926603050518*X + 1.876010845446694*Y + .041556017530349*Z, .055643430959114*X - .20402591351675*Y + 1.057225188223179*Z].map(gam).map(c => Math.min(Math.max(c, 0), 1));
+  }
+  const hexToRgb = h => { const s = h.replace('#','').toLowerCase(); return [0,2,4].map(i => parseInt(s.slice(i, i+2), 16) / 255); };
+  const sgn = (a, b) => a === 0 || b === 0 ? 0 : (a > 0) === (b > 0) ? 1 : -1;
+  function pchipDerivs(x, y){
+    const n = x.length; if (n === 2){ const s = (y[1]-y[0]) / (x[1]-x[0]); return [s, s]; }
+    const d = new Array(n); let h1 = x[1]-x[0], del1 = (y[1]-y[0]) / h1, h2 = x[2]-x[1], del2 = (y[2]-y[1]) / h2, hs = h1 + h2;
+    let w1 = (h1 + hs) / hs, w2 = -h1 / hs; d[0] = w1*del1 + w2*del2;
+    if (sgn(d[0], del1) < 0) d[0] = 0; else if (sgn(del1, del2) < 0 && Math.abs(d[0]) > Math.abs(3*del1)) d[0] = 3*del1;
+    for (let i = 1; i < n - 1; i++){
+      if (i > 1){ h1 = h2; h2 = x[i+1]-x[i]; hs = h1 + h2; del1 = del2; del2 = (y[i+1]-y[i]) / h2; }
+      d[i] = 0;
+      if (sgn(del1, del2) > 0){ const h3 = 3*hs; w1 = (hs + h1) / h3; w2 = (hs + h2) / h3; const mx = Math.max(Math.abs(del1), Math.abs(del2)), mn = Math.min(Math.abs(del1), Math.abs(del2)); d[i] = mn / (w1*(del1/mx) + w2*(del2/mx)); }
+    }
+    w1 = -h2 / hs; w2 = (h2 + hs) / hs; d[n-1] = w1*del1 + w2*del2;
+    if (sgn(d[n-1], del2) < 0) d[n-1] = 0; else if (sgn(del1, del2) < 0 && Math.abs(d[n-1]) > Math.abs(3*del2)) d[n-1] = 3*del2;
+    return d;
+  }
+  const lowerBound = (a, v) => { let lo = 0, hi = a.length; while (lo < hi){ const m = (lo + hi) >> 1; if (a[m] < v) lo = m + 1; else hi = m; } return hi; };
+  function cubic(x, y, d, xs){
+    const out = new Array(xs.length);
+    for (let k = 0; k < x.length - 1; k++){
+      const h = x[k+1]-x[k], del = y[k+1]-y[k], c1 = (del/h - d[k]) / h, c2 = (d[k] + d[k+1] - 2*del/h) / (h*h);
+      let a = lowerBound(xs, x[k]), b = lowerBound(xs, x[k+1]);
+      if (k === x.length - 2 && xs[b] === x[k+1]) b++;
+      for (let i = a; i < b; i++){ const t = xs[i]; out[i] = y[k] + (t - x[k]) * (d[k] + (t - x[k]) * (c1 + c2 * (t - x[k+1]))); }
+    }
+    return out;
+  }
+  function lchycle(o){
+    const cols = o.colors.map(c => typeof c === 'string' ? hexToRgb(c) : c), n = cols.length, N = o.nOut;
+    let pts, zeroDeriv;
+    if (o.steady > 0){
+      const st = Math.min(o.steady, 1 - 10 * Number.EPSILON), span = N / n;
+      pts = Array.from({length: 2*n}, (_, a) => ({ rgb: cols[Math.floor(a/2)], t: (Math.floor(a/2) + (a % 2 ? st/2 : -st/2)) * span + N * (o.phase || 0) }));
+      zeroDeriv = o.zeroDeriv ?? true;
+    } else {
+      pts = cols.map((rgb, a) => ({ rgb, t: a * N / n + N * (o.phase || 0) }));
+      zeroDeriv = o.zeroDeriv ?? false;
+    }
+    pts.sort((a, b) => a.t - b.t);
+    const ts = pts.map(p => p.t), lch = pts.map(p => rgbToLch(p.rgb));
+    const vals = o.luv ? lch.map(([L,C,H]) => [L, C*Math.cos(H*Math.PI/180), C*Math.sin(H*Math.PI/180)]) : lch;
+    const L3 = [...vals, ...vals, ...vals];
+    if (!o.luv) for (let k = 1; k < L3.length; k++){ const a = L3[k-1][2], b = L3[k][2]; L3[k] = [L3[k][0], L3[k][1], b - 360 * Math.round((b - a) / 360)]; }
+    const X3 = [...ts, ...ts.map(t => t + N), ...ts.map(t => t + 2*N)], xs = Array.from({length: N}, (_, i) => N + i);
+    const out = Array.from({length: N}, () => [0,0,0]);
+    for (let ch = 0; ch < 3; ch++){
+      const ys = L3.map(v => v[ch]), d = zeroDeriv ? ys.map(() => 0) : pchipDerivs(X3, ys), r = cubic(X3, ys, d, xs);
+      r.forEach((v, i) => { if (v !== undefined) out[i][ch] = v; });
+    }
+    return (o.luv ? out.map(([L,a,b]) => [L, Math.sqrt(a*a + b*b), (180*Math.atan2(b, a)/Math.PI + 360) % 360]) : out.map(([L,C,H]) => [L, C, H % 360])).map(lchToRgb);
+  }
+
+  // ---- compile a template into a concrete lamp ----
+  const packRgb = arr => { const out = new Uint8Array(arr.length * 3); arr.forEach((h, i) => { const s = h.replace('#',''); out[i*3] = parseInt(s.slice(0,2),16); out[i*3+1] = parseInt(s.slice(2,4),16); out[i*3+2] = parseInt(s.slice(4,6),16); }); return out; };
+  function resolve(node, env){
+    if (isArr(node)) return node.map(x => resolve(x, env));
+    if (node && typeof node === 'object'){
+      if (typeof node._key === 'string'){
+        const v = env[node._key];
+        if (node._format === 'rgbArray') return packRgb(v);
+        if (node._format === 'jsonParse') return JSON.parse(v);
+        return v;
+      }
+      const o = {}; for (const k in node) o[k] = resolve(node[k], env); return o;
+    }
+    return node;
+  }
+  function defaultsFor(tpl){
+    const m = {};
+    for (const u of tpl.ui || []){
+      if (u.type === 'colors') m[u.key] = String(u.default).split(',');
+      else m[u.key] = u.default;
+    }
+    return m;
+  }
+  function compile(tpl, meta, variant){
+    const env = Object.assign({ variant: variant || 'og' }, defaultsFor(tpl), meta);
+    for (const [k, src] of Object.entries(tpl.mappings || {})){
+      try { env[k] = evalExpr(String(src), env); } catch(e){ if (!/^(toad|lightning|og)/.test(k)) throw e; }
+    }
+    const proj = variant === 'toad' && tpl.toad ? tpl.toad : tpl.peach;
+    return { lamp: resolve(proj.lamp, env), env };
+  }
+  function lampFromExclusive(x, variant){
+    const src = variant === 'toad' && x.toad ? x.toad : x.lamp, lamp = JSON.parse(JSON.stringify(src));
+    // Proxy versions point at the color list by name ({_key:'arrayColors'}); fill it in from the Peak version
+    const env = { arrayColors: x.lamp && x.lamp.param && (x.lamp.param.color || x.lamp.param.colors), toadArrayColors: x.toadColors, userColors: x.colors };
+    for (const k of Object.keys(lamp.param)){ const v = lamp.param[k]; if (v && typeof v === 'object' && !Array.isArray(v) && typeof v._key === 'string'){ const got = env[v._key]; lamp.param[k] = v._format === 'rgbArray' && Array.isArray(got) ? got.slice() : got; } }
+    for (const k of ['color','colors']) if (Array.isArray(lamp.param[k]) && typeof lamp.param[k][0] === 'string') lamp.param[k] = packRgb(lamp.param[k]);
+    return lamp; }
+  // colors for on-screen preview
+  function previewColors(lamp){
+    const c = lamp.param.color || lamp.param.colors;
+    if (!c) return [];
+    if (c instanceof Uint8Array){ const out = []; for (let i = 0; i + 2 < c.length; i += 3) out.push('#' + [c[i],c[i+1],c[i+2]].map(v => v.toString(16).padStart(2,'0')).join('')); return out; }
+    return c;
+  }
+  return { compile, lampFromExclusive, previewColors, lchycle, evalExpr, packRgb };
+})();
+
+/* ================= utilities ================= */
+const $ = s => document.querySelector(s);
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const c2f = c => c*9/5+32, f2c = f => (f-32)*5/9;
+const DAY = 86400000;
+let greetOpen = false, toastLater = null; // banners wait until the welcome drop-down is gone
+function toast(msg){ if (greetOpen){ toastLater = msg; return; } const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),2400); }
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+let hapticSw = null;
+function hapticTick(){
+  // iPhone browsers block navigator.vibrate; toggling a native switch gives a real haptic tap on iOS 18+
+  try {
+    if (!hapticSw){ hapticSw = document.createElement('label'); hapticSw.setAttribute('aria-hidden','true'); hapticSw.style.cssText = 'position:fixed;left:-200px;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none';
+      const i = document.createElement('input'); i.type = 'checkbox'; i.setAttribute('switch', ''); i.tabIndex = -1; hapticSw.appendChild(i); document.body.appendChild(hapticSw); }
+    hapticSw.click();
+  } catch(e){}
+}
+function buzz(p){
+  if (window.EMBER_APP && window.EMBER_APP.native){ window.EMBER_APP.post('haptic', { kind: Array.isArray(p) ? 'success' : p >= 40 ? 'heavy' : p >= 20 ? 'medium' : 'light' }); return; } // the iPhone app: the real Taptic Engine
+  try { if (navigator.vibrate && navigator.vibrate(p)) return; } catch(e){}
+  const n = Array.isArray(p) ? Math.ceil(p.length / 2) : 1;
+  for (let k = 0; k < n; k++) setTimeout(hapticTick, k * 160);
+}
+
+/* ================= persistent store ================= */
+const KEY = 'emberline.v1';
+const DEFAULT_STORE = { theme:'orchid', accent:'#9900cc', unit:'F', cleanEvery:150, cleanBaseOdo:null, localSince:0, lastClean:null, cleanLog:[], sessions:[], showAll:false, bright:[255,255,255,255], lantern:'#ff9d4d', ledScheme:null, name:'Chase', greet:true, shops:null, ui:'glass' };
+const DEFAULT_SHOPS = [
+  { id:'hiline', name:'Hi-Line Delivery', area:'San Mateo · delivery', url:'https://weedmaps.com/deliveries/hi-line-delivery-san-mateo', notes:'', items:[] },
+  { id:'terpknock', name:'Terpknock', area:'@terpknock', url:'https://www.instagram.com/terpknock/?hl=en', notes:'', items:[
+    { name:'Aki Farms', desc:'Non-micronized', grams:2, price:60 },
+    { name:'Aki Farms', desc:'90u', grams:2, price:100 }
+  ] }
+];
+let store = Object.assign({}, DEFAULT_STORE);
+try { const raw = localStorage.getItem(KEY); if (raw) store = Object.assign({}, DEFAULT_STORE, JSON.parse(raw)); } catch(e){}
+if (!Array.isArray(store.shops)) store.shops = JSON.parse(JSON.stringify(DEFAULT_SHOPS));
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(store)); } catch(e){} }
+// invite link (?ref=<player id>): remember who sent you until your ranked profile is made, then drop it from the address
+{ const r = new URLSearchParams(location.search).get('ref');
+  if (r && /^[A-Za-z0-9_.]{3,32}$/.test(r)){ store.inviteRef = r; save(); try { const u = new URL(location.href); u.searchParams.delete('ref'); history.replaceState(null, '', u.pathname + u.search + u.hash); } catch(e){} } }
+
+/* ================= device state ================= */
+const STATE_NAMES = {0:'Starting',1:'Starting',2:'Starting',3:'Off',4:'Sleep',5:'Idle',6:'Selecting',7:'Preheating',8:'Ready',9:'Fading',10:'Version',11:'Battery',12:'Test',13:'Pairing'};
+const S = {
+  mode:'off', name:'Peak Pro', tempC:22, state:5, battery:null, charging:false,
+  odo:null, dpd:null, chamber:null, edition:null, fw:null, readyMode:null, batSaver:null, lowBatInd:null, heatHours:null, batVolts:null, batTemp:null, liveTargetC:null, active:1, elapsed:0, total:0, stealth:false, lantern:false, api:3,
+  profiles:[
+    {name:'Low',    tempC:f2c(490), time:45, color:'#0050ff', boostF:10, boostT:15, vapor:0},
+    {name:'Medium', tempC:f2c(510), time:45, color:'#00ff40', boostF:10, boostT:15, vapor:0.5},
+    {name:'High',   tempC:f2c(530), time:40, color:'#ff0000', boostF:15, boostT:15, vapor:1},
+    {name:'Peak',   tempC:f2c(545), time:35, color:'#ffffff', boostF:20, boostT:10, vapor:1.5}
+  ]
+};
+let demo = null; // demo dataset: {sessions, since, lastClean}
+
+const CHAMBERS = { 0:'No chamber', 1:'Classic', 2:'3DXL', 3:'3D' };
+const VAPOR = [ {v:0, n:'Smooth'}, {v:0.5, n:'Bold'}, {v:1, n:'Intense'}, {v:1.5, n:'Extreme', xl:true} ];
+const vaporName = v => (VAPOR.reduce((a,b) => Math.abs(b.v - v) < Math.abs(a.v - v) ? b : a)).n;
+const is3DXL = () => !isProxy() && S.chamber === 2;
+const fmtDelta = f => store.unit === 'F' ? `+${Math.round(f)}°F` : `+${Math.round(f * 5 / 9)}°C`;
+
+/* ================= Lorax BLE protocol ================= */
+const SVC='e276967f-ea8a-478a-a92e-d78f5dd15dd5', CMD='60133d5c-5727-4f2c-9697-d842c5292a3c',
+      REPLY='8dc5ec05-8f7d-45ad-99db-3fbde65dbd9c', VERSION='05434bca-cc7f-4ef6-bbb3-b1c520b9800c';
+const PIKACHU='06caf9c0-74d3-454f-9be9-e30cd999c17a', PUP='420b9b40-457d-4abe-a3bf-71609d79581b', OTA='1d14d6ee-fd63-4fa1-bfa4-8f47b42119f0', PUFFCO_CO=3075;
+const MASTER = new Uint8Array([0x64,0xc6,0x45,0x62,0x56,0xf2,0x6f,0x5b,0x1c,0xa1,0x27,0x37,0xa5,0xdd,0x71,0xfb]);
+const OP = { SEED:0x00, UNLOCK:0x01, READ:0x10, WRITE:0x11 };
+const enc = new TextEncoder(), dec = new TextDecoder();
+const MAX_MSG = 128; // Peak Pro ATT MTU is 131 (minus 3 byte header)
+
+class Lorax {
+  constructor(){ this.seq=1; this.pending=new Map(); this.queue=Promise.resolve(); this.dev=null; this.ints={}; }
+  async request(showAll, name, id){
+    const opt = { optionalServices:[SVC, PIKACHU, PUP, OTA], optionalManufacturerData:[PUFFCO_CO] };
+    const base = [{ services:[SVC] }, { services:[PIKACHU] }, { manufacturerData:[{ companyIdentifier:PUFFCO_CO }] }];
+    const names = [{namePrefix:'Peak'},{namePrefix:'PEAK'},{namePrefix:'Puffco'},{namePrefix:'PUFFCO'},{namePrefix:'Proxy'},{namePrefix:'PROXY'}];
+    let filters;
+    if (name) filters = IS_PATH ? (id ? [{ deviceId: id }, { name }] : [{ name }]) : [{ name }]; // Path reconnects to a known id with no popup
+    else filters = [...base, ...names];
+    const attempt = f => navigator.bluetooth.requestDevice(showAll && !name ? Object.assign({ acceptAllDevices:true }, opt) : Object.assign({ filters:f }, opt));
+    this.lastRequest = filters;
+    let dev;
+    try { dev = await attempt(filters); }
+    catch(e){
+      // older browsers reject filters they don't know (deviceId / manufacturerData); retry with the plain ones
+      if (e && e.name === 'TypeError'){ const plain = filters.filter(x => !x.deviceId && !x.manufacturerData); dev = await navigator.bluetooth.requestDevice({ filters: plain, optionalServices:[SVC, PIKACHU] }); }
+      else throw e;
+    }
+    this.adopt(dev); return dev;
+  }
+  adopt(dev){
+    if (this.dev === dev) return;
+    if (this.dev && this._onGone) this.dev.removeEventListener('gattserverdisconnected', this._onGone);
+    this.dev = dev; this._onGone = () => this._dropped();
+    dev.addEventListener('gattserverdisconnected', this._onGone);
+  }
+  get connected(){ return !!(this.dev && this.dev.gatt && this.dev.gatt.connected && this.cmd); }
+  async attach(onStage, quick){
+    const st = x => onStage && onStage(x);
+    this.cmd = null;
+    st('gatt'); const gatt = await withTimeout(this.dev.gatt.connect(), quick ? 8000 : 15000, 'gatt');
+    st('service'); let svc;
+    try { svc = await withTimeout(gatt.getPrimaryService(SVC), 10000, 'service'); } catch(e){ e.code = 'noservice'; throw e; }
+    if (!quick){ const first = !devList().some(d => d.id === this.dev.id); if (first) st('pair'); // a phone that never paired with this Peak may show a pairing prompt: give the person time to tap Pair
+      try { const v = await svc.getCharacteristic(VERSION); await withTimeout(v.readValue(), first ? 25000 : 5000, 'gatt'); } catch(e){} } // triggers bonding (already bonded on a reconnect)
+    const cmd = await svc.getCharacteristic(CMD), rep = await svc.getCharacteristic(REPLY);
+    if (this.rep && this._onRep){ try { this.rep.removeEventListener('characteristicvaluechanged', this._onRep); } catch(e){} }
+    this._onRep = e => this._onReply(e.target.value);
+    rep.addEventListener('characteristicvaluechanged', this._onRep);
+    await withTimeout(rep.startNotifications(), 8000, 'gatt');
+    this.rep = rep; this.cmd = cmd; this.seq = 1; this.ints = {}; this.pending.clear(); this.queue = Promise.resolve();
+    st('auth'); await this._auth();
+  }
+  disconnect(silent){
+    this.cmd = null;
+    try { if (this.dev && this.dev.gatt.connected){ this._silent = !!silent; this.dev.gatt.disconnect(); } } catch(e){}
+  }
+  _dropped(){
+    try { clog('link dropped' + (this._silent ? ' (we closed it)' : ' (phone or Peak closed it)')); } catch(e){}
+    this.cmd = null;
+    for (const p of this.pending.values()){ clearTimeout(p.timer); p.rej(new Error('Disconnected')); }
+    this.pending.clear(); this.queue = Promise.resolve();
+    if (this._silent){ this._silent = false; return; }
+    this.onDisconnect && this.onDisconnect();
+  }
+  _onReply(dv){
+    if (dv.byteLength < 3) return;
+    const seq = dv.getUint16(0,true), status = dv.getUint8(2);
+    const p = this.pending.get(seq); if (!p) return;
+    this.pending.delete(seq); clearTimeout(p.timer);
+    const body = new Uint8Array(dv.buffer.slice(dv.byteOffset+3, dv.byteOffset+dv.byteLength));
+    status === 0 ? p.res(body) : p.rej(Object.assign(new Error('Device status 0x'+status.toString(16)), {status}));
+  }
+  run(op, body = new Uint8Array(0), timeout = 4000){
+    const job = () => new Promise(async (res, rej) => {
+      if (!this.cmd) return rej(new Error('Disconnected'));
+      const seq = this.seq; this.seq = this.seq >= 0xffff ? 1 : this.seq + 1;
+      const msg = new Uint8Array(3 + body.length);
+      msg[0] = seq & 0xff; msg[1] = seq >> 8; msg[2] = op; msg.set(body, 3);
+      const timer = setTimeout(() => { this.pending.delete(seq); rej(new Error('Timed out')); }, timeout);
+      this.pending.set(seq, {res, rej, timer});
+      try {
+        if (this.cmd.writeValueWithoutResponse) await this.cmd.writeValueWithoutResponse(msg);
+        else await this.cmd.writeValue(msg);
+      } catch(e){ clearTimeout(timer); this.pending.delete(seq); rej(e); }
+    });
+    const p = this.queue.then(job, job);
+    this.queue = p.catch(()=>{});
+    return p;
+  }
+  async _auth(){
+    const seed = await this.run(OP.SEED, new Uint8Array(0), 6000);
+    if (seed.length < 16) throw new Error('Bad access seed');
+    const buf = new Uint8Array(32); buf.set(MASTER,0); buf.set(seed.slice(0,16),16);
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
+    await this.run(OP.UNLOCK, digest.slice(0,16));
+  }
+  read(path, size, offset = 0){
+    const p = enc.encode(path), b = new Uint8Array(4 + p.length);
+    b[0]=offset&0xff; b[1]=offset>>8; b[2]=size&0xff; b[3]=size>>8; b.set(p,4);
+    return this.run(OP.READ, b, 3000);
+  }
+  write(path, bytes, offset = 0, flags = 0){
+    const p = enc.encode(path), b = new Uint8Array(3 + p.length + 1 + bytes.length);
+    b[0]=offset&0xff; b[1]=offset>>8; b[2]=flags; b.set(p,3); b[3+p.length]=0; b.set(bytes, 4+p.length);
+    return this.run(OP.WRITE, b, 3000);
+  }
+  // Peak Pro stores numbers as 32-bit floats. The Proxy stores some as whole numbers, which read as ~0 if treated
+  // as floats (that's the 0% battery / 32°F bug). Spot that, read them as integers, and remember it for writes.
+  async f32(path, size = 4){
+    const r = await this.read(path, size);
+    if (r.length < 4){ const dv0 = new DataView(r.buffer, r.byteOffset, r.length); const v = r.length >= 2 ? dv0.getUint16(0, true) : r.length ? r[0] : 0; this.ints[path] = { scale: 1 }; return v; }
+    const dv = new DataView(r.buffer, r.byteOffset, r.length), f = dv.getFloat32(0, true), bits = dv.getUint32(0, true);
+    // NaN is the device saying "no reading" (a Peak with no chamber seated). It is not a Proxy whole number: read as one
+    // it showed 385792114°F. A Peak never stores whole numbers, and on a Proxy the plain NaN pattern can't be a real value
+    if (isNaN(f) && (!isProxy() || (bits & 0x7fffffff) === 0x7fc00000)) return NaN;
+    if (bits !== 0 && (!isFinite(f) || Math.abs(f) < 1e-20)){
+      const v = dv.getInt32(0, true), scale = this.intScale(path);
+      this.ints[path] = { scale }; return v === -2147483648 ? 0 : v / scale; // that value means "not set"
+    }
+    return f;
+  }
+  intScale(path){
+    // Proxy units (from the device inspector): temps in tenths of °C, times in hundredths of a second,
+    // battery in hundredths of a percent, volts in millivolts
+    // from Puffco's own app (Proxy int32 scales)
+    if (/info\/(dpd|drem)/.test(path)) return 256;               // dabs per day, dabs left
+    if (/msoc|lbws/.test(path)) return 100;                        // battery limit %, low battery warning %
+    if (/chg\/(etf|elap)/.test(path)) return 200;                 // charge time to full / elapsed
+    if (/bat\/(cap|curr)|chg\/iout/.test(path)) return 1000;      // battery capacity / current
+    if (/tmpo/.test(path)) return 10;                              // boost temp
+    if (/timo/.test(path)) return 200;                             // boost time
+    if (/intn|lbrt/.test(path)) return 256;                       // vapor setting, brightness
+    if (/temp|btmp|tcmd/.test(path)) return 10;
+    if (/elap|tott|time|btim|mbct/.test(path)) return 200;         // Puffco web app: times are seconds x 200
+    if (/bat\/soc/.test(path)) return 100;
+    if (/volt/.test(path)) return 1000;
+    if (/led\/di[fa]/.test(path)) return store.inhOld ? 1000 : 4096; // Puffco web app: 4096 = 1.0 (test build can flip back to the old 1000)
+    return 1;
+  }
+  async u8(path){ return (await this.read(path, 1))[0]; }
+  async u32(path){ const r = await this.read(path, 4); return new DataView(r.buffer).getUint32(0, true); }
+  async str(path){ const r = await this.read(path, 64); return dec.decode(r).split('\0')[0].trim(); }
+  wf32(path, v){ const b = new Uint8Array(4), t = this.ints[path] || (isProxy() ? { scale: this.intScale(path) } : null); /* Proxy stores whole numbers everywhere, even when the value reads 0 */ if (t) new DataView(b.buffer).setInt32(0, Math.round(v * t.scale), true); else new DataView(b.buffer).setFloat32(0, v, true); return this.write(path, b); }
+  async readAll(path){
+    const out = []; let off = 0;
+    while (off < 4096){
+      const chunk = await this.read(path, 125, off);
+      out.push(...chunk); off += chunk.length;
+      if (chunk.length < 125) break;
+    }
+    return new Uint8Array(out);
+  }
+  async writeBlob(path, blob){
+    const pl = enc.encode(path), room = MAX_MSG - (6 + pl.length + 1);
+    // fits in one message: single write that truncates the file
+    if (blob.length <= room){ try { await this.write(path, blob, 0, 4); return; } catch(e){} }
+    // bigger: open a handle, write the pieces, close. The Peak only applies the file on close,
+    // so it never sees half a light pattern (half patterns are what made it go white)
+    let h = null;
+    for (const fl of [4, 5, 0]){ try { const r = await this.run(0x20, new Uint8Array([fl, ...pl]), 3000); if (r.length >= 2){ h = r[0] | (r[1] << 8); break; } } catch(e){} }
+    if (h != null){
+      const step = MAX_MSG - 3 - 4;
+      try {
+        for (let off = 0; off < blob.length; off += step){
+          const piece = blob.slice(off, off + step), b = new Uint8Array(4 + piece.length);
+          b[0] = h & 255; b[1] = h >> 8; b[2] = off & 255; b[3] = off >> 8; b.set(piece, 4);
+          await this.run(0x22, b, 3000);
+        }
+      } finally { try { await this.run(0x26, new Uint8Array([h & 255, h >> 8]), 3000); } catch(e){} }
+      return;
+    }
+    return this.writeBlobLegacy(path, blob);
+  }
+  async writeBlobLegacy(path, blob){
+    const room = MAX_MSG - (6 + enc.encode(path).length + 1);
+    let off = 0, truncated = true;
+    // first piece truncates the file (flag 4) so no old bytes are left behind
+    try { await this.write(path, blob.slice(0, room), 0, 4); }
+    catch(e){ truncated = false; try { await this.write(path, blob.slice(0, room), 0, 1); } catch(e2){ await this.write(path, blob.slice(0, room), 0, 0); } }
+    off = Math.min(room, blob.length);
+    while (off < blob.length){ const piece = blob.slice(off, off + room); await this.write(path, piece, off, 0); off += piece.length; }
+    // older firmware without truncate: pad the tail with zeros instead
+    if (!truncated){ try { await this.write(path, new Uint8Array(Math.min(64, room)), blob.length, 0); } catch(e){} }
+  }
+}
+
+/* minimal canonical CBOR encoder (for LED color payloads) */
+function cbor(v){
+  const out = [];
+  const head = (major, n) => {
+    if (n < 24) out.push(major<<5 | n);
+    else if (n < 256) out.push(major<<5 | 24, n);
+    else if (n < 65536) out.push(major<<5 | 25, n>>8, n&255);
+    else if (n < 4294967296) out.push(major<<5 | 26, (n>>>24)&255, (n>>>16)&255, (n>>>8)&255, n&255);
+    else { const hi = Math.floor(n / 4294967296), lo = n >>> 0; out.push(major<<5 | 27, (hi>>>24)&255, (hi>>>16)&255, (hi>>>8)&255, hi&255, (lo>>>24)&255, (lo>>>16)&255, (lo>>>8)&255, lo&255); }
+  };
+  const w = x => {
+    if (x instanceof Uint8Array){ head(2, x.length); out.push(...x); }
+    else if (typeof x === 'boolean'){ out.push(x ? 0xf5 : 0xf4); }
+    else if (x === null || x === undefined){ out.push(0xf6); }
+    else if (typeof x === 'number' && !Number.isInteger(x)){
+      if (Math.fround(x) === x && !cbor.f64){ const b = new Uint8Array(4); new DataView(b.buffer).setFloat32(0, x); out.push(0xfa, ...b); }
+      else { const b = new Uint8Array(8); new DataView(b.buffer).setFloat64(0, x); out.push(0xfb, ...b); }
+    }
+    else if (typeof x === 'number'){ x >= 0 ? head(0, x) : head(1, -1 - x); }
+    else if (typeof x === 'string'){ const b = enc.encode(x); head(3, b.length); out.push(...b); }
+    else if (Array.isArray(x)){ head(4, x.length); x.forEach(w); }
+    else if (x instanceof Map){
+      const keys = [...x.keys()].map(k => ({k, b: cbor(k)})).sort((a,b) => a.b.length - b.b.length || cmpBytes(a.b, b.b));
+      head(5, keys.length); keys.forEach(({k,b}) => { out.push(...b); w(x.get(k)); });
+    }
+    else {
+      const keys = Object.keys(x).map(k => ({k, b: cbor(k)}))
+        .sort((a,b) => a.b.length - b.b.length || cmpBytes(a.b, b.b));
+      head(5, keys.length); keys.forEach(({k,b}) => { out.push(...b); w(x[k]); });
+    }
+  };
+  w(v); return new Uint8Array(out);
+}
+/* Proxy ("toad") light format, matched to the official Puffco web app: number keys instead of names,
+   and decimals scaled to whole numbers. {0:{0:<lamp id>, 1:<params>}, 1:<meta>} */
+const Toad = (() => {
+  const k = (key, sc, opt) => ({ key, opt, f: v => typeof v === 'number' ? Math.round(v * sc) : v });
+  const P = (key, a, b) => ({ key, f: v => Array.isArray(v) ? v.map(e => [Math.round(e[0] * a), Math.round(e[1] * b)]) : v });
+  const O = (key, sub) => ({ key, f: v => Array.isArray(v) ? v.map(e => apply(e, sub)) : v });
+  const V = { posXMin:k(0,16384,1), posXMax:k(1,16384,1), posYMin:k(2,16384), posYMax:k(3,16384), minRad:k(4,16384), maxRad:k(5,16384), period:k(6,32768), attack:k(7,32768), velXMin:k(8,4096,1), velXMax:k(9,4096,1), velYMin:k(10,4096,1), velYMax:k(11,4096,1) };
+  const M = { aX:k(0,16384), aY:k(1,16384), bX:k(2,16384), bY:k(3,16384), elast:k(4,256), exProb:k(5,256), exPkRdSc:k(6,256), exAtkTm:k(7,32768), exDecTm:k(8,32768) };
+  const PP = { constX:P(0,16384,512), constY:P(1,16384,512), brownX:P(2,16384,512), brownY:P(3,16384,512), visc:k(4,256), spawn:{ key:5, sub:V }, terminal:O(6,M), bgBright:k(7,256), partSoft:k(8,256), partToon:k(9,256), prNvRdSc:k(10,256), repuls:k(11,256), minQty:{ key:12 }, maxQty:{ key:13 }, prnDecTm:k(14,32768), colorByY:k(15,256) };
+  const LAMPS = {
+    pikaled2: { id:0, map:{ bright:{key:0}, speed:k(1,16), anim:{key:2}, plNum:{key:3}, plDenom:{key:4}, offset:{key:5}, color:{key:6}, colorLen:{key:7}, speedDi0:k(8,16,1), speedDi1:k(9,16,1), diFrac:k(10,256,1) } },
+    solid: { id:1, map:{ color:{key:0} } },
+    partphy2: { id:2, map:{ nonDi:{key:0,sub:PP}, di0:{key:1,sub:PP}, di1:{key:2,sub:PP}, colors:{key:3}, diFrac:k(4,256), boxBot:k(5,16384), boxTop:k(6,16384), blendClr:k(7,1) } }
+  };
+  const META = { version:{key:1}, moodName:{key:2}, moodType:{key:4}, userColors:{ key:9, f: v => Array.isArray(v) ? MoodEngine.packRgb(v.map(c => typeof c === 'string' ? c : '#' + [...c].map(x => x.toString(16).padStart(2, '0')).join(''))) : v }, bgBright:k(10,32768), density:k(11,4096), dynamicInhale:k(12,32768), tempoFrac:k(13,32768) };
+  function apply(obj, map){
+    const m = new Map();
+    for (const [name, spec] of Object.entries(map)){
+      if (!(name in obj) || obj[name] == null) continue;
+      const v = obj[name];
+      m.set(spec.key, spec.sub ? apply(v, spec.sub) : spec.f ? spec.f(v) : v);
+    }
+    return m;
+  }
+  function encode(lamp, meta){
+    const L = LAMPS[lamp.name]; if (!L) throw new Error('No Proxy version of ' + lamp.name);
+    const root = new Map([[0, new Map([[0, L.id], [1, apply(lamp.param, L.map)]])]]);
+    if (meta){ const mm = {}; for (const key in meta) if (key !== 'userColors' || Array.isArray(meta[key])) mm[key] = meta[key]; root.set(1, apply(mm, META)); }
+    const b = cbor(root); b.native = true; return b;
+  }
+  return { encode };
+})();
+// a light pattern as bytes for whichever device is connected
+const lampBlob = (lamp, meta) => isProxy() ? Toad.encode(lamp, meta) : cbor(meta ? { lamp, meta } : { lamp });
+function cborDecode(buf){
+  let i = 0; const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const len = ai => ai < 24 ? ai : ai === 24 ? buf[i++] : ai === 25 ? (i += 2, dv.getUint16(i-2)) : ai === 26 ? (i += 4, dv.getUint32(i-4)) : ai === 27 ? (i += 8, Number(dv.getBigUint64(i-8))) : -1;
+  const item = () => {
+    const b = buf[i++], mt = b >> 5, ai = b & 31;
+    if (mt === 7){
+      if (ai === 20) return false; if (ai === 21) return true; if (ai === 22 || ai === 23) return null;
+      if (ai === 25){ i += 2; const h = dv.getUint16(i-2), e = (h>>10)&31, f = h&1023, sg = h>>15 ? -1 : 1; return sg * (e === 0 ? f*2**-24 : e === 31 ? (f ? NaN : Infinity) : (1+f/1024)*2**(e-15)); }
+      if (ai === 26){ i += 4; return dv.getFloat32(i-4); }
+      if (ai === 27){ i += 8; return dv.getFloat64(i-8); }
+      return undefined;
+    }
+    const n = len(ai);
+    if (mt === 0) return n;
+    if (mt === 1) return -1 - n;
+    if (mt === 2){ const v = buf.slice(i, i+n); i += n; return {$b: [...v].map(x=>x.toString(16).padStart(2,'0')).join('')}; }
+    if (mt === 3){ const v = dec.decode(buf.slice(i, i+n)); i += n; return v; }
+    if (mt === 4){ const a = []; for (let k=0;k<n;k++) a.push(item()); return a; }
+    if (mt === 5){ const o = {}; for (let k=0;k<n;k++){ const key = item(); o[typeof key === 'string' ? key : JSON.stringify(key)] = item(); } return o; }
+    if (mt === 6) return {tag:n, v:item()};
+  };
+  return item();
+}
+function lightPalette(blob){
+  try {
+    const o = cborDecode(blob), lamp = o && o.lamp, meta = o && o.meta || {};
+    const hx = v => v && v.$b ? (v.$b.match(/.{6}/g) || []).map(h => '#' + h) : typeof v === 'number' ? ['#' + (v >>> 0 & 0xffffff).toString(16).padStart(6, '0')] : typeof v === 'string' && /^#?[0-9a-f]{6}$/i.test(v) ? ['#' + v.replace('#','')] : [];
+    let cols = [];
+    if (Array.isArray(meta.userColors)) meta.userColors.forEach(c => cols.push(...hx(c)));
+    // Proxy format: {0:{0:<lamp id>, 1:<params>}, 1:<meta>}. Meta 9 = the mood's colors; otherwise the color param for that lamp (pikaled2 = 6, solid = 0, partphy2 = 3)
+    if (!cols.length && o && o['0'] && typeof o['0']['0'] === 'number' && o['0']['1']){
+      const mt = o['1'], prm = o['0']['1'], key = { 0:'6', 1:'0', 2:'3' }[o['0']['0']];
+      if (mt && mt['9'] && mt['9'].$b) cols = hx(mt['9']);
+      if (!cols.length && key && prm[key] && prm[key].$b) cols = hx(prm[key]);
+      if (!cols.length) return { cols: [], name: mt && typeof mt['2'] === 'string' ? mt['2'] : null };
+      return { cols: cols.map(c => c.toLowerCase()).filter((c, i, a) => a.indexOf(c) === i), name: mt && typeof mt['2'] === 'string' ? mt['2'] : null };
+    }
+    if (!cols.length && lamp && lamp.param){ const c = lamp.param.color || lamp.param.colors; if (c && c.$b) cols = hx(c); else if (Array.isArray(c)) c.forEach(x => cols.push(...hx(x))); }
+    cols = cols.map(c => c.toLowerCase()).filter((c, i, a) => a.indexOf(c) === i);
+    return { cols, name: meta.moodName || null };
+  } catch(e){ return { cols: [], name: null }; }
+}
+function vivid(hex){ const [r, g, b] = Array.from(hexBytes(hex), v => v / 255), mx = Math.max(r, g, b), mn = Math.min(r, g, b); return (mx ? (mx - mn) / mx : 0) * .7 + mx * .3; }
+function pickAccent(cols){
+  const ok = cols.filter(c => Math.max(...hexBytes(c)) > 40); if (!ok.length) return cols[0] || null;
+  // the mood's own lead color if it's bright and colorful enough, otherwise its most vivid color
+  const lead = ok.find(c => { const v = Array.from(hexBytes(c), x => x / 255), mx = Math.max(...v), mn = Math.min(...v); return mx >= .5 && (mx - mn) / mx >= .45; });
+  return lead || ok.slice().sort((a, b) => vivid(b) - vivid(a))[0];
+}
+function applyPalette(p, pal){
+  if (!pal || !pal.cols.length) return false;
+  p.color = pickAccent(pal.cols) || p.color;
+  p.pal = pal.cols.filter(c => Math.max(...hexBytes(c)) > 40).slice(0, 6);
+  if (pal.name && !p.mood) p.lightName = pal.name;
+  return true;
+}
+const toHex = u => [...u].map(x=>x.toString(16).padStart(2,'0')).join('');
+function cmpBytes(a,b){ for (let i=0;i<Math.min(a.length,b.length);i++) if (a[i]!==b[i]) return a[i]-b[i]; return a.length-b.length; }
+const hexBytes = h => new Uint8Array([1,3,5].map(i => parseInt(h.slice(i,i+2),16)));
+const SINGLE_OFFSETS = [0,0,0,0,0,0,65536,0,0,65536,0,0,65536,65536,0,0,65536,65536,65536,0];
+let PROXY_TPL = null; // the Proxy's own light blob, used as the template for previews
+async function loadProxyTpl(){
+  if (!isProxy() || PROXY_TPL) return;
+  for (const path of ['/p/app/thc/colr', `/u/app/hc/${S.active || 0}/colr`]){
+    try { const t = cborDecode(await ble.readAll(path)); if (t && t.lamp && t.lamp.param){ PROXY_TPL = t; return; } } catch(e){}
+  }
+}
+function proxySolid(hex){
+  // byte strings come back from the decoder as {$b:'hex'}; turn them back into bytes for writing
+  const fix = v => Array.isArray(v) ? v.map(fix) : v instanceof Uint8Array ? new Uint8Array(v) : v && typeof v === 'object' ? (typeof v.$b === 'string' ? new Uint8Array(v.$b.match(/../g) ? v.$b.match(/../g).map(h => parseInt(h, 16)) : []) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fix(x)]))) : v;
+  const t = fix(PROXY_TPL), p = t.lamp.param, rgb = hexBytes(hex);
+  if (p.color instanceof Uint8Array && p.color.length >= 3){ for (let i = 0; i < p.color.length; i++) p.color[i] = rgb[i % 3]; }
+  else p.color = rgb;
+  if ('anim' in p) p.anim = 1;
+  return cbor(t);
+}
+// Proxy lights use number keys: {0:{0:1, 1:{0:<rgb bytes>}}} is one solid color (read off a real Proxy)
+const proxyBlob = hex => { const c = hexBytes(hex); const b = new Uint8Array([0xa1,0x00,0xa2,0x00,0x01,0x01,0xa1,0x00,0x43,c[0],c[1],c[2]]); b.native = true; return b; };
+const solidPayload = hex => isProxy() ? proxyBlob(hex) : cbor({ lamp:{ name:'pikaled2', param:{ bright:255, speed:64, anim:1, plNum:0, plDenom:1, offset: S.series === 'toad' ? Array(12).fill(0) : SINGLE_OFFSETS, color:hexBytes(hex), colorLen:32 } } });
+const rgbt = hex => { const c = hexBytes(hex); return new Uint8Array([c[0],c[1],c[2],0,0,0,0,0]); };
+
+/* ================= device controller ================= */
+const ble = new Lorax();
+// connection log: what happened to the Bluetooth link, so people can paste it in Discord (kept on this phone, last 150 lines)
+const CLOG = (() => { try { return JSON.parse(localStorage.getItem('emberConnLog') || '[]'); } catch(e){ return []; } })();
+function clog(msg){
+  const d = new Date(), t = d.toLocaleTimeString([], { hour12:false }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+  CLOG.push(`${d.toLocaleDateString([], { month:'numeric', day:'numeric' })} ${t} ${msg}`); if (CLOG.length > 150) CLOG.splice(0, CLOG.length - 150);
+  try { localStorage.setItem('emberConnLog', JSON.stringify(CLOG)); } catch(e){}
+}
+document.addEventListener('click', async e => {
+  if (!e.target.closest || !e.target.closest('#connLogCopy')) return;
+  const head = `Emberline connection log · ${navigator.userAgent.match(/iPhone OS [\d_]+|Android [\d.]+|Mac OS X [\d_]+/) || ''} · ${typeof IS_PATH !== 'undefined' && IS_PATH ? 'Path' : 'browser'} · device ${store.lastDeviceName || '?'} · now ${S.mode} / ${C && C.state}`;
+  const txt = head + '\n' + (CLOG.length ? CLOG.join('\n') : '(empty)');
+  try { await navigator.clipboard.writeText(txt); toast('Connection log copied. Paste it in Discord'); } catch(_){ prompt('Copy this', txt); }
+});
+let pollTimer = null, slowTick = 0, busy = false;
+
+function connectDevice(){ return startConnect(false); }
+
+/* ================= full screen ================= */
+const IS_APP = !!(window.EMBER_APP && window.EMBER_APP.native); // the Emberline iPhone app (ios/): Bluetooth comes from the app
+const BG = { on:false }; // the app is in the background and its own tracker owns the Peak: the page stays off the link
+const IS_PATH = !!navigator.notifications || !!window.notifications || /PathBrowser|Path\//i.test(navigator.userAgent || '');
+const FS = {
+  supported(){ const el = document.documentElement; return !!(window.requestFullscreen || el.requestFullscreen || el.webkitRequestFullscreen); },
+  active(){ return !!(window.fullscreenElement || document.fullscreenElement || document.webkitFullscreenElement); },
+  async enter(){
+    try {
+      if (window.requestFullscreen) { window.requestFullscreen(); return; }
+      const el = document.documentElement;
+      if (el.requestFullscreen) await el.requestFullscreen({ navigationUI:'hide' });
+      else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    } catch(e){}
+  },
+  async exit(){
+    try {
+      if (window.exitFullscreen) { window.exitFullscreen(); return; }
+      if (document.exitFullscreen && document.fullscreenElement) await document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    } catch(e){}
+  }
+};
+function wantFullscreen(){ return store.fullscreen !== false && window.parent === window; } // never inside a frame (the VR simulator)
+// go full screen on open: try now, after the page finishes loading, and as the loading screen clears (Path allows it without a tap).
+// Other browsers need a tap, so keep listening on taps until it actually sticks.
+function armFullscreen(){
+  if (!wantFullscreen() || !FS.supported()) return;
+  const tryIt = () => { if (wantFullscreen() && !FS.active()) FS.enter(); };
+  tryIt();
+  if (document.readyState !== 'complete') window.addEventListener('load', () => setTimeout(tryIt, 50), { once:true });
+  [700, 1700, 2600].forEach(ms => setTimeout(tryIt, ms));
+  const onTap = e => { if (e && e.target && e.target.closest && e.target.closest('[data-push]')) return; /* a notifications button needs the tap itself (asking for full screen would use it up) */ if (!wantFullscreen() || FS.active()){ ['pointerup','touchend','click'].forEach(ev => document.removeEventListener(ev, onTap, true)); return; } FS.enter(); };
+  ['pointerup','touchend','click'].forEach(ev => document.addEventListener(ev, onTap, true));
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(tryIt, 300); });
+}
+// rich only: tap Settings 3 times fast to go in or out of full screen (by player id, so a rename doesn't break it)
+const RICH_ID = 'a1ca5a326c89dd177960d792e64d0e82';
+// rich only: a wallpaper behind the glass (the Lines one, or any photo from his phone, kept on that phone)
+const WALL_LINES = 'bg/rich-wallpaper.jpg';
+function isRich(){ if (IS_TEST && store.testRich) return true; const me = LB.me || lbStore().meCache; return !!(me && me.id === RICH_ID); }
+function wallPhoto(){ try { return localStorage.getItem('emberWall') || ''; } catch(e){ return ''; } }
+function applyWall(){
+  const k = isRich() ? store.wall : '', src = k === 'lines' ? WALL_LINES : k === 'photo' ? wallPhoto() : '';
+  if (applyWall.src === src) return; applyWall.src = src;
+  const r = document.documentElement; r.classList.toggle('has-wall', !!src);
+  if (src) r.style.setProperty('--wall', `url("${src}")`); else r.style.removeProperty('--wall');
+}
+function drawRichWall(){
+  try { drawRichSpot(); } catch(e){}
+  const el = $('#richWall'); if (!el) return;
+  if (!isRich()){ el.hidden = true; return; }
+  el.hidden = false; const k = store.wall || '', has = !!wallPhoto();
+  el.innerHTML = `<span class="label">Wallpaper · only you have this</span>
+    <div class="seg" id="wallSeg"><button data-wall="" aria-pressed="${!k}">Off</button><button data-wall="lines" aria-pressed="${k === 'lines'}">Lines</button><button data-wall="photo" aria-pressed="${k === 'photo'}">${has ? 'My photo' : 'Choose photo'}</button></div>
+    ${has ? '<button class="btn small" id="wallNew">Pick a different photo</button>' : ''}<input type="file" id="wallFile" accept="image/*" hidden>`;
+}
+/* ===== Spotify now playing (rich only) =====
+   A website can't see or control other apps' music on iPhone, so this talks to Spotify's own API: sign in once
+   (PKCE, no server needed), then it shows what's playing and skip / pause / back (control needs Premium) */
+const SPOT = { now:null, busy:false, err:'' };
+const SPOT_CID = '06f39ce667fb49b38a61e7f7702c253e'; // rich's Spotify developer app (a Client ID is public, PKCE needs no secret)
+const spotRedirect = () => location.origin + location.pathname;
+const spotOn = () => isRich() && store.spot && store.spot.refresh;
+function b64url(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+async function spotLink(){
+  const cid = ((store.spot && store.spot.cid) || SPOT_CID).trim();
+  const v = b64url(crypto.getRandomValues(new Uint8Array(48)));
+  const ch = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v)));
+  const url = 'https://accounts.spotify.com/authorize?' + new URLSearchParams({ client_id: cid, response_type:'code', redirect_uri: spotRedirect(),
+    code_challenge_method:'S256', code_challenge: ch, scope:'user-read-currently-playing user-read-playback-state user-modify-playback-state' });
+  store.spot = Object.assign({}, store.spot, { cid, verifier: v, url }); save(); // verifier stays in this browser: a code from another browser is pasted back here
+  return url;
+}
+async function spotLogin(){ location.href = (store.spot && store.spot.verifier && store.spot.url) || await spotLink(); }
+async function spotCopyLink(){
+  const url = (store.spot && store.spot.verifier && store.spot.url) || await spotLink();
+  try { await navigator.clipboard.writeText(url); toast('Sign-in link copied. Open it in Chrome or Safari'); } catch(e){ prompt('Copy this link and open it in Chrome or Safari', url); }
+  drawRichSpot();
+}
+async function spotPasteCode(code){
+  code = String(code || '').trim().replace(/^.*[?&]code=([^&]+).*$/, '$1'); // the whole link pasted is fine too
+  if (!code){ toast('Paste the code from the other browser'); return; }
+  if (!store.spot || !store.spot.verifier){ toast('Tap Copy sign-in link first, then sign in with that link'); return; }
+  try { await spotToken({ grant_type:'authorization_code', code, redirect_uri: spotRedirect(), client_id: store.spot.cid || SPOT_CID, code_verifier: store.spot.verifier }); toast('Spotify connected'); spotMe(); drawRichSpot(); spotTick(); }
+  catch(e){ toast('That code didn’t work: ' + e.message + '. Codes last about 10 minutes, get a new one.'); }
+}
+// signed in, but this browser didn't start it (Path sent Spotify to Chrome or Safari): show the code to paste back in Path
+function spotCodeSheet(code){
+  const el = document.createElement('div'); el.className = 'egg sq';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Spotify code" style="text-align:left;justify-items:stretch;gap:12px">
+    <h2 style="margin:0">Almost done</h2>
+    <p style="margin:0">Spotify signed you in here, but Emberline runs in Path. Copy this code, go back to Path, and paste it in Settings → Spotify.</p>
+    <p class="mono" style="margin:0;padding:10px;border-radius:12px;background:var(--fill);word-break:break-all;user-select:all;font-size:13px">${esc(code)}</p>
+    <button class="btn primary" id="spCodeCopy" style="width:100%">Copy code</button>
+    <button class="btn" id="spCodeClose" style="width:100%">Close</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  el.addEventListener('click', async e => {
+    if (e.target.id === 'spCodeCopy'){ try { await navigator.clipboard.writeText(code); toast('Code copied. Paste it in Path'); } catch(_){ prompt('Copy this code', code); } }
+    if (e.target === el || e.target.id === 'spCodeClose'){ el.classList.remove('on'); setTimeout(() => el.remove(), 260); }
+  });
+}
+async function spotToken(body){
+  const r = await fetch('https://accounts.spotify.com/api/token', { method:'POST', headers:{ 'Content-Type':'application/x-www-form-urlencoded' }, body: new URLSearchParams(body) });
+  const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error_description || j.error || ('Spotify said ' + r.status));
+  store.spot = Object.assign({}, store.spot, { token: j.access_token, exp: Date.now() + (j.expires_in - 60) * 1000, refresh: j.refresh_token || store.spot.refresh, verifier: null }); save();
+}
+// which Spotify account is connected (shown in Settings)
+async function spotMe(){
+  try { const r = await spotApi('', 'GET', 'https://api.spotify.com/v1/me'); if (!r.ok){ SPOT.err = 'Spotify said ' + r.status + (r.status === 403 ? ': this account isn’t allowed in the Spotify app (add it under User Management)' : ''); return; }
+    const j = await r.json(); store.spot.name = j.display_name || j.id || 'Spotify user'; save(); } catch(e){ SPOT.err = e.message; }
+  try { drawRichSpot(); } catch(e){}
+}
+// back from Spotify's sign in page with ?code=
+(async () => {
+  const q = new URLSearchParams(location.search), code = q.get('code');
+  if (!code) return;
+  try { const u = new URL(location.href); u.searchParams.delete('code'); u.searchParams.delete('state'); history.replaceState(null, '', u.pathname + u.search + u.hash); } catch(e){}
+  if (!store.spot || !store.spot.verifier){ setTimeout(() => spotCodeSheet(code), 1800); return; } // started in another browser
+  try { await spotToken({ grant_type:'authorization_code', code, redirect_uri: spotRedirect(), client_id: store.spot.cid, code_verifier: store.spot.verifier }); toast('Spotify connected'); spotMe(); spotTick(); }
+  catch(e){ toast('Spotify sign in failed: ' + e.message); }
+  try { drawRichSpot(); } catch(e){}
+})();
+async function spotApi(path, method, full){
+  if (!store.spot.token || Date.now() > (store.spot.exp || 0)) await spotToken({ grant_type:'refresh_token', refresh_token: store.spot.refresh, client_id: store.spot.cid || SPOT_CID });
+  const r = await fetch(full || 'https://api.spotify.com/v1/me/player' + path, { method: method || 'GET', headers:{ Authorization: 'Bearer ' + store.spot.token } });
+  if (r.status === 401){ store.spot.token = null; save(); }
+  return r;
+}
+async function spotTick(){
+  if (!spotOn() || SPOT.busy || document.hidden || (view !== 'home' && view !== 'set')){ if (!spotOn()) drawSpot(); return; }
+  SPOT.busy = true;
+  try { const r = await spotApi('/currently-playing'); SPOT.err = ''; SPOT.checked = Date.now();
+    if (r.status === 204){ SPOT.now = null; }
+    else if (!r.ok){ SPOT.err = 'Spotify said ' + r.status + (r.status === 403 ? ' (this account isn’t allowed in your Spotify app)' : r.status === 401 ? ' (sign in again)' : ''); }
+    else if (r.ok){ const j = await r.json(), it = j && j.item;
+      SPOT.now = it ? { name: it.name, by: (it.artists || it.show && [it.show] || []).map(a => a.name).join(', '), art: ((it.album || it).images || [])[0], playing: !!j.is_playing } : null;
+      if (SPOT.now && SPOT.now.art) SPOT.now.art = SPOT.now.art.url; }
+  } catch(e){ SPOT.err = e.message; } finally { SPOT.busy = false; drawSpot(); if (view === 'set') try { drawRichSpot(); } catch(_){} }
+}
+setInterval(spotTick, 5000);
+const SP_IC = { prev:'<path d="M6 5h2v14H6zM20 5v14L9 12z"/>', next:'<path d="M16 5h2v14h-2zM4 5v14l11-7z"/>', play:'<path d="M7 4v16l13-8z"/>', pause:'<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>' };
+function drawSpot(){
+  const el = $('#spot'); if (!el) return;
+  if (!spotOn()){ el.hidden = true; return; }
+  el.hidden = false;
+  const n = SPOT.now;
+  if (!n){ const msg = SPOT.err ? esc(SPOT.err) : SPOT.checked ? 'Nothing playing on Spotify' : 'Checking Spotify…';
+    const h = `<span class="sp-art" style="display:grid;place-items:center"><svg viewBox="0 0 24 24" width="22" height="22" fill="#1ed760" aria-hidden="true"><circle cx="12" cy="12" r="11"/><path d="M6.5 9.5c3.8-1.1 7.6-.8 11 1M7.2 12.6c3-.8 6.1-.5 8.8.9M7.8 15.4c2.4-.6 4.6-.4 6.6.7" stroke="#000" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg></span><div class="sp-txt"><b>Spotify</b><span>${msg}</span></div>`;
+    if (el._h !== h){ el._h = h; el.innerHTML = h; } return; }
+  const ic = k => `<svg viewBox="0 0 24 24" aria-hidden="true">${SP_IC[k]}</svg>`;
+  const html = `${n.art ? `<img src="${esc(n.art)}" alt="">` : '<span class="sp-art"></span>'}<div class="sp-txt"><b>${esc(n.name || '')}</b><span>${esc(n.by || '')}</span></div>
+    <button data-sp="previous" aria-label="Back">${ic('prev')}</button><button class="sp-pp" data-sp="${n.playing ? 'pause' : 'play'}" aria-label="${n.playing ? 'Pause' : 'Play'}">${ic(n.playing ? 'pause' : 'play')}</button><button data-sp="next" aria-label="Skip">${ic('next')}</button>`;
+  if (el._h !== html){ el._h = html; el.innerHTML = html; }
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-sp]'); if (!b || !spotOn()) return;
+  const a = b.dataset.sp; buzz(10);
+  if (a === 'pause' || a === 'play'){ SPOT.now.playing = a === 'play'; drawSpot(); }
+  try { const r = await spotApi('/' + a, a === 'pause' || a === 'play' ? 'PUT' : 'POST');
+    if (r.status === 403) toast('Spotify Premium is needed to control playback'); else if (r.status === 404) toast('Nothing is playing on Spotify right now');
+  } catch(err){ toast('Spotify: ' + err.message); }
+  setTimeout(spotTick, 700);
+});
+function drawRichSpot(){
+  const el = $('#richSpot'); if (!el) return;
+  if (!isRich()){ el.hidden = true; return; }
+  el.hidden = false; const sp = store.spot || {};
+  if (sp.refresh && !sp.name && !SPOT.meAsked){ SPOT.meAsked = true; spotMe(); spotTick(); }
+  el.innerHTML = `<span class="label">Spotify on the Session screen · only you have this</span>
+    ${sp.refresh ? `<p style="margin:0;font-size:15px">Connected as <b>${esc(sp.name || '…')}</b></p>
+      <p class="muted" style="margin:0;font-size:13px">${SPOT.err ? esc(SPOT.err) : SPOT.now ? 'Now playing: ' + esc(SPOT.now.name) + ' · ' + esc(SPOT.now.by) : SPOT.checked ? 'Nothing playing right now' : 'Checking…'}</p>
+      <p class="muted" style="margin:0;font-size:12px">It shows under the gauge on the Session screen, with back, pause and skip (needs Premium).</p>
+      <button class="btn small" id="spOut">Disconnect Spotify</button>`
+    : `<p class="muted" style="margin:0;font-size:13px">Shows what's playing on your Spotify under the gauge. This page's link has to be a Redirect URI in the Spotify app: <span class="mono" style="word-break:break-all;user-select:all">${esc(spotRedirect())}</span></p>
+      <button class="btn primary" id="spIn">Connect Spotify</button>
+      <button class="btn" id="spCopy">Copy sign-in link (for Chrome or Safari)</button>
+      ${sp.verifier ? `<div style="display:grid;gap:6px;padding-top:4px"><span class="label">Signed in in another browser?</span><p class="muted" style="margin:0;font-size:13px">Paste the code it showed you:</p>
+        <div class="row" style="gap:8px"><input type="text" id="spCode" placeholder="Code" autocomplete="off" autocapitalize="off" style="flex:1;min-width:0;background:var(--fill);border:0;border-radius:14px;padding:12px 14px;color:var(--fg);font:inherit;font-size:16px"><button class="btn small" id="spCodeGo">Connect</button></div></div>` : ''}`}`;
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest('#richSpot')) return;
+  if (e.target.id === 'spIn'){ spotLogin(); }
+  if (e.target.id === 'spCopy'){ spotCopyLink(); }
+  if (e.target.id === 'spCodeGo'){ spotPasteCode(($('#spCode') || {}).value); }
+  if (e.target.id === 'spOut'){ store.spot = { cid: (store.spot || {}).cid }; SPOT.now = null; save(); drawRichSpot(); drawSpot(); toast('Spotify disconnected'); }
+});
+function wallPick(){ const i = $('#wallFile'); if (i){ i.value = ''; i.click(); } }
+document.addEventListener('click', e => {
+  if (!e.target.closest('#richWall')) return;
+  if (e.target.id === 'wallNew'){ wallPick(); return; }
+  const b = e.target.closest('[data-wall]'); if (!b) return; const k = b.dataset.wall;
+  if (k === 'photo' && !wallPhoto()){ wallPick(); return; }
+  store.wall = k; save(); applyWall(); drawRichWall();
+});
+document.addEventListener('change', e => {
+  if (e.target.id !== 'wallFile') return; const f = e.target.files && e.target.files[0]; if (!f) return;
+  const img = new Image(), url = URL.createObjectURL(f);
+  img.onload = () => { // it's shown blurred, so a small copy looks the same; shrink until it fits in the phone's storage
+    URL.revokeObjectURL(url); let ok = false;
+    for (const [px, q] of [[640, .72], [480, .66], [320, .6]]){
+      const k = Math.min(1, px / Math.max(img.width, img.height)), c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      try { localStorage.removeItem('emberWall'); localStorage.setItem('emberWall', c.toDataURL('image/jpeg', q)); ok = true; break; } catch(err){}
+    }
+    if (!ok){ toast('Your phone storage is full, so the photo couldn’t be saved.'); return; }
+    store.wall = 'photo'; save(); applyWall.src = null; applyWall(); drawRichWall(); toast('Wallpaper set');
+  };
+  img.onerror = () => { URL.revokeObjectURL(url); toast('That picture couldn’t be opened.'); };
+  img.src = url;
+});
+function fsToggle(){ store.fullscreen = !wantFullscreen(); save(); if (store.fullscreen) FS.enter(); else FS.exit(); toast(store.fullscreen ? 'Full screen on' : 'Full screen off'); if (view === 'set') drawSettings(); }
+{ let taps = 0, last = 0;
+  document.addEventListener('click', e => {
+    if (!e.target.closest('nav button[data-v="set"]')) return;
+    const me = LB.me || lbStore().meCache; if (!me || me.id !== RICH_ID) return;
+    const now = Date.now(); taps = now - last < 600 ? taps + 1 : 1; last = now;
+    if (taps >= 3){ taps = 0; fsToggle(); }
+  }, true); }
+['fullscreenchange','webkitfullscreenchange'].forEach(ev => document.addEventListener(ev, () => { if (view === 'set') drawSettings(); setTimeout(() => moveTabPill(view), 250); }));
+
+/* ================= connection manager ================= */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function withTimeout(p, ms, stage){
+  let t; return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(Object.assign(new Error('Timed out'), { stage, timeout:true })), ms); })]).finally(() => clearTimeout(t));
+}
+const UA = navigator.userAgent || '';
+const IS_IOS = /iPhone|iPad|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const IS_BLUEFY = /Bluefy/i.test(UA);
+let C = { state:'idle', title:'', msg:'', attempt:0 };   // idle | unsupported | btoff | connecting | reconnecting | error | live
+let manualDisconnect = false, reconnectRun = 0, failStreak = 0;
+
+function bleError(e, stage){
+  const name = e && e.name || '', m = String(e && e.message || e || '');
+  if (name === 'NotFoundError' && /cancel|chooser|no device selected/i.test(m)) return { quiet:true };
+  // Path's Bluetooth bridge isn't there (page opened in a window Path didn't set up, or an old Path)
+  if (/messageHandlers/.test(m)) return { title:'Path’s Bluetooth didn’t load', msg:'Fully close Path (swipe it away), open it again, and type the Emberline link into Path’s address bar. Don’t open it from a link in another app. If it keeps happening, update Path in the App Store.' };
+  if (name === 'NotFoundError' && stage === 'request') return { title:'No Peak found', msg:'Make sure your Peak is awake (press the button once), close to your phone, and not connected to the Puffco app. Then try again. If it still doesn’t show, turn on "Show all Bluetooth devices" in Settings.' };
+  if (name === 'NotAllowedError' || name === 'SecurityError') return { title:'Bluetooth permission is off', msg: IS_IOS ? 'Open iPhone Settings → Path (or Privacy & Security → Bluetooth) and allow Bluetooth, then come back and tap Connect.' : 'Allow Bluetooth for this site in your browser settings, then tap Connect again.' };
+  if (name === 'NotSupportedError') return { title:'Bluetooth isn’t supported here', msg:'This browser can’t talk to Bluetooth devices. Use Path browser on iPhone, or Chrome on Android or a computer.' };
+  if (name === 'InvalidStateError') return { title:'Bluetooth is busy', msg:'Another connection attempt is still running. Wait a few seconds and try again.' };
+  if (stage === 'service' || e.code === 'noservice') return { title:'That doesn’t look like a Peak Pro', msg:'The device doesn’t have the Puffco control service. Pick your Peak from the list, or update its firmware in the Puffco app if it’s very old.' };
+  if (stage === 'auth') return { title:'Your Peak didn’t answer', msg:'It connected but didn’t respond to the handshake. Fully close the Puffco app (swipe it away), wake the Peak, and tap Connect again.' };
+  if (stage === 'gatt' || name === 'NetworkError' || e.timeout) return { title:'Couldn’t connect to your Peak', msg:'It may be connected to another phone or the Puffco app, asleep, or out of range. Close the Puffco app, press the Peak’s button, keep it close, and try again.' };
+  return { title:'Something went wrong', msg: m || 'Unknown Bluetooth error. Try again.' };
+}
+
+function setConnUI(state, extra){
+  if ((state === 'idle' || state === 'error') && S.mode === 'live' && ble.connected && !manualDisconnect) state = 'live', extra = null; // a stale message must not cover a working connection
+  C = Object.assign({ state, title:'', msg:'', attempt:0 }, extra || {});
+  const pill = $('#connBtn');
+  const map = { idle:['off','Connect'], unsupported:['off','Connect'], btoff:['off','Connect'], connecting:['busy', 'Connecting…'], reconnecting:['busy','Reconnecting…'], error:['err','Retry'], live:['on','Connected'] };
+  const [cls, txt] = map[state] || map.idle;
+  pill.className = 'navbtn pill ' + cls; $('#connTxt').textContent = txt;
+  drawConnectCard(); render();
+}
+// say "Proxy" instead of "Peak" when that's the device we're talking to (live, or the last one used)
+function devWord(){
+  if (S.series === 'toad') return 'Proxy';
+  if (S.mode !== 'live'){ try { const d = devList().find(x => x.id === store.lastDeviceId); if (d && d.series === 'toad') return 'Proxy'; } catch(e){} }
+  return 'Peak';
+}
+function pk(s){ return devWord() === 'Proxy' ? String(s).replace(/\bPeak(?! Pro)(’s|'s)?\b/g, (m, a) => 'Proxy' + (a || '')) : s; }
+function drawConnectCard(){
+  const el = $('#connectCard'); if (!el) return;
+  if (C.state === 'live'){ el.hidden = true; return; }
+  el.hidden = false;
+  const busy = C.state === 'connecting' || C.state === 'reconnecting';
+  let title = 'Connect your Peak', msg = '', btn = 'Connect', alt = '';
+  if (C.state === 'unsupported'){
+    title = IS_IOS ? 'Open this page in Path browser' : 'This browser can’t use Bluetooth';
+    msg = IS_IOS ? 'Safari and other iPhone browsers don’t allow web pages to use Bluetooth. Open this same address in Puffco’s Path browser instead.' : 'Use Chrome or Edge on Android or a computer, or Path browser on iPhone.';
+    btn = 'Copy link'; alt = '';
+  } else if (C.state === 'btoff'){ title = 'Bluetooth is off'; msg = 'Turn on Bluetooth in Control Center or Settings, then tap Connect.'; }
+  else if (C.state === 'connecting'){ title = C.label || 'Connecting…'; msg = /^Choose/.test(C.label || '') ? 'Pick your Peak in the list that pops up.' : 'Hang tight, this takes a second.'; }
+  else if (C.state === 'reconnecting'){ title = 'Reconnecting to your Peak…'; msg = `Connection dropped. Trying again (${C.attempt} of ${RECONNECT_TRIES}).`; btn = 'Stop'; }
+  else if (C.state === 'error'){ title = C.title; msg = C.msg; btn = 'Try again'; }
+  else if (C.state === 'idle' && C.note){ msg = C.note; if (store.lastDeviceName) btn = 'Connect to ' + store.lastDeviceName.slice(0, 18); }
+  const tips = C.state === 'unsupported' ? '' : `<ul class="cc-tips">
+      <li class="${'bluetooth' in navigator ? 'ok' : ''}">Open in Path browser (iPhone), or Chrome (Android)</li>
+      <li>Close the Puffco app completely</li>
+      <li>Press the Peak’s button once to wake it</li>
+      <li>Keep it within a few feet</li></ul>`;
+  el.className = 'card cc ' + C.state;
+  el.innerHTML = pk(`<div class="cc-head"><span class="cc-ic">${busy ? '<i class="spin"></i>' : C.state === 'error' || C.state === 'btoff' || C.state === 'unsupported' ? '!' : '<svg viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg>'}</span><div class="grow"><b>${esc(title)}</b>${msg ? `<p>${esc(msg)}</p>` : ''}</div></div>
+    ${tips}
+    <div class="shop-actions"><button class="btn primary" id="ccBtn" ${busy && C.state !== 'reconnecting' ? 'disabled' : ''}>${btn}</button>${alt}${ble.dev && C.state === 'error' ? '<button class="btn small ghost" id="ccPick">Pick a different device</button>' : ''}</div>`);
+}
+
+async function startConnect(pickNew, auto){
+  if (C.state === 'connecting' || S.mode === 'live') return;
+  if (auto && C.state === 'reconnecting') return; // a reconnect is already running: don't start a second one on top of it
+  if (!('bluetooth' in navigator)){ setConnUI('unsupported'); return; }
+  manualDisconnect = false; reconnectRun++;
+  // Connect / Retry: first try the last device the same way picking it from the device menu does (a fresh ask by id).
+  // Re-using the old device handle could hang and fail, so you had to pick it from the menu at the top instead
+  if (auto && !pickNew) ble.dev = null; // automatic tries already ran connectLast: just ask for the device fresh by name and id
+  if (!pickNew && !auto && store.lastDeviceName && (ble.dev || IS_PATH)){
+    setConnUI('connecting', { label:'Connecting to ' + store.lastDeviceName + '…' });
+    if (await connectLast({ scan: 4000 })) return;
+    if (S.mode === 'live' || manualDisconnect) return;
+    ble.dev = null; // drop the stale handle so the next step asks for the device fresh
+  }
+  setConnUI('connecting', { label:'Choose your Peak' });
+  let stage = 'request';
+  try {
+    if (pickNew || !ble.dev){ await ble.request(store.showAll, auto ? store.lastDeviceName : null, auto ? store.lastDeviceId : null); }
+    stage = 'gatt'; setConnUI('connecting', { label:'Connecting…' });
+    const onStage = s => { stage = s; if (s === 'auth') setConnUI('connecting', { label:'Unlocking…' }); else if (s === 'pair') setConnUI('connecting', { label:'Tap Pair if your phone asks' }); };
+    try { await ble.attach(onStage); }
+    catch(e){ // the first try right after picking the device often fails on iPhone: retry once before showing an error
+      if (e && e.code === 'noservice') throw e;
+      setConnUI('connecting', { label:'Connecting again…' });
+      // wait for the first try's disconnect to really land: on iPhone it can arrive late and knock down the retry
+      const d = ble.dev, up = !!(d && d.gatt && d.gatt.connected);
+      try { ble.disconnect(true); } catch(_){}
+      if (up && d) await new Promise(r => { const t = setTimeout(r, 2500); d.addEventListener('gattserverdisconnected', () => { clearTimeout(t); setTimeout(r, 50); }, { once:true }); });
+      ble._silent = false; ble.cmd = null; await sleep(700);
+      stage = 'gatt'; await ble.attach(onStage);
+    }
+    stage = 'read'; setConnUI('connecting', { label:'Reading your Peak…' });
+    await afterConnect();
+  } catch(e){
+    console.warn('connect failed at', stage, e); clog(`connect failed at ${stage}: ${(e && (e.name || '') + ' ' + (e.message || '')).trim()}`);
+    if (S.mode === 'live' && ble.connected){ setConnUI('live'); return; } // another try connected while this one failed: keep that connection
+    try { ble.disconnect(true); } catch(_){}
+    const info = bleError(e, stage);
+    if (auto && stage === 'request'){
+      const gesture = /gesture|user activation|interaction/i.test(String(e && e.message));
+      setConnUI('idle', { note: gesture ? `Tap anywhere to reconnect to ${store.lastDeviceName}` : '' });
+      if (gesture) armTapReconnect();
+      return;
+    }
+    if (auto){ setConnUI('idle', { note:`Couldn’t reach ${store.lastDeviceName || 'your Peak'} automatically. Wake it and tap Connect.` }); return; }
+    if (info.quiet){ setConnUI('idle'); return; }
+    if (stage === 'request' && typeof navigator.bluetooth.getAvailability === 'function'){
+      try { if (!(await navigator.bluetooth.getAvailability())){ setConnUI('btoff'); return; } } catch(_){}
+    }
+    setConnUI('error', info);
+  }
+}
+async function afterConnect(quick){
+  // reconnect to the same Peak: go live after one quick status read, then refresh everything else in the background
+  if (quick && S.readFor && ble.dev && S.readFor === ble.dev.id){
+    S.mode = 'live'; failStreak = 0;
+    try { S.state = await ble.u8('/p/app/stat/id'); } catch(e){}
+    resumeOpenSess();
+    try { S.active = clamp(await ble.u8('/p/app/hcs'), 0, 3); } catch(e){}
+    startPolling();
+    setConnUI('live'); clog('reconnected (quick)');
+    toast('Reconnected');
+    (async () => {
+      try { await slowPoll(); render(); } catch(e){}
+      try { await readProfiles(); render(); if (view === 'prof') drawProfiles(); } catch(e){}
+      try { await readBatteryDetail(); } catch(e){}
+    })();
+    return;
+  }
+  S.mode = 'live'; S.name = ble.dev.name || 'Peak Pro'; failStreak = 0; S.devName = null; S.edition = null; PROXY_TPL = null; // don't carry the last device's name over
+  await detectLedApi();
+  try { S.state = await ble.u8('/p/app/stat/id'); } catch(e){}
+  resumeOpenSess();
+  connectIntro(); // the logo lights up now while the rest loads
+  try { S.active = clamp(await ble.u8('/p/app/hcs'), 0, 3); } catch(e){}
+  try { const b = await ble.f32('/p/bat/soc'); if (isFinite(b)) S.battery = clamp(Math.round(b), 0, 100); } catch(e){}
+  store.lastDeviceId = ble.dev.id; store.lastDeviceName = S.name;
+  rememberDevice(); save();
+  // show the app as connected right away (saved profile names/colors fill in instantly), then fill in the rest
+  startPolling();
+  setConnUI('live'); clog('connected to ' + (S.devName || S.name));
+  toast('Connected to ' + (S.devName || S.name));
+  try { const c = store.profPal && store.profPal[ble.dev.id]; if (c) c.forEach((x, i) => { const q = S.profiles[i]; if (x && q){ q.color = x.c || q.color; q.pal = x.pal; ['name','tempC','time','boostF','boostT','vapor'].forEach(k => { if (x[k] != null) q[k] = x[k]; }); } }); } catch(e){}
+  render();
+  const id = ble.dev.id;
+  (async () => {
+    try { await slowPoll(); render(); } catch(e){}
+    try { await readProfiles(); render(); if (view === 'prof') drawProfiles(); } catch(e){}
+    try { await applyProfileBright(S.active); } catch(e){}
+    try { await readDeviceInfo(); render(); rememberDevice(); save(); } catch(e){}
+    setTimeout(() => { try { edShareAsk(); } catch(e){} }, 9000); // limited edition owners: offer to share the edition's lights
+    setTimeout(() => { try { ogPeakNotice(0); } catch(e){} }, 2500); // original Peak / older firmware: animated moods and hit timing now work
+    // mood shuffle catch-up: if the Puffco did sessions while Emberline was closed (dab count went up), pick fresh moods now
+    try { if (store.shuffle && S.odo != null){ if (store.shufOdo != null && S.odo > store.shufOdo){ Object.keys(store.shuffle).forEach(k => { if (store.shuffle[k].on) setTimeout(() => shuffleNext(+k), 1500 + 600 * k); }); } store.shufOdo = S.odo; save(); } } catch(e){}
+    { const g = myGear().join(); if (g && g !== store.gearSent){ store.gearSent = g; save(); try { await lbPush(true); } catch(e){} } } // share your gear on your profile as soon as a new device connects
+    try { await loadProxyTpl(); } catch(e){}
+    // Proxy: an unfinished preview left on the device shows as rainbow while idle. Its resting value is a single 0, so put that back.
+    if (isProxy()){ try { const pv = await ble.readAll('/p/app/led/pclr'); if (pv.length > 1){ try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(_){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } } } catch(e){} } // same as test C, which turns it back to normal
+    try { await readSerial(); } catch(e){}
+    try { await readBatteryDetail(); } catch(e){}
+    cleanBaseSync();
+    if (ble.dev && ble.dev.id === id) S.readFor = id;
+  })();
+}
+let hcsHold = 0;
+/* Peak light previews: same /p/app/led/pclr channel the Puffco app uses */
+let ledChain = Promise.resolve(), previewTimer = null;
+function ledJob(fn){ const p = ledChain.then(fn, fn); ledChain = p.catch(() => {}); return p; }
+let pvOn = false; // true while we have something on the preview channel
+async function previewWrite(blobOrHex){
+  if (isProxy() && typeof blobOrHex !== 'string' && !(blobOrHex && blobOrHex.native)) return; // the Proxy rejects Peak-style light data
+  pvOn = true;
+  if (S.api === 2){ await ble.write('/p/app/led/pclr', rgbt(typeof blobOrHex === 'string' ? blobOrHex : '#ffffff')); return; }
+  await ble.writeBlob('/p/app/led/pclr', typeof blobOrHex === 'string' ? solidPayload(blobOrHex) : blobOrHex);
+}
+async function previewClear(){
+  if (isProxy() && !pvOn) return; // clearing a preview that isn't there puts the Proxy into its rainbow look
+  pvOn = false;
+  try {
+    if (S.api === 2) await ble.write('/p/app/led/pclr', new Uint8Array(8));
+    else { try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(e){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } }
+  } catch(e){}
+}
+function flashPeak(hex, times){
+  if (S.mode !== 'live') return Promise.resolve();
+  clearTimeout(previewTimer); if (zoneLive.on) zoneLiveStop(true);
+  return ledJob(async () => {
+    for (let n = 0; n < times; n++){
+      try { await previewWrite(hex); } catch(e){ return; }
+      await sleep(320); await previewClear(); await sleep(240);
+    }
+  });
+}
+function previewProfile(i){
+  if (S.mode !== 'live' || store.selFlash === false) return;
+  if (S.state >= 7 && S.state <= 9) return;
+  const p = S.profiles[i];
+  clearTimeout(previewTimer);
+  ledJob(async () => {
+    // show exactly what this profile has on the Peak: read its saved light and play it on the preview channel
+    let blob = null;
+    if (S.api !== 2){ try { const r = await ble.readAll(`/u/app/hc/${i}/colr`); if (r.length > 8 && (r[0] & 0xe0) === 0xa0){ blob = r; blob.native = true; } } catch(e){} }
+    if (!blob && isProxy()) return; // couldn't read the Proxy's own light, leave it alone
+    if (!blob){ blob = p.color || '#ffffff'; if (p.mood && S.api !== 2){ try { blob = moodPayload(p.mood); } catch(e){} } }
+    try { await previewWrite(blob); } catch(e){}
+  });
+  previewTimer = setTimeout(() => ledJob(previewClear), 5000);
+}
+/* hit timer */
+const SESH = { on:false }; // group sesh (test build), see Group sesh below
+const HIT = { on:false, start:0, last:null, hits:[], supported:null, base:0, peak:0, loop:null, inflight:false, live:0 };
+const HIT_DELAY = -250; // the sensor lags the real pull a little, so start the clock a touch early
+const HIT_MERGE = 700; // a dip shorter than this is the same hit
+const hitMerge = () => HIT.mode === 'heat' ? 1600 : HIT_MERGE; // older Peaks time hits from the heater, which dips mid-pull
+const HIT_IDLE = .03; // typical sensor value with nobody pulling
+const HIT_STUCK = 120000; // no real pull lasts 2 minutes (a session ends first)
+function hitReset(){ PH.on = false; HIT.lastSt = -1; HIT.armed = false; HIT.quiet = 0; HIT.same = 0; HIT.lastV = -1; HIT.endAt = 0; HIT.lastStart = 0; HIT.pbase = null; HIT.diaAt = 0; HIT.on = false; HIT.start = 0; HIT.last = null; HIT.hits = []; HIT.ends = []; HIT.base = HIT_IDLE; HIT.live = 0; }
+function hitSample(v, now){
+  // some firmware freezes the inhale reading on its last value (e.g. a mood with reactive light off). A real pull
+  // never reads the exact same number for ~1.5s, so a frozen reading counts as no pull
+  // a maxed-out sensor (hard pull) also repeats, so only values below the top count as frozen
+  if (HIT.mode !== 'heat' && v > 0 && v < .9 && v === HIT.lastV){ if (++HIT.same >= 19) v = 0; } else { HIT.same = 0; HIT.lastV = v; HIT.sameAt = now; }
+  if (HIT.on && v === 0 && HIT.same >= 19){ // froze mid-hit: the pull ended when the reading stopped changing, so keep the hit up to that point
+    HIT.on = false; HIT.endAt = 0; const secs = ((HIT.sameAt || now) - HIT.start) / 1000;
+    if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); (HIT.ends = HIT.ends || []).push(Date.now()); if (cur) cur.hits = HIT.hits.slice(); }
+    render(); return;
+  }
+  // a pull longer than a whole session means a stuck reading: close it, but keep the hit (up to when the reading last moved).
+  // This used to drop anything past 30s, so long hits (and long hits with short dips merged in) were lost
+  if (HIT.on && now - HIT.start > HIT_STUCK){ HIT.on = false; HIT.endAt = 0; HIT.live = 0; const secs = Math.min((HIT.sameAt || now) - HIT.start, HIT_STUCK) / 1000;
+    if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); (HIT.ends = HIT.ends || []).push(Date.now()); if (cur) cur.hits = HIT.hits.slice(); }
+    HIT.base = Math.min(.6, v); render(); return; }
+  // v = inhale strength (0..1). Hysteresis so a shaky draw counts as one hit.
+  // learn the resting level only from quiet samples, so a pull that's already going when Ready hits still counts
+  if (!HIT.on){ const b = HIT.base || HIT_IDLE; if (v < b + .05) HIT.base = Math.min(.08, b * .9 + v * .1); }
+  const up = Math.max(.12, HIT.base + .1), down = Math.max(.06, HIT.base + .04);
+  // Ready just started: wait until the sensor reads quiet once before timing. Otherwise a reading left over from
+  // preheat (the Proxy holds and slowly fades its last value) counts as a long fake hit
+  // remember the last few preheat readings: if they were low, whatever reads high at Ready is a real pull
+  if (S.state === 7){ (HIT.pre = HIT.pre || []).push(v); if (HIT.pre.length > 6) HIT.pre.shift(); }
+  if (S.state === 8 && HIT.lastSt !== 8){ HIT.armed = HIT.mode === 'heat'; HIT.quiet = 0; HIT.readyT = now; HIT.rmin = HIT.rmax = HIT.still = null;
+    const pre = (HIT.pre || []).slice(-3); HIT.preHigh = pre.length ? Math.max(...pre) >= up : null; HIT.pre = []; }
+  HIT.lastSt = S.state;
+  if (S.state === 8 && !HIT.armed){
+    if (v < down){ if (++HIT.quiet >= 1) HIT.armed = true; } // quiet: nobody's pulling, start timing from here
+    else if (HIT.preHigh === false && v >= up){ // low all through preheat, high now: a real pull that started at Ready, so count it right away
+      HIT.armed = true; HIT.on = true; HIT.start = Math.max(HIT.readyT + HIT_DELAY, now + HIT_DELAY); HIT.peak = v; HIT.party = false; buzz(15); if (!hitRaf) hitRaf = requestAnimationFrame(hitTick);
+    }
+    else {
+      HIT.quiet = 0; HIT.rmin = Math.min(HIT.rmin ?? v, v); HIT.rmax = Math.max(HIT.rmax ?? v, v);
+      // Peak: never quiet after 1s of Ready. A reading that moves is someone who started pulling before Ready (time it
+      // from Ready); one that sits still is left over from preheat (the Ready light), so treat that level as resting
+      if (!isProxy() && now - HIT.readyT > 1000){
+        if (HIT.still == null && HIT.rmax - HIT.rmin > .06 && v >= up){ HIT.armed = true; HIT.on = true; HIT.start = HIT.readyT; HIT.peak = v; HIT.party = false; if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
+        else if (HIT.still == null) HIT.still = HIT.rmax; // left over: wait until it goes quiet, or a real pull lifts it clearly above this level
+        else if (v > HIT.still + .12){ HIT.armed = true; HIT.on = true; HIT.start = now + HIT_DELAY; HIT.peak = v; HIT.party = false; buzz(15); if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
+      }
+    }
+    render(); return;
+  }
+  if (S.state !== 8){ if (HIT.on){ HIT.on = false; const secs = (now - HIT.start) / 1000; if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); (HIT.ends = HIT.ends || []).push(Date.now()); if (cur) cur.hits = HIT.hits.slice(); } } render(); return; } // not Ready: close any hit that was still open
+  if (!HIT.on && v >= up && HIT.endAt && now - HIT.endAt < hitMerge() && HIT.hits.length){ HIT.on = true; HIT.hits.pop(); if (HIT.ends) HIT.ends.pop(); HIT.start = HIT.lastStart; if (cur) cur.hits = HIT.hits.slice(); HIT.last = HIT.hits.length ? HIT.hits[HIT.hits.length - 1] : null; if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); } // short dip: keep counting the same hit
+  else if (!HIT.on && v >= up){ HIT.on = true; HIT.start = now + HIT_DELAY; HIT.peak = v; HIT.party = false; buzz(15); if (!hitRaf) hitRaf = requestAnimationFrame(hitTick); }
+  else if (HIT.on){
+    HIT.peak = Math.max(HIT.peak, v); HIT.live = Math.max(0, (now - HIT.start) / 1000);
+    if (!HIT.party && store.bigHit !== false && HIT.live >= bigHitAt()){ HIT.party = true; bigHit(); }
+    if (v <= Math.max(down, Math.min(HIT.peak * .3, .15))){ // ends when the pull fades, not only when it's fully gone
+      HIT.on = false; HIT.endAt = now; HIT.lastStart = HIT.start; const secs = (now - HIT.start) / 1000;
+      if (secs >= .5){ HIT.last = Math.round(secs * 10) / 10; HIT.hits.push(HIT.last); (HIT.ends = HIT.ends || []).push(Date.now()); if (cur) cur.hits = HIT.hits.slice(); }
+    }
+  }
+  render();
+}
+setInterval(() => { if (S.state === 8) checkWarn(); if (HIT.discoPending && !HIT.on){ const b = HIT.discoPending; HIT.discoPending = null; if (S.state >= 7 && S.state <= 9) try { discoHeatCycle(b); } catch(e){} } }, 500); // the Disco light for a blinker, once the pull is over
+/* long hit: phone buzzes 3 times, Peak goes Disco for 10 seconds, then back to what it was showing */
+const DISCO_MS = 10000;
+function bigHit(){
+  blinker(bigHitAt());
+  if (S.mode !== 'live') return;
+  const disco = MOODS.excl.find(x => /disco/i.test(x.name));
+  let blob = null; try { blob = S.api === 2 ? '#ff00ff' : disco ? moodPayload({ kind:'excl', id: disco.id, name: disco.name }) : null; } catch(e){}
+  if (!blob) return;
+  const wasZone = zoneLive.on; if (wasZone) zoneLiveStop(true);
+  clearTimeout(previewTimer);
+  if (S.state >= 7 && S.state <= 9){
+    // Mid-session the Peak ignores the preview channel, so swap the active heat-cycle light and put it back after 10s.
+    if (HIT.on){ HIT.discoPending = blob; return; } // mid-pull: swapping the light now changes the inhale reading and ended hits at ~8s, so wait
+    discoHeatCycle(blob);
+    return;
+  }
+  ledJob(() => previewWrite(blob).catch(() => {}));
+  previewTimer = setTimeout(() => { ledJob(previewClear); if (wasZone && ed && ed.tag === ZONE_TAG) zoneLiveStart(ed.meta, true); }, DISCO_MS);
+}
+let discoRestore = null;
+function discoHeatCycle(blob){
+  if (discoRestore) return; // already showing Disco
+  ledJob(async () => {
+    try {
+      if (S.api === 2){
+        const hex = (S.profiles[S.active] || {}).color || '#ffffff';
+        for (const s of ['colr','phcl','accl']){ try { await ble.write(`/p/app/thc/${s}`, rgbt(blob)); } catch(e){} }
+        discoRestore = async () => { for (const s of ['colr','phcl','accl']){ try { await ble.write(`/p/app/thc/${s}`, rgbt(hex)); } catch(e){} } };
+      } else {
+        let saved = null;
+        try { const r = await ble.readAll('/p/app/thc/colr'); if (r && r.length > 8) saved = r; } catch(e){}
+        if (!saved){ try { const r = await ble.readAll(`/u/app/hc/${S.active}/colr`); if (r && r.length > 8) saved = r; } catch(e){} }
+        if (!saved) return; // can't put it back, so don't change it
+        await ble.writeBlob('/p/app/thc/colr', blob);
+        discoRestore = () => ble.writeBlob('/p/app/thc/colr', saved);
+      }
+    } catch(e){ discoRestore = null; }
+  });
+  setTimeout(() => ledJob(async () => { const r = discoRestore; discoRestore = null; if (r && S.mode === 'live'){ try { await r(); } catch(e){} } }), DISCO_MS);
+}
+/* older Peaks have no inhale sensor. Pulling air cools the coil, so the heater works harder:
+   duty (how hard it's heating) jumps from ~30% to ~65% while you hit. Right after Ready the heater is
+   still maxed out, so until it settles we watch for the temperature dropping instead.
+   Tuned on a Guardian recording: 5 of 5 hits found, no false hits, lengths within about half a second. */
+const HH = { buf:[], tb:[], settled:false, on:false, how:'', low:0, t0:0 };
+/* heater recorder for original Peaks: open the site with ?heatrec, run a session, tap Copy and paste it in Discord */
+const HREC = { on:false, t0:0, rows:[] };
+function hrecAdd(now, duty, temp, raw, hit){
+  if (!HREC.on || HREC.rows.length >= 3000) return;
+  HREC.rows.push([Math.round(now - HREC.t0), Math.round(duty), Math.round(temp * 10) / 10, S.state, raw, hit]);
+  const n = document.querySelector('#hrecN'); if (n) n.textContent = HREC.rows.length + ' samples';
+}
+function hrecPanel(){
+  if (!/[?&]heatrec\b/.test(location.search) || document.querySelector('#hrec')) return;
+  const el = document.createElement('div'); el.id = 'hrec';
+  el.style.cssText = 'position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 92px);z-index:60;display:flex;gap:8px;align-items:center;padding:10px 12px;border-radius:16px;background:rgba(20,14,30,.92);backdrop-filter:blur(10px);font-size:13px;color:#fff';
+  el.innerHTML = '<b style="flex:1">Heater recorder <span id="hrecN" style="font-weight:400;opacity:.7">0 samples</span></b><button class="btn small primary" id="hrecGo">Record</button><button class="btn small" id="hrecCp">Copy</button>';
+  document.body.appendChild(el);
+  el.querySelector('#hrecGo').onclick = e => { HREC.on = !HREC.on; if (HREC.on){ HREC.rows = []; HREC.t0 = performance.now(); } e.target.textContent = HREC.on ? 'Stop' : 'Record'; };
+  el.querySelector('#hrecCp').onclick = async () => {
+    // tell me what really happened next to the numbers
+    const txt = `heatrec ${S.edition || ''} fw=${S.fw || ''} api=${S.api}\nms,duty,temp,state,raw(1 duty 2 temp),hit\n` + HREC.rows.map(r => r.join(',')).join('\n');
+    try { await navigator.clipboard.writeText(txt); toast('Copied. Paste it in Discord'); } catch(e){ prompt('Copy this', txt); }
+  };
+}
+setTimeout(hrecPanel, 1500);
+const HEAT_CONFIRM = 1000; // ms the heater has to look like a pull before it counts
+function heatHitReset(){ HH.buf = []; HH.tb = []; HH.settled = false; HH.on = false; HH.how = ''; HH.low = 0; HH.t0 = 0; HH.since = 0; HH.shown = false; }
+function heatHitStep(duty, tempC, now){
+  now = now || performance.now(); if (!HH.t0) HH.t0 = now;
+  HH.buf = HH.buf.concat(duty).slice(-4); HH.tb = HH.tb.concat(tempC).slice(-10); // ~0.6s of duty, ~1.6s of temp
+  const full = HH.buf.length === 4, avg = HH.buf.reduce((a, b) => a + b, 0) / HH.buf.length;
+  if (!HH.on){
+    // only once the heater has settled. Right after Ready (a recording from an Opal) the heater sits at 100% while the temp
+    // falls ~30° on its own for ~3s and climbs back, which looks exactly like a pull, so nothing counts until it settles (~5s)
+    if (HH.settled && full && avg >= 50){ HH.on = true; HH.how = 'duty'; }
+  }
+  else if (full && avg < 42) HH.on = false;
+  if (full && avg < 45 && !HH.on) HH.settled = true;
+  return HH.on;
+}
+function heatHitStart(){
+  if (HIT.loop || BG.on) return;
+  heatHitReset(); HIT.supported = true; HIT.mode = 'heat';
+  HIT.loop = setInterval(async () => {
+    if (S.mode !== 'live' || (S.state !== 8 && S.state !== 7)){ hitLoopStop(); return; }
+    if (HIT.inflight) return; HIT.inflight = true;
+    try {
+      const duty = await ble.f32('/p/htr/duty'); let t = S.tempC; try { const v = await ble.f32('/p/app/htr/temp'); if (isFinite(v)) t = v; } catch(e){}
+      const now = performance.now();
+      if (S.state !== 8){ heatHitReset(); hrecAdd(now, duty, t, 0, 0); return; } // preheat: nothing to time yet
+      const raw = heatHitStep(duty, t, now);
+      // only count it once the heater has looked like a pull for a full second (a short blip at the start of Ready was a
+      // fake hit), then start the clock from when it really began
+      if (raw && !HH.since) HH.since = now; else if (!raw) HH.since = 0;
+      const resume = HIT.endAt && now - HIT.endAt < hitMerge(); // picking up again right after a dip: same hit, no wait
+      const was = HH.shown, on = raw && (now - HH.since >= HEAT_CONFIRM || resume); HH.shown = on; hrecAdd(now, duty, t, raw ? (HH.how === 'temp' ? 2 : 1) : 0, on ? 1 : 0);
+      hitSample(on ? 1 : 0, was && !on ? now - 450 : !was && on ? HH.since - (HH.how === 'temp' ? 800 : 0) : now); // the heater lags the end of the pull by about half a second; a temp drop takes ~0.8s to show
+    } catch(e){ if (e && e.status){ HIT.supported = false; hitLoopStop(); } }
+    finally { HIT.inflight = false; }
+  }, 160);
+}
+/* Proxy inhale reading (from a labeled recording): it jumps to 1.0 within ~0.4s of a pull, sits at 1.0 while you
+   pull, stays at 1.0 about 0.9s after you stop, then fades over ~5s (0.8, 0.5, 0.3...). The fade and the idle
+   wobble (up to ~0.4) are what made fake hits. So a hit is only "reading pinned near 1.0". */
+const PH = { on:false };
+function proxyHitStep(v){ if (!PH.on && v >= .9) PH.on = true; else if (PH.on && v < .88) PH.on = false; return PH.on; }
+function hitLoopStart(){
+  if (HIT.loop || S.mode !== 'live' || BG.on) return; // BG: the iPhone app's tracker has the Peak while the app is closed
+  if (S.api === 2) return heatHitStart(); // older firmware: no inhale sensor, time hits from the heater instead
+  if (HIT.supported === false) return;
+  HIT.mode = 'inhale';
+  HIT.loop = setInterval(async () => {
+    if (S.mode !== 'live' || (S.state !== 8 && S.state !== 7)){ hitLoopStop(); return; }
+    if (HIT.inflight) return; HIT.inflight = true;
+    try {
+      let v = await ble.f32('/p/app/led/dif'); HIT.supported = true;
+      // Proxy: the inhale reading only counts while dynamic inhale is live (dia > 0). Otherwise dif freezes on its last value.
+      if (isFinite(v) && isProxy()){ const t = performance.now(); if (!HIT.diaAt || t - HIT.diaAt > 1000){ HIT.diaAt = t; try { HIT.dia = await ble.f32('/p/app/led/dia'); } catch(e){ HIT.dia = 1; } } if (!(HIT.dia > 0)) v = 0; } // dia only checked once a second, so the inhale reading stays fast
+      if (isFinite(v)){
+        const now = performance.now();
+        if (isProxy()){ const was = PH.on, on = proxyHitStep(v); HIT.mode = 'proxy'; hitSample(on ? 1 : 0, was && !on ? now - 600 : !was && on ? now - 550 : now); } // Proxy: only a maxed reading is a pull; it pins ~0.8s after you start and lets go ~0.6s after you stop
+        else hitSample(clamp(v, 0, 1), now);
+      }
+    }
+    catch(e){ if (e && e.status){ HIT.supported = false; hitLoopStop(); } }
+    finally { HIT.inflight = false; }
+  }, 160);
+}
+function hitLoopStop(){ clearInterval(HIT.loop); HIT.loop = null; if (HIT.on){ hitSample(0, performance.now()); } }
+const GOLD_GOAL = 100, IS_TEST = !!window.EMBER_TEST;
+// blinkers = single hits of 8s or longer, all time (same count as the Stats tile)
+function blinkerCount(){
+  const ss = (store.sessions || []), live = (typeof cur !== 'undefined' && cur && HIT.hits) ? HIT.hits : [];
+  const here = ss.reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0) + live.filter(h => h >= 8).length;
+  return Math.max(here, serverBlinkers()) + (IS_TEST ? (store.blinkerBonus || 0) : 0); // a new phone or tablet starts with the account's count, not 0
+}
+// all-time blinkers your account reached on any device (sent with your profile stats)
+function serverBlinkers(){ try { const me = LB.me || lbStore().meCache, v = me && me.stats && +me.stats.blAll; return v > 0 ? v : 0; } catch(e){ return 0; } }
+/* blinker: one hit that reaches the long-hit length (8s by default). Fired from bigHit(). */
+let blinkAt = 0;
+function blinker(secs){
+  if (Date.now() - blinkAt < 5000) return; // once per hit
+  blinkAt = Date.now();
+  // this hit isn't saved yet, so count it now
+  if (!store.goldUnlocked && blinkerCount() + 1 >= GOLD_GOAL){ setTimeout(goldUnlocked, 2800); }
+  else if (!store.goldUnlocked && blinkerCount() + 1 < GOLD_GOAL) setTimeout(() => toast(`${blinkerCount() + 1} / ${GOLD_GOAL} blinkers toward Aurum`), 2700);
+  buzz([60, 80, 60, 80, 120]);
+  const wrap = $('#gWrap'), shock = $('#blShock'), stamp = $('#blStamp'), center = wrap && wrap.querySelector('.gauge-center'), fill = $('#gFill');
+  if (!wrap || !stamp || view !== 'home' || document.documentElement.dataset.ui === 'cockpit') { toast(`Blinker! ${secs.toFixed(1)}s`); return; }
+  $('#blTime').textContent = secs.toFixed(1) + 's';
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  try {
+    if (fill) fill.animate([{ filter:'brightness(3) drop-shadow(0 0 14px #fff)' }, { filter:'none' }], { duration:700, easing:'ease-out' });
+    if (!reduce) shock.animate([{ transform:'translate(-50%,-50%) scale(.82)', opacity:.9, borderWidth:'6px' }, { transform:'translate(-50%,-50%) scale(1.7)', opacity:0, borderWidth:'1px' }], { duration:900, easing:'cubic-bezier(.2,.7,.3,1)' });
+    if (!reduce){ wrap.classList.remove('bl-shaking'); void wrap.offsetWidth; wrap.classList.add('bl-shaking'); }
+    if (center) center.animate([{ opacity:1 }, { opacity:0, offset:.15 }, { opacity:0, offset:.85 }, { opacity:1 }], { duration:2600 });
+    stamp.animate([
+      { opacity:0, transform:'translate(-50%,-50%) scale(' + (reduce ? 1 : 2.2) + ')' },
+      { opacity:1, transform:'translate(-50%,-50%) scale(.95)', offset:.12 },
+      { opacity:1, transform:'translate(-50%,-50%) scale(1)', offset:.2 },
+      { opacity:1, transform:'translate(-50%,-50%) scale(1)', offset:.85 },
+      { opacity:0, transform:'translate(-50%,-50%) scale(1)' }
+    ], { duration:2600, delay:120, easing:'cubic-bezier(.2,.8,.3,1)' });
+  } catch(e){ toast(`Blinker! ${secs.toFixed(1)}s`); }
+}
+// smooth hit timer: count on screen every frame instead of waiting for the next sensor reading
+let hitRaf = 0;
+function hitTick(){
+  hitRaf = 0; if (!HIT.on) return;
+  HIT.live = Math.max(0, (performance.now() - HIT.start) / 1000);
+  const t = HIT.live.toFixed(1);
+  document.querySelectorAll('.hit-live').forEach(el => { const sm = el.querySelector('small'); el.textContent = t + 's'; if (sm) el.prepend(sm); });
+  const ck = document.querySelector('#ckStatus'); if (ck && S.state === 8) ck.textContent = 'HIT ' + t;
+  if (!HIT.party && store.bigHit !== false && HIT.live >= bigHitAt()){ HIT.party = true; bigHit(); }
+  hitRaf = requestAnimationFrame(hitTick);
+}
+function hitText(){
+  if (S.state !== 8 && !(S.state === 9 && HIT.last)) return '';
+  if (HIT.on) return `<span class="hit-live"><small>Hit</small>${HIT.live.toFixed(1)}s</span>`;
+  if (HIT.last) return `Last hit <b>${HIT.last.toFixed(1)}s</b>${HIT.hits.length > 1 ? ` · ${HIT.hits.length} hits` : ''}`;
+  if (S.mode === 'live' && HIT.supported === false) return '';
+  return 'Take a hit, it’s timed';
+}
+/* session ending warning */
+let warnDone = false, readyAt = 0, readyTotal = 0, lastElapsed = -1, elapsedStuck = 0;
+function sessionLeft(){
+  if (S.state !== 8) return null;
+  if (!readyAt){ readyAt = Date.now(); readyTotal = S.total > 0 ? S.total : (S.profiles[S.active] || {}).time || 30; }
+  if (S.total > 0) readyTotal = S.total; // follow the Peak's total, including boosts and time cuts
+  if (S.elapsed !== lastElapsed){ lastElapsed = S.elapsed; elapsedStuck = Date.now(); }
+  const local = readyTotal - (Date.now() - readyAt) / 1000;
+  const dev = S.total > 0 ? S.total - S.elapsed : null;
+  // trust the Peak unless its timer stopped moving
+  return dev != null && Date.now() - elapsedStuck < 2500 ? dev : local;
+}
+function checkWarn(){
+  if (S.state !== 8){ warnDone = false; readyAt = 0; lastElapsed = -1; return; }
+  const left = sessionLeft(), at = clamp(+store.warnSecs || 15, 3, 110);
+  if (left == null) return;
+  if (left > at + 1.5){ warnDone = false; return; }  // boost added time: arm again
+  if (warnDone || left <= 0 || store.warnOn === false) return;
+  warnDone = true;
+  buzz([90, 120, 90]);
+  flashHeatCycle(store.warnColor || '#ffffff', 2);
+}
+// flash a color on the Peak during a session: the preview channel is ignored mid-session, so blink the active heat-cycle light and put it back
+function flashHeatCycle(hex, times){
+  if (S.mode !== 'live') return Promise.resolve();
+  if (!(S.state >= 7 && S.state <= 9)) return flashPeak(hex, times);
+  if (discoRestore) return Promise.resolve(); // Disco is showing, leave it
+  return ledJob(async () => {
+    try {
+      if (S.api === 2){
+        const back = (S.profiles[S.active] || {}).color || '#ffffff';
+        for (let n = 0; n < times; n++){ await ble.write('/p/app/thc/colr', rgbt(hex)); await sleep(380); await ble.write('/p/app/thc/colr', rgbt(back)); await sleep(260); }
+        return;
+      }
+      let saved = null;
+      try { const r = await ble.readAll('/p/app/thc/colr'); if (r && r.length > 8) saved = r; } catch(e){}
+      if (!saved){ try { const r = await ble.readAll(`/u/app/hc/${S.active}/colr`); if (r && r.length > 8) saved = r; } catch(e){} }
+      if (!saved) return; // can't put it back, so don't touch it
+      const on = solidPayload(hex);
+      try { for (let n = 0; n < times; n++){ await ble.writeBlob('/p/app/thc/colr', on); await sleep(420); await ble.writeBlob('/p/app/thc/colr', saved); await sleep(300); } }
+      finally { try { await ble.writeBlob('/p/app/thc/colr', saved); } catch(e){} }
+    } catch(e){}
+  });
+}
+function startPolling(){ clearInterval(pollTimer); pollTimer = setInterval(poll, 450); }
+function stopPolling(){ clearInterval(pollTimer); pollTimer = null; }
+
+/* ---- saved devices (Peak Pro, Proxy, …) ---- */
+function devList(){ if (!Array.isArray(store.devices)) store.devices = []; if (!store.devices.length && store.lastDeviceName) store.devices.push({ id: store.lastDeviceId, name: store.lastDeviceName, label: store.lastDeviceName, series:'peach', last: Date.now() }); return store.devices; }
+function rememberDevice(){
+  const list = devList(), id = ble.dev.id, name = S.name;
+  let d = list.find(x => x.id === id) || list.find(x => x.name === name);
+  if (!d){ d = { id, name }; list.push(d); }
+  Object.assign(d, { id, name, label: S.devName || name, series: S.series || 'peach', edition: S.edition || null, last: Date.now() });
+  list.sort((a, b) => (b.last || 0) - (a.last || 0));
+}
+const DEV_IMG = { proxy:'data:image/webp;base64,UklGRuIKAABXRUJQVlA4WAoAAAAQAAAAQAAAfwAAQUxQSGUFAAANsIf9nyFJ0ucbkW1jbe/Ztm3btm3btm3btn03tme2+2Y6I76nzKqMnPs/IiaAgeX73/vMafZv/fmXv7SfKpnSY/2YcwHmTrj09c/73Fv+SswuzNzadSVshzPufMevvHwDMZWVGScAknBauN/dP/TqA4FcEkzSrOh0/KNv8OIPUNXlyBOhBSg6XeRZU0/4tZRLgckKtQDF7Fs846MvTjEVs1LPWm0gKM08/UoP/nVVl2Gt7D55EIhO13zJ694Z7BIIecexDK6Y5l+/5XEBlyDvPMYaCKLTky96t2gXAHsWGarikfuc/NyYi1iZHA5U+Qlv2S2XIIYd0sKlvx5TCQtDw9zyU6Z7cyoaVuC63z8gd5Y5iaGHfNKZ3wu5K+WFRcKwyOFmn5E789l4eIEbfvMQXYd8HikOz+fkv4fckbkeXaZ4na91pXriqoQOxF3el+k25MuTqw6iL7Py+5A7ka9HDh2Qxm/28Y4S10V0Gbjdx9boMqTT5wjd+JL8MqYu8jVJVSek6rYfkTswN8LqJnCbT/+T4aueugyRjvL58z+KaWghX57cFTnc/sPy0OQbkENXgdt8cb88rBSuQ6Azj5/yN+UhydM13Zt1N/0tw47p+qSRzsRlH/jE7fJwzO2xOkNrMzf9aExDUb14GSIFBu75rsRQY74+qSoh+vL5JzENw9wRqwRSdY93ykNQffxFiBQZuO2X98iDxXQz6pFC0olX+HRMg2XuhCj2Pm/LDBzqc491VUr01fb+JuSB8l2oYymksbu8ayDVo7cnUGzgTp86KLeL6TrkqqB02sW+EFM7c39yKAe499tM67B22oWJFBx93XV/CblVviv1SEnUk3d4T7s0eicqih7hrh9alZtifR3yWhgpx9qx/Rbnf65KTfINzbqZZasUGDvsO33QNGfOx+eDKFXMncoVfr4qN5glZETBdji5WtekPDIFomgpjZ715yaYGEOUbh2zs0lequnj/D5azoF6MLe/SZ4nhx7M72uCBaweLO1ukifo5fQhN2R+dIlJq7w/IDfobz479+BvNMsza5Qv9rTAs3OoOOv4bS1IaZQeJtpa9NGtMqEP7ZN6Ibci9q2nRxurD0dBtzLqnegb/citUh45CljltU+u6Llz7FtP5TZWL9rboV/ui1sAKfZM7kduA1Yf3C6Ho4BVXh6EHsqtrD4M2Du5rnoGKf5fyu1yKE+4nVUeg/Qzt7P64P7lNnIOfRgwxd7VldWzFOmh3Er00bROsQ8D9sO4Sb5gqh+tt5zYh9zu72eWJ/a2Mb+9aCzN8eBmclPmt7On5VBW1i8JqcnVBV+7cWkOHyLkJsyb7h8oOld7v0yiZYo/+93d10ZKSiMvpFprg8MjH3F2XZVTT3z7J3FNbhI5br/P206oq1Lq8T89NVZZ4P8SltL4jx/5houkoBKcx37/xDhxJBjL/Lcg1DM/evCjb0UOndkxfO2NUwuHgo0tIwtEqBc2P/b8eyxg1IEhaOcH/3bCCYeibYMFgoAIafLwmzde79JjGNAQjBVg1/d/dM75s0eCG0AmgITIF/zgZzNXOmcSMFYLIyTEke2//sP0FS42ImVjsGVlyQ7mv314w0//MXHhs5enRhEtBbC6f9u6LauzFz5/NsoSzRYZbOxsB69u+P1fV0aml05cnhqtQpR9+IKVCw7u2XXgyOji8SedulgJiaD/RgKj7EzOtp0gpH2bt+/cveeCOgMEh1iNjc3MH7O8NDteyUghBCkEKWDAlsm2s03OJoSc11ZXDtd1TnYYHR8bGR2tAjZICiJIQQqI/22MZYzBthFBgLCwbWyEkCUkS2JwAwZZgDGAkUEA4n8Ly7QGAFZQOCBWBQAAsBwAnQEqQQCAAD5hLpJHpCIhpSJ1W6igDAllANJRgG8R8SD1t+iA6gDeQf3C9LvMO5yfg/mUsEtLFmRf1z/Xept/nf2/0Z/TP/T9wv+Uf0//kf23s7ftv7Gf61kVQaju3Pt+0eGu83VShGaZLaWSreu0u1es9VFE1ayH1TkVvJ+L3E+mQ5/vljCL4Bmv2hStMJSSOJWjiu5Zh6igPlwuShZg8peJeHzy70PsjfVRFtr+coT7RgwUQ7tDaaVzXcBZyGEWh+woWYnkC64vdKoVYHHgC72nVWL48WeZxTRrFUjHQvS77jSmQrJ7nvLqAAD++OdNZY3U/wjjwylZrXjz45HQAfwtj8/+66OttpkhacFV3dOF9/U85dDhc+JC6/ZvrSu6ycuRzgPHaZ+gtH/PevKwhTqOEdAwODfPWDzlYCaTY7uZncUKNWafJZ+HTNJtPUgDJy6O3VcJgpkmNjv11FdWcMd7W7neQFypWKOUWc4IagRavK8FhI8Bp8IjukvzVyLXbkTv+PtXAAfgn98uxFoTSzc/tQKd96McZZ3b+hVviyDXJK4z64txDbOTODAnPqXBDjNlOcKimxVW6JoM3U5rT88qzweh2+sNuHuQgx8yJGxyS/Q+R5DufMkUpli5aVSlZBPmUSGZj5qvdV1whcqUSnVfqv2TqL4crnQ0xYJ8ZILmG4LSIA/LYEnzxAylhItCB02si/bfT736B7oxV445MQAL84/LrToUi9DPrAvJB8BZg1Dcv1iw05FbZNbbv4gv4W/bz7PDr7+pwHZwP4b2wBg6+iPSL5NHokmDULcV5HnhbsB3ju6gCNVVQu9wA+tMkZ9ueXsIyQQLAAoWISVlGJKH1DLiD0/Amf3XP4oz/vmAKLIOGKng6Ng3ynHFFHvwbw27WXyeVKeqBBBBTz3FdPkAeV2VIDX2bAR722r2/TeneffW2AJqGz50UF3CBkVsMRiroEcBetkd6MQmCFAXzICEIdD6/exg84ELgkD3ZHKH4iushD14t13fs9F4/gT2Rx/lG/IQztWWVx1ycZ0SPcEcjHEHIw8xn+6BEEXrCnefam/Denv+T9FXS+fGPUG4dpH7jNpBA0Gu/CEf7xOD0CW5JksQ3zIo31f/+JIw9fk6APzkr7Jj0vTO2lFfiLioHtRv+v/2AYvv4bucb//2Pn/Br6zP/obHXLjaEy8uX835QiXhkEmsEqdMpq6DSWf25aojkwl8kmE42wQNr884aLNuf/hkH9aQ5VaJcCm9T+VBZWfFWn0b/YSPGCcdFnpzejk4wF0hRQEbw49B0WACPcDXpMTsQyFMDnn+Qz7d/ofnc1CsQP1xsroAfbf81j+COGYqEqCgbPR3XbXb/GwyW/6GxiVbvc5wdo3v1mQRH3SN/zJs1TWCW/GR6bxYeLHrFbn7mrCesTlBQ/A+gOC9jG7DL9oLfEf/HQx5tLHbp6XSxH+9oaX5GqQW9oP1e+8ly7f4vodMyJvKH2jEFNUX6KUnj2DnNs1FzfjxEsGEdiqQhcve5wVNyTfmDTpqoo6EHUIBH51Gw9g1K9jYKVtnmnuZhXg/0ZuCFluGCpHkJd7nEpUOrG9NaAXHCwKwVyY3Ld5xuxC+JDrPO/Ue4cDQAaLCIY0HgTfazVpdDj36jQ9Bpry/AqNMeLp6XNePwrHJHeD5GBM75cZbdXk9J6Lz8a3i1VXsqnmGpYfGjYyoQ5Ngq6rbT2AuvQo+N5llJaWKPYhmB4AMGXcKwkBRn443+SFbZ/mBUtBzaj77y2HtcQq8TZ79bVeYzvUVnAOTlSJ+1z+nkgntoHgFnuy6rD9wAAAAAA==', peak:'data:image/webp;base64,UklGRpQRAABXRUJQVlA4WAoAAAAQAAAANwAAfwAAQUxQSJwJAAAN8P7//+FG///P6/54zmQySZq0abdJ3bSLY23zsG2fetm2bds4bNv22qjbTRk0nHk+Hyf2yGT7jIgJgIatDZlAyebeArQm1F3yyJ6iWW7608+TYI3YSJ2+ixuQGbz88CBBZ2kZL2JKAJNhaE28cEfBgGKE7AlijQy54m6QIRkIFBg604p/wiQJlUqkiDWSSDwkyHChsqeMMPQl1TR+OFxUQrE1CcEa8YrHMUtSEUhuOkIaCbXyFgIpU6mJuAuNGfPvssp+KKUMX1EnaQdercsaDCA/v18jork703FHMQQfm01KH+GueMCISEgoVwZLrA/RklsCeSFcATiJAdJHoeuRaM5kycBQo6+sDcmG7MHmPEEaCrmQA3146XPUUAYBgOpIZ4k1EWrF7WBSgpTAhC/qQlsx/zZ/noRkg5A16wvauEbj83UZkwzJBNWEUWI9SHTvmYqVYLIiCSc/y4Gmwl3xMAzBLIkEybGunC7Ey26BFIACBFAbGRBKD1O0PuAvKUGsCIJTs1xo6tbxe5GCz2eWoCRx/+KMJqQWvYI6R6RzthVkwN/cq4nBS++CXSxuaBlI9hKQbGJNbO6+Aw6indeGp36TEjw0N68FsWXUPhWY8rU97D8e654C0NXDOgBGU3+yPuezoqFn51pZRl8T9CQr8QKECgem7SS5ALKxAuvAgeT6u0HlWcoxMyqaBUrdQ0oD4ppC4l4wtwxHneOhxilgsAZ6lqPGG3ZONA0keKy17DLciCoSa1AT24WaQoRHu51wpA9AKhaewMyzP73qIRhO8Kial+0cnQaQceKSZw6+qXW3QHF7rxPft+jQvCwA25cRPFPEpmh8hFiuHe2aeocaaocNlpPLhjBjTBwf7wnk7FFr2dH0gSv74BrsGCDMuMgvewGWdPNfvH2odvvq2ftBPDV/lGfOzq/+LyDrH/z9X6z28y74YMo1eGLxcfCMkbP4FpiCF3f8rVssyT1WmwXgQGCGicOBwhsmCuuNRT3/jHR+/fl+ZhzbPIyZZlGct5cDZnn97v8snNz7159fqSRQ6BibMVgTG++FP1+HfGvhgvKLSaO5DJQIxCdFCIBBzMxWYcV/YOYSO9yN+cnGe69sfRtAz9oxhZOqFAAwALIQe0gIJ/7a5YcGRrZu/GtTYgiQ0SyfDKFOudjns3Njw8NHUr740IAN9Pe/u+WK3C2fNH6xDIwJk3BSff8GgFBjS7P9ifu2PIcQu1Nnjb665+uvFed3PGC77uS8dJG4KtPZhIrUtuWWVf+DP02rjn7huT/d9fiBxfXppE+6liklqnbx6tfPuOxd//p3z90/GTXm3op8KXz2wO/bPr9n5JGb9i4d9nG6VF+gqoywzc8/3BR/RZ6x807ADr3qL9uFtRPRHszZ98SaUNbnQMbMUbA34sZH66jGLs5ePF4Y+IScevZPFHFldHTRYH7ecXP+PWuLxMTpeokqGccjcUAIBIKom2VEN30aws5c/0jrA9c+0hn95Kf5Q30F8HhnrhohvleUAgAxAGbGD2KfgEwkhy5+sXVANm37fqDdKcKOjbjsySxf163wvgSAiBC+duwPK/Y0LN55+LKnLGvZ5Z+OhhRGmhwDVbYqNt6nsmvUZLrnP3//2anDNwwfWd0efSrMPN05QVyFAYZ39g3snf3mfPy/7cOP3vzcX760c7GSSjmJIVQrUK0S+2MdTo+5cmB29wvnviXR21xUSEaIVBU9XVQF095AbN2L1o3bfxULz77m/9saRvxS5brGwFWULVRdwNYlt+44x1q4d1B96YXg0rtsqPTc4wpVNkgSzCCCYoAE2MSK7e2Ld2xvi214uKkh0GOpMmcEiKvIRQSIAEAQAAjkYWaivOO8Z4Ob0oObH0Obz5XTnRMuPCt6Pbei/Opg/ZyV/scOFpBY2z7Qs+in2RsbM5GPHO3PTrV1zHusZHG2JR+Y9mYceu2cee1H8znbzBt99eucYyOlj/2l5sLbb26fnhqe81Jkx3nxiXCx4MKFZ3Kt5f3HRltq/blgMSeNCWOx2ZCMLhi6+NDA4Utfv3xPcN/A1mTAnW6RaWIvbBReO7MmuF+wEUy5wdzc0MiByJpi/0RzcU/rnO2x01ItA7W7651cOFh04VmIBeOTGRVugeLciBUUTYuOvLH8hZt2TMyf99Ll//iWjL/dkROqXAo55M3B05eFOxJHD02bRkA5FB6OXvjsQufIZHzfeWbXPQMLNvUMxqXpBOtSReWBcM45Y2WjZbl0WbWnY3Yqj5XXIuO7q5VltveDfcd6Nn7gjyHTdnINUwKVhez6MwAwTAKdz9boy1a9UqIutrJxOvF08vGfPmJhLW23yclHy6QqAbLohwnCicZZzY4DNgSYIWKx5mV9PdnRSLIx41cuEr3ElRgFjjAqs20DBIAIYIbojLVljtFzkEFMznIJXjO+AFMlAhMqEwFKhppBZz//kikmm1xRrsQoFergmVClENINigu+dvuveHrFQQmPxNkwk5fqSQhANnxr1Wc3/8608h6EStVhhgVgsNr6M/wbCl6NVJhpZk4kIUPOarxNXIncdD20NNj8UfTD8ACMNeoBUooInlN1mkBQYjxF7GGigTRhcgmeCwFoSvDOkIYugMWOB6DkJ02YigTPmYguBAPSA+NYvIZJC8Bix4MSg70bWGgSQIG4AoS6/XqGpraVgUeJBzbHmHQgFjVZ4kpsjj15nWvoAKbaNLwq/OHDfiY9Qjlvxr6XP+QaOgCmS+wBTN/+REwJLYjhWRnH//IdSVowqlTiT6vWK6FD1WyUnj9bD0NWAYU1IMw8U/NIFSSDXVoA4Ww1PEdBaEFchVArIA0tGFWvBZMWgUIVktZBQMv6SW9CzgmAdCDUT7I3dSpcnw5AbFx6YpwOPQnRSfZCrm8ZhBaA5SpiD9xigrQgzMI4PBJ3goUWQI1TIvaSgDQ0sUJT8NwNTYlFTdZbsy5QonVIqArk+jdCaMJUl0JlIc+EMjUBDOmB+EpmoY1d9KDQBY0DBQ/EQy0gbVx4eugS6GqoF8GVJJ5cGVdCC2k8B+FUYmPy/5+UeoB+DaEqQdHfrmx0DdBMsWs/UxZlvC8JMoQv+aMvRQHFIAKoOgaYQYaZ/pGfFCswE4OIRPCuu89b0+ojnMjM4BMIAIGIACIgv/1f8XiOJBiKoZSUTlHseHC4Zs7sjqaGkE1EoBMqu6XC1PDRfYd9gZBjCiLC+zIrWVLlwYOH+kYzjmGFIzXhkCWI3XKpVCrmpstKiZAJEEmcRAaxU8xnMplsZjqbKytGlURQ8AhWUDgg0gcAAFAhAJ0BKjgAgAA+YSaPRiQhoSErGL1QgAwJZQDQ7ZW8ZbVWmZ7xr5PWad/03tp/wnhL4h/isjWmD/fcPewhvi4APzT+nf7z8u/PN1XO+Pma/8HyiPAp8k9gD+N/1H/Q+ol/zeV/6Z/83uC/zP+pf8b/AdoT9qPYt/Xhya9Nl/AxWQzUyub7/W1qGH8wIOyDLg1k62RNfWCsT15MEYcbflmxAIzsn0DRfki2SAN2N9eT01avFUUsnLpeQkecwp62iqF0B9f1XvGA8XBbOGW0ECXvcMgctXVi0oadPDrJNJRcRiwH/Dsqu11mJW+K5XLJ4u9FxfkU4R/+PXqM6nxMHUDGdzxdSMbLtIXzMeo3cHxb7EtgAP7+fKW8zLOidkyq6PCgEXdIf8W8/hQA0kZD9JmD+stoIb5BUHovGuyBbKDcVmNUzfueG84GYJ9HMo3NkT45HAhAKGnMq3v0lJmYbzxlmuLi0Lby12Gvr1WYBZE3mvYzWSy5MfnsH94PnM/h/tDkM+/aVgsy3QFsEbW5m7IN43wMvhsa1cw1rXb4Hl0iVU4TeI9Kv1ssInIE0gPn2Et/tbUr1kWL//BnskTx0fsZFiq4m3QKLwljpT2VzkCzPlztAsnbesY++40XfV70zNsHJY/y/Lp318uA6NkWesswildZuv0nZut4pWTlc4YmCK8WDfEUSlKuWMX4eH+z6zS4N6yGj9qScBbKdwIEth8Znn2695+JfNvz9pGcyzbYFy8RlkCt1Sd56B8CSPcxUcZpgdeSBYuxhuyf75+X1FsTk5yJaVAk90W/0DxmI0JX0VX/L5b4SJQtMvPUqGOf6aqU/UHX+8AslCdcj5bLzhrACOy3GUZx7v/UHC/a+f4Mq+Z/wgx9wOUIEy3X2bGlw6weHh4+xUbGgw9xLnx4v9B+CHhKi8RS+kBkbDOvS+kNZWQAenLFzkvum1Zq5xrabzGNyLgcnIIuQRd0faBYBxCnw6HAlChL5+b0yjrGFIlhjVkbyq9QpC4w4P3UkfhAcSMR+L4g9Y6ipWnQhjLnLFQm3ZV/zA618xkXUlfPLTtw7ckuP2b7EbBeXBRhf126PYc7nf+6fPu/TM26YZ/EBH/NxzrZcAd6dleznxmBKCCSzrQ6PBBjL9CHLAKJF60gppUKLTA1ho7SsVDv4QY4MCMfA/j2WrV1PGSIzRuvqIFbXcIW4+/UNwbKSykKZ3ebBi9PP1hgm3bDnJ5gtQzzFMLziYl95Y0yHKudLkYtrCjH7x9T+pd/s40k0gpNs1yP+R+X56zyOTbIsOEg7dd/qwmwznuUnp9tyq0U95O1nnZwHFMufesTaRXFNy+ob1c25GJEHknR0tEEJIp8os+QSiFKrcYOn+bwOXe+LFUO7yW+oe0uo2N9M/8rxyUx8J5bZucphch4QHV2S+FaaPAjP39OVg46q9IkDEvstxDiU9KlYMRVWmgK0s5m7tkB4L4Fglqkig1Ht9AEWECUTI+BSKX96XHz2VYV1htpPjlMxdzDH3/YahLHxN+GIJvZph15FUDZnucylaMWtN6IRB0XTvv+HlqOmEq1yD3Sc/6bfWIBaEVR3aa2n0DkTlY/xNw3aMyFrcv9TxAU908K5iTcc+sa+/cDjwIFu6YeqJ/IGaH+rYOx8c41wVuhZMCNYFQV9/FfRtV45Z0OyaJuVAwRK7xIH1dSjzuw1uGb/1SmViVOiKNKzS8BQgHe76JrxguNjll5BQQ9e7NJijv0jNpFjgsRv3E0wDwPCac9uX3s9A+7dpM8eSerdg8tIYWs22g7N/oSi3/WKYryPmpxDJRJ1EuiNvNL5JrKn5lUt5Up/hjau/4UvM/5P2X+Rc0BKjZoe6MNZuxuEv/VhJ0+5rwx4jhZ4dDEvcE7LYeC+uES5OHCBPoYbDHJ1WWEuw+DIxHJlWnQOrJzxn9GlqxNIW0hK+3JA4JCW5zc6C1Xc2d5aIU/ypOcE9FjKRhTQaZdrRy7uoZaBkmr/mdZYLPKGofhdrlfDkqOmc4J2FjkGdiyLmP++7DBdXd2+QcHERhA/Zr0IIbWEW5IFXvneyIueVioVybVA0IZTLxP59Qfu5ywL6EmdZJpvh419+ouaLWC09fuDeoYr/BOkoOxXjQPlm84PGOALBmHQTiw0LHQ3zjpJNSwNnxVMSDzRKNQ1azZjBKLKKU8NXXr0KGgJFn8qnlOauSm7HmYM67qq5ZTVX+L3VB4fId2B96zn3hJnac7zF+tA9fezx6ICCOCrtWCSBbE1q17R2ffyWGaQTRqprCa5piMTJVPh3TbV1Mif1rd8vewfQ91cCmjUcZWRcU+nFhl+lBQx85w0XtsqJ2aCzz/+f/G6tP9z+90b3+Xp3tSZjUEOhNFy4+t+T244xRtewoZXrembJ3ZFJ5lbRHen2TBP8Zooz/BHhTdMBldW9nS8kw0j4HPWXNrbVWgmYbU7RU/JvJsAtm/HlNWvyNPKNyQlrXnOkokdLlgCWXDGLHC5akJhp0qXn32AMN+TdyM0irQB2hE4xgc7k6ua6aC2bVEp3LPT884WI3opEsYrNkBgdjo/Uy9aHPVk3+nR2nubgmKHIUGXzs53i4mF6GaHReUYwB139wjiAnVrehMRRP2sAa0itv6sv/l67c7UKYRfxo/24XWRXMuOOVxP+OHf1+v9vGAAAA=' }; // small product cutouts for the device picker
+function devKind(d){ return d.series === 'toad' ? 'Proxy' : `${d.edition ? d.edition + ' ' : ''}Peak Pro`; }
+function currentDevId(){ return S.mode === 'live' && ble.dev ? ble.dev.id : null; }
+function drawDevMenu(){
+  const el = $('#devMenu'); if (!el) return;
+  const list = devList(), cur = currentDevId();
+  el.innerHTML = `<div class="dm-in">
+    ${list.length ? list.map((d, i) => {
+      const on = cur && (d.id === cur), busy = !on && (C.state === 'connecting' || C.state === 'reconnecting') && store.lastDeviceId === d.id;
+      return `<div class="dm-row${on ? ' on' : ''}"><button class="dm-dev" data-dev="${i}">
+        <span class="dm-ic dm-pic"><img alt="" src="${d.series === 'toad' ? DEV_IMG.proxy : DEV_IMG.peak}"></span>
+        <span class="dm-t"><b>${esc(d.label || d.name)}</b><small>${esc(devKind(d))}${on ? ' · Connected' : busy ? ' · Connecting…' : multiOn() && SIDE.st[d.id] ? ' · ' + esc(sideWord(SIDE.st[d.id])) : ''}</small></span>
+        ${on ? '<i class="dm-dot"></i>' : ''}</button>
+        <button class="dm-x" data-forget="${i}" aria-label="Forget ${esc(d.label || d.name)}">✕</button></div>`; }).join('') : '<p class="muted" style="margin:6px 10px">No devices yet.</p>'}
+    <button class="dm-add" id="dmAdd"><span>+</span> Add a device<small>Peak Pro or Proxy</small></button>
+    ${cur ? '<button class="dm-add dm-dis" id="dmDis">Disconnect</button>' : ''}
+    ${IS_APP ? `<label class="dm-multi"><span>Keep my devices connected<small>Up to 3. Each one still tracks and counts</small></span><input type="checkbox" class="switch" data-multi ${multiOn() ? 'checked' : ''}></label>` : ''}
+  </div>`;
+}
+function toggleDevMenu(force){
+  const el = $('#devMenu'), open = force ?? el.hidden;
+  if (open){ drawDevMenu(); el.hidden = false; requestAnimationFrame(() => el.classList.add('open')); $('#devSw').setAttribute('aria-expanded', 'true'); }
+  else { el.classList.remove('open'); $('#devSw').setAttribute('aria-expanded', 'false'); setTimeout(() => { if (!el.classList.contains('open')) el.hidden = true; }, 260); }
+}
+async function switchToDevice(d){
+  toggleDevMenu(false);
+  if (currentDevId() === d.id) return;
+  // let go of the current device quietly, then go straight to the chosen one
+  if (multiOn() && ble.dev && ble.dev.gatt && ble.dev.gatt.connected){ multiSync(true); window.EMBER_APP.post('multi', { keep: ble.dev.id }); } // iPhone app: it stays connected and tracked
+  appAuto(false); if (S.mode === 'live' || ble.connected){ manualDisconnect = true; reconnectRun++; stopPolling(); try { ble.disconnect(true); } catch(e){} S.mode = 'off'; await sleep(250); }
+  zoneLiveStop(true);
+  store.lastDeviceId = d.id; store.lastDeviceName = d.name; save();
+  ble.dev = null; manualDisconnect = false;
+  S.series = d.series; S.edition = d.edition || null; S.devName = d.label || d.name;
+  toast(`Switching to ${d.label || d.name}…`);
+  setConnUI('connecting', { label:'Connecting to ' + (d.label || d.name) + '…' });
+  if (await connectLast({ scan: 6000, skipCached: true })) return;
+  setConnUI('idle');
+  startConnect(false, true);   // asks for that device by name (a tap may be needed outside Path)
+}
+async function addDevice(){
+  toggleDevMenu(false);
+  appAuto(false); if (S.mode === 'live' || ble.connected){ manualDisconnect = true; reconnectRun++; stopPolling(); try { ble.disconnect(true); } catch(e){} S.mode = 'off'; await sleep(250); }
+  ble.dev = null; manualDisconnect = false; setConnUI('idle');
+  startConnect(true, false);
+}
+function onDropped(){
+  stopPolling(); releaseWake();
+  const wasLive = S.mode === 'live';
+  S.mode = 'off';
+  if (manualDisconnect){ manualDisconnect = false; setConnUI('idle'); toast('Disconnected'); return; }
+  if (wasLive) autoReconnect();
+}
+// try every way the browser allows to get back to the last Peak without a picker
+async function connectLast(opts){
+  opts = opts || {};
+  const name = store.lastDeviceName, id = store.lastDeviceId;
+  const go = async () => { const q = !!(S.readFor && ble.dev && S.readFor === ble.dev.id); await ble.attach(null, q); await afterConnect(q); return true; };
+  const fail = e => { console.warn('reconnect step failed', e); clog('reconnect step failed: ' + ((e && e.message) || e)); try { ble.disconnect(true); } catch(_){} };
+  // 1. the device object we already have
+  if (ble.dev && !opts.skipCached){ try { return await go(); } catch(e){ fail(e); } }
+  // 2. Chrome: devices this site was allowed before
+  try {
+    if (navigator.bluetooth.getDevices && id){
+      const d = (await navigator.bluetooth.getDevices()).find(x => x.id === id);
+      if (d && d !== ble.dev){ ble.adopt(d); try { return await go(); } catch(e){ fail(e); } }
+    }
+  } catch(e){}
+  if (!name) return false;
+  // 3. Path browser: ask for the remembered Peak by id + name, no tap needed (this is what Puffco's own app does)
+  if (IS_PATH){
+    try {
+      // Path finds a remembered Peak in well under a second; if it's asleep, stop looking instead of hanging
+      await withTimeout(ble.request(false, name, id), 6000, 'request').catch(e => { try { navigator.bluetooth.stopRequest && navigator.bluetooth.stopRequest(); } catch(_){} throw e; });
+      return await go();
+    } catch(e){ fail(e); }
+  }
+  // 4. background scan (other browsers)
+  if (opts.scan && navigator.bluetooth.requestLEScan){
+    const d = await scanForPeak(name, opts.scan, id);
+    if (d && d.gatt){ ble.adopt(d); try { return await go(); } catch(e){ fail(e); } }
+    else if (d && IS_PATH){ // Path: the scan saw it awake, now fetch it by id (no popup)
+      try { await withTimeout(ble.request(false, name, d.id || id), 6000, 'request'); return await go(); } catch(e){ fail(e); }
+    }
+  }
+  return false;
+}
+const RECONNECT_TRIES = 6;
+async function autoReconnect(){
+  const run = ++reconnectRun;
+  for (let n = 1; n <= RECONNECT_TRIES; n++){
+    if (run !== reconnectRun || manualDisconnect || S.mode === 'live') return;
+    setConnUI('reconnecting', { attempt:n }); clog('reconnect try ' + n);
+    await sleep([600, 1000, 1800, 3000, 4500, 6000][n - 1]); // first wait: let the phone fully drop the old link so the Peak shows up again
+    if (run !== reconnectRun || manualDisconnect || S.mode === 'live') return;
+    if (document.hidden){ setConnUI('error', { title:'Connection paused', msg:'Emberline was in the background. It reconnects when you come back.' }); return; }
+    if (await connectLast({ scan: n >= 3 ? 4000 : 0 })) return;
+  }
+  if (run === reconnectRun) clog('gave up reconnecting');
+  if (run === reconnectRun) setConnUI('error', { title:'Lost connection to your Peak', msg: IS_APP ? 'It may have gone to sleep, moved out of range, or connected to the Puffco app. Wake it and Emberline reconnects on its own.' : 'It may have gone to sleep, moved out of range, or connected to the Puffco app. Wake it and tap Try again.' });
+}
+// background scan used for instant reconnects (Path browser supports this)
+async function scanForPeak(name, ms, id){
+  const bt = navigator.bluetooth;
+  let scan = null;
+  try { scan = await bt.requestLEScan({ filters: name ? [{ name }] : [{ services:[SVC] }], keepRepeatedDevices:false }); }
+  catch(e){ return null; }
+  return new Promise(res => {
+    let t;
+    const done = d => {
+      bt.removeEventListener('advertisementreceived', on); clearTimeout(t);
+      try { scan && scan.stop && scan.stop(); } catch(_){}
+      try { bt.stopLEScan && bt.stopLEScan(); } catch(_){}
+      res(d);
+    };
+    // Chrome sends a real device; Path sends ev.data = { device: { id, name }, rssi } with no gatt
+    const on = ev => { const e = ev.data && ev.data.device ? ev.data : ev, d = e.device; if (d && ((name && d.name === name) || (id && d.id === id) || (!name && !id))) done(d); };
+    bt.addEventListener('advertisementreceived', on);
+    t = setTimeout(() => done(null), ms);
+  });
+}
+function armTapReconnect(){
+  const go = ev => {
+    document.removeEventListener('pointerup', go, true);
+    if (S.mode === 'live' || C.state === 'connecting') return;
+    if (ev.target.closest && ev.target.closest('#welcome, #connBtn, #ccBtn, input, label, a')) return;
+    startConnect(false, true);
+  };
+  document.addEventListener('pointerup', go, true);
+}
+/* iPhone app: the app keeps a standing connect to your Peak, so it reconnects the moment the Peak wakes up or comes
+   back in range (however long it was gone). Tapping Disconnect, switching or forgetting the device turns that off */
+function appAuto(on){ if (IS_APP) window.EMBER_APP.post('auto', { on: !!on }); }
+let bleBackAt = 0;
+window.emberBleBack = id => { // the app reconnected the Peak on its own: attach to it now
+  if (S.mode === 'live' || C.state === 'connecting' || manualDisconnect || store.autoConnect === false) return;
+  if (store.lastDeviceId && id && store.lastDeviceId !== id) return;
+  if (Date.now() - bleBackAt < 4000) return; bleBackAt = Date.now();
+  try { clog('app: Peak is back, reconnecting'); } catch(e){}
+  autoReconnect();
+};
+function userDisconnect(){ appAuto(false); manualDisconnect = true; reconnectRun++; ble.disconnect(); if (!ble.connected) onDropped(); }
+
+// pause polling in the background, resume (or reconnect) when back
+function forceReconnect(why){
+  try { clog('force reconnect' + (why ? ': ' + why : '')); } catch(e){}
+  stopPolling(); releaseWake();
+  const was = S.mode === 'live'; S.mode = 'off';
+  try { ble.disconnect(true); } catch(_){}
+  ble.cmd = null;
+  if (was && !manualDisconnect) autoReconnect();
+}
+document.addEventListener('visibilitychange', async () => {
+  document.documentElement.classList.toggle('bg', document.hidden);
+  if (document.hidden){ stopPolling(); return; }
+  if (manualDisconnect || store.autoConnect === false && C.state !== 'live' && C.state !== 'reconnecting') return;
+  if (S.mode === 'live' && !ble.connected){ forceReconnect('link died while in the background'); return; } // link died while we were away
+  if (S.mode === 'live' && ble.connected){
+    // iOS often kills the link while the app is in the background without telling the page
+    // the first read after the app comes back is often slow on iPhone: 0.9s used to cut working connections
+    let alive = false;
+    for (let i = 0; i < 2 && !alive; i++){ try { await withTimeout(ble.u8('/p/app/stat/id'), 2500, 'gatt'); alive = true; } catch(e){ if (!ble.connected) break; } }
+    if (document.hidden) return;
+    clog(alive ? 'back in app: Peak answered' : 'back in app: no answer twice');
+    if (alive){ startPolling(); poll(); } else forceReconnect('no answer after coming back');
+  }
+  else if (C.state !== 'connecting' && store.lastDeviceName && S.mode !== 'live') autoReconnect();
+});
+window.addEventListener('pageshow', ev => { if (ev.persisted && S.mode !== 'live' && store.lastDeviceName && store.autoConnect !== false) autoReconnect(); });
+
+// Bluetooth availability and remembered device
+async function bootConnection(){
+  if (!('bluetooth' in navigator)){ setConnUI('unsupported'); try { window.emberSplashReady && window.emberSplashReady(); } catch(_){} return; }
+  setConnUI('idle');
+  try {
+    if (navigator.bluetooth.getAvailability && !(await navigator.bluetooth.getAvailability())) setConnUI('btoff');
+    navigator.bluetooth.addEventListener && navigator.bluetooth.addEventListener('availabilitychanged', ev => {
+      if (ev.value === false && S.mode !== 'live') setConnUI('btoff');
+      else if (ev.value && C.state === 'btoff') setConnUI('idle');
+    });
+  } catch(e){}
+  const splashDone = () => { try { window.emberSplashReady && window.emberSplashReady(); } catch(_){} };
+  if (store.autoConnect === false || !store.lastDeviceName || C.state === 'btoff'){ splashDone(); return; }
+  const canSilent = IS_PATH || navigator.bluetooth.getDevices || navigator.bluetooth.requestLEScan;
+  if (canSilent){
+    setConnUI('connecting', { label:'Connecting to ' + store.lastDeviceName + '…' });
+    try { window.emberSplashNote && window.emberSplashNote('Connecting to ' + store.lastDeviceName + '…'); } catch(_){}
+    setTimeout(splashDone, 3000); // don't hold the loading screen longer than this
+    for (let n = 0; n < 2; n++){
+      if (await connectLast({ scan: n ? 2500 : 6000, skipCached: n === 0 })){ splashDone(); return; }
+      if (S.mode === 'live' || manualDisconnect) return;
+      await sleep(1200);
+    }
+    if (S.mode === 'live') return;
+    setConnUI('idle', { note:`Couldn’t find ${store.lastDeviceName} nearby. Wake it (press the button once) and tap Connect.` });
+    armTapReconnect();
+    return;
+  }
+  // otherwise ask for the last Peak by name right away
+  splashDone();
+  startConnect(false, true);
+}
+
+// keep the screen awake while a session runs
+let wakeLock = null;
+async function holdWake(){ if (wakeLock || !navigator.wakeLock) return; try { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } catch(e){} }
+function releaseWake(){ try { wakeLock && wakeLock.release(); } catch(e){} wakeLock = null; }
+function needLive(what){ if (S.mode === 'live') return true; toast(`Connect your ${devWord()} to ${what}`); if (view !== 'home') show('home'); return false; }
+
+async function detectLedApi(){
+  let raw = null;
+  for (let i = 0; i < 3 && raw == null; i++){ try { raw = await ble.u32('/p/sys/fw/api'); } catch(e){ await sleep(250); } } // retry: a missed read used to keep the last device's type
+  if (raw != null) S.series = (raw >>> 16) === 1 ? 'toad' : 'peach';   // same as Puffco's app: api series 1 = Proxy
+  else S.series = await guessSeries();
+  if (S.series === 'toad'){ S.api = 3; return; } // Proxy counts its api versions separately: it always uses the newer light format
+  if (raw != null && (raw & 0xffff) < 27){ S.api = 2; return; }
+  try { await ble.read('/u/app/hc/0/phcl', 8); S.api = 2; } catch(e){ S.api = 3; }
+}
+// no api read: the Proxy stores temps as whole numbers (x10), a Peak as decimals, so the raw temp bytes tell them apart.
+// Otherwise a Proxy Haze (model 1) showed up as a Peak Opal (also model 1)
+async function guessSeries(){
+  for (const path of ['/p/app/htr/temp', '/p/htr/temp']){
+    try { const r = await ble.read(path, 4); if (r && r.length >= 4){ const n = new DataView(r.buffer, r.byteOffset, 4).getInt32(0, true); return n > 0 && n < 10000 ? 'toad' : 'peach'; } } catch(e){}
+  }
+  return /^proxy/i.test((ble.dev && ble.dev.name) || '') ? 'toad' : 'peach';
+}
+
+async function readProfiles(){
+  try { const c = store.profPal && ble.dev && store.profPal[ble.dev.id]; if (c) c.forEach((x, i) => { if (x && S.profiles[i]){ const q = S.profiles[i]; q.color = x.c || q.color; q.pal = x.pal; ['name','tempC','time','boostF','boostT','vapor'].forEach(k => { if (x[k] != null) q[k] = x[k]; }); } }); render(); } catch(e){}
+  for (let i=0;i<4;i++){
+    const p = S.profiles[i];
+    try { p.name = (await ble.str(`/u/app/hc/${i}/name`)) || p.name; } catch(e){}
+    try { const t = await ble.f32(`/u/app/hc/${i}/temp`); if (t > 50 && t < 450) p.tempC = t; } catch(e){}
+    try { const t = await ble.f32(`/u/app/hc/${i}/time`); if (t > 0 && t < 600) p.time = Math.round(t); } catch(e){}
+    try { const b = await ble.f32(`/u/app/hc/${i}/btmp`); if (b >= 0 && b <= 40) p.boostF = Math.round(b * 9 / 5); } catch(e){}
+    try { const b = await ble.f32(`/u/app/hc/${i}/btim`); if (b >= 0 && b <= 120) p.boostT = Math.round(b); } catch(e){}
+    try { const v = await ble.f32(`/u/app/hc/${i}/intn`); if (v >= 0 && v <= 2) p.vapor = v; } catch(e){}
+    if (S.api === 2){ try { const r = await ble.read(`/u/app/hc/${i}/colr`, 8); if (r[3]===0) p.color = '#'+[r[0],r[1],r[2]].map(x=>x.toString(16).padStart(2,'0')).join(''); } catch(e){} }
+    else { try { applyPalette(p, lightPalette(await ble.readAll(`/u/app/hc/${i}/colr`))); } catch(e){} }
+  }
+  // remember per device so the colors show instantly next time
+  try { if (ble.dev){ store.profPal = store.profPal || {}; store.profPal[ble.dev.id] = S.profiles.map(p => ({ c: p.color, pal: p.pal || null, name: p.name, tempC: p.tempC, time: p.time, boostF: p.boostF, boostT: p.boostT, vapor: p.vapor })); save(); } } catch(e){}
+  try { S.active = clamp(await ble.u8('/p/app/hcs'),0,3); } catch(e){}
+}
+
+/* sessions done while the app was closed: the Peak's dab counter keeps going, so fill in the gap when we see it again */
+function odoSync(){
+  const id = ble.dev && ble.dev.id; if (!id || S.mode !== 'live' || S.odo == null) return;
+  store.odoSeen = store.odoSeen || {};
+  const seen = store.odoSeen[id], now = Date.now();
+  if (seen && S.odo > seen.odo){
+    const missed = Math.min(30, S.odo - seen.odo - (S.cyclesSinceOdo || 0));
+    if (missed > 0 && !(S.state >= 7 && S.state <= 9)){
+      const span = Math.max(60000, now - seen.t);
+      for (let i = 0; i < missed; i++){
+        const t = Math.round(seen.t + span * (i + 1) / (missed + 1));
+        const pr = S.profiles[S.active] || {}, tg = pr.tempC ? Math.round(c2f(pr.tempC)) : null;
+        store.sessions.push({ t, p:S.active, name:pr.name || 'Session', target:tg, peak:tg, away:true, hits:[], vapor:pr.vapor, dev:id, series:S.series || 'peach' });
+      }
+      store.sessions.sort((a, b) => a.t - b.t);
+      toast(`Added ${missed} session${missed > 1 ? 's' : ''} from while the app was closed`);
+      try { lbPush(true); } catch(e){}
+    }
+  }
+  if (!(S.state >= 7 && S.state <= 9)){ store.odoSeen[id] = { odo:S.odo, t:now }; S.cyclesSinceOdo = 0; save(); }
+}
+async function slowPoll(){
+  if (++slowPoll.n % 4 === 0) await readBatteryDetail();
+  if (!isProxy()){ try { S.chamber = await ble.u8('/p/htr/chmt'); } catch(e){} } else S.chamber = null; // Proxy has no swappable chamber
+  try { S.battery = clamp(Math.round(await ble.f32('/p/bat/soc')),0,100); } catch(e){}
+  try { const c = await ble.u8('/p/bat/chg/stat'); S.charging = c === 0 || c === 1; } catch(e){}
+  if (S.charging){
+    try { const e2 = await ble.f32('/p/bat/chg/etf'); S.chgEta = isFinite(e2) && e2 > 0 && e2 < 86400 ? e2 : null; S.chgEtaAt = Date.now(); } catch(e){ S.chgEta = null; }
+    // backup guess from how fast the % is going up
+    const now = Date.now(); if (!S.chgRef || S.battery < S.chgRef.soc) S.chgRef = { t: now, soc: S.battery };
+    const dS = S.battery - S.chgRef.soc, dT = (now - S.chgRef.t) / 1000;
+    S.chgGuess = dS >= 2 && dT > 60 ? (100 - S.battery) * dT / dS : null;
+  } else { S.chgRef = null; S.chgEta = null; S.chgGuess = null; }
+  { let o = null; try { o = Math.round(await ble.f32('/p/app/odom/0/nc', 12)); } catch(e){ try { o = Math.round(await ble.f32('/p/app/info/dtot', 12)); } catch(e2){} }
+    if (o != null && isFinite(o) && o >= 0){ S.odo = o; S.odoFor = cleanKey(); } } // odoFor: which device this count is from
+  try { S.dpd = await ble.f32('/p/app/info/dpd', 12); } catch(e){}
+  try { odoSync(); } catch(e){}
+  if (Date.now() > hcsHold){ try { S.active = clamp(await ble.u8('/p/app/hcs'),0,3); } catch(e){} }
+  try { S.stealth = (await ble.u8('/u/app/ui/stlm')) === 1; } catch(e){}
+}
+
+let idleTick = 0;
+async function poll(){
+  if (busy || S.mode !== 'live' || BG.on) return;
+  busy = true; let quiet = false;
+  try {
+    const prev = S.state;
+    try { S.state = await ble.u8('/p/app/stat/id'); failStreak = 0; }
+    catch(e){
+      ++failStreak;
+      const linkDown = !(ble.dev && ble.dev.gatt && ble.dev.gatt.connected);
+      if ((linkDown && failStreak >= 2) || failStreak >= 8){ failStreak = 0; forceReconnect(linkDown ? 'reads failing, link down' : '8 reads failed in a row'); return; }
+    }
+    // sitting idle (not heating, Ready or Boost): keep watching for a start, but read the rest and redraw only every 3rd tick.
+    // Reading everything and redrawing the whole app twice a second kept the phone warm for nothing
+    const busyNow = s => s >= 7 && s <= 9;
+    if (!busyNow(S.state) && !busyNow(prev) && S.state === prev && (++idleTick % 3) !== 0){ quiet = true; return; }
+    try { const t = await ble.f32('/p/app/htr/temp'); if (isFinite(t)) S.tempC = t; } catch(e){ try { const t = await ble.f32('/p/htr/temp'); if (isFinite(t)) S.tempC = t; } catch(e2){} } // no reading (no chamber): keep the last temp
+    // while Ready, keep the Bluetooth line clear for the inhale sensor: read the timer every other tick and skip the rest
+    const hitting = S.state === 8 && HIT.loop, odd = (slowTick & 1) === 1;
+    if (S.state !== prev){ S.elapsed = 0; S.elapsedAt = performance.now(); S.totalFor = -1; if (S.state === 8) S.total = (S.profiles[S.active] || {}).time || S.total; } // new phase: don't show the last phase's timer
+    if (S.state >= 7 && S.state <= 9 && (!hitting || odd || S.totalFor !== S.state)){
+      try {
+        S.elapsed = await ble.f32('/p/app/stat/elap'); S.elapsedAt = performance.now();
+        if (!hitting || S.totalFor !== S.state || slowTick % 8 === 1){ const t = await ble.f32('/p/app/stat/tott'); if (t > 0){ S.total = t; S.totalFor = S.state; } } // the preheat total isn't the session total
+      } catch(e){}
+      if (!hitting){ try { const t = await ble.f32('/p/app/htr/tcmd'); if (t > 100 && t < 400){ S.liveTargetC = t; if (cur) cur.setF = Math.max(cur.setF || 0, Math.round(c2f(t))); } } catch(e){} } // setF: the temp the Peak really heated to, for the 450°F rule
+    }
+    if (Date.now() > hcsHold && !hitting){ try { const a = await ble.u8('/p/app/hcs'); if (a <= 3 && a !== S.active){ S.active = a; applyProfileBright(a); if (view === 'prof') drawProfiles(); } } catch(e){} }
+    trackSession(prev, S.state);
+    if (++slowTick % 14 === 0) await slowPoll();
+  } finally { busy = false; if (!quiet) render(); }
+}
+
+document.addEventListener('input', e => { const t = e.target.closest && e.target.closest('[data-ph]'); if (t) t.parentElement.style.cssText = 'background:' + t.value; });
+document.addEventListener('change', e => { const t = e.target.closest && e.target.closest('[data-ph]'); if (!t) return; const i = +t.dataset.ph; phSet(i, t.value); drawProfiles(); toast(`Preheat color set for ${S.profiles[i].name}`); });
+/* preheat color: shows a different light while heating, then puts the profile light back */
+const phVal = i => ((store.preheat || [])[i]) || null;
+const phColor = i => { const v = phVal(i); return typeof v === 'string' ? v : null; };
+const phMood = i => { const v = phVal(i); return v && typeof v === 'object' ? v : null; };
+const phIdx = t => typeof t === 'string' && t.startsWith('ph:') ? +t.slice(3) : -1;
+function phLabel(i){ const m = phMood(i); return m ? `${esc(m.name || 'Mood')} while heating` : phColor(i) ? 'This color while heating' : 'Off, uses the profile light'; }
+function phSwatch(i){ const m = phMood(i), c = phColor(i); return m ? swatchStyle(m) : c ? 'background:' + c : 'background:transparent;border:2px dashed var(--muted)'; }
+function phHex(i){ const m = phMood(i); if (m){ try { return moodSolid(m); } catch(e){ return '#ffffff'; } } return phColor(i); }
+function phSet(i, hex){ store.preheat = store.preheat || []; store.preheat[i] = hex; save(); if (S.mode === 'live' && S.api === 2) ledJob(() => ble.write(`/u/app/hc/${i}/phcl`, rgbt(phHex(i) || S.profiles[i].color)).catch(() => {})); }
+let phRestore = null, phBusy = false;
+function phStart(){
+  const v = phVal(S.active); if (!v || S.api === 2 || S.mode !== 'live' || phRestore || phBusy) return; // original Peak does this on its own
+  phBusy = true;
+  // the Peak ignores the preview channel mid-session, so swap the active heat-cycle light
+  ledJob(async () => {
+    try {
+      let saved = null;
+      try { const r = await ble.readAll('/p/app/thc/colr'); if (r && r.length > 8) saved = r; } catch(e){}
+      if (!saved){ try { const r = await ble.readAll(`/u/app/hc/${S.active}/colr`); if (r && r.length > 8) saved = r; } catch(e){} }
+      if (!saved || S.state !== 7) return; // can't put it back (or already Ready), so don't change it
+      const blob = typeof v === 'string' ? solidPayload(v) : moodPayload(v);
+      if (isProxy()) await proxyColr('/p/app/thc/colr', blob); else await ble.writeBlob('/p/app/thc/colr', blob);
+      phRestore = async () => { if (isProxy()) await proxyColr('/p/app/thc/colr', saved); else await ble.writeBlob('/p/app/thc/colr', saved); };
+    } catch(e){ phRestore = null; } finally { phBusy = false; }
+  });
+}
+function phEnd(){ ledJob(async () => { const r = phRestore; phRestore = null; if (r && S.mode === 'live'){ try { await r(); } catch(e){} } }); }
+// put the profile light back a few degrees before Ready, so the rewrite (which shows white for a moment) finishes while it's still heating
+setInterval(() => { if (!phRestore || S.state !== 7) return; const tgt = S.liveTargetC || (S.profiles[S.active] || {}).tempC; if (tgt && S.tempC >= tgt - 6) phEnd(); }, 300);
+
+/* session tracking from state transitions */
+let cur = null;
+function trackSession(prev, st){
+  checkWarn();
+  const midSess = !!(cur && cur.readyAt); // already reached Ready: Boost and other in-between states are the same session
+  if (st === 7 && prev !== 7){ if (!midSess) hitReset(); hitLoopStart(); if (!midSess) phStart(); }
+  if (prev === 7 && st !== 7) phEnd(); // start listening during preheat so hits count the moment it's Ready
+  if (st === 8 && prev !== 8){ if (prev !== 9 && prev !== 7 && !midSess) hitReset(); hitLoopStart(); }
+  if (prev === 8 && st !== 8 && S.mode === 'live' && !zoneLive.on){ clearTimeout(previewTimer); setTimeout(() => { ledJob(previewClear); if (LT.on) ltShowCurrent(); }, 900); }
+  const tF = c2f(S.tempC);
+  if (st === 7 && prev !== 7 && !cur){
+    cur = { t:Date.now(), p:S.active, name:S.profiles[S.active].name, target:Math.round(c2f(S.profiles[S.active].tempC)), peak:tF, hit:false, batt:S.battery };
+  }
+  if (cur){
+    cur.peak = Math.max(cur.peak, tF);
+    if (st === 8){ cur.hit = true; if (!cur.readyAt){ cur.readyAt = Date.now(); cur.tax = taxPop(); cur.blk = champBlink(); saveOpenSess(); } }
+    if (st === 9 || st <= 6){
+      const ranFor = cur.readyAt ? (Date.now() - cur.readyAt) / 1000 : 0;
+      S.cyclesSinceOdo = (S.cyclesSinceOdo || 0) + 1;
+      const gotHit = (cur.hits || HIT.hits || []).some(h => h >= 1);
+      if (cur.hit && (ranFor >= 20 || gotHit)){ logSession({ setF: cur.setF || undefined, hitAt: cur.readyAt ? (HIT.ends || []).slice(0, 20).map(t => Math.round((t - cur.readyAt) / 100) / 10) : undefined, tax: cur.tax && ranFor >= RANK_TAX_SECS ? cur.tax : undefined, blk: cur.blk, t:cur.t, p:cur.p, name:cur.name, target:cur.target, peak:Math.round(cur.peak), dur:Math.round((Date.now()-cur.t)/1000), batt:cur.batt, hits:(cur.hits || HIT.hits).slice(0, 20), vapor:(S.profiles[cur.p] || {}).vapor, sc:sinceClean() + 1, run: cur.readyAt ? Math.round((Date.now() - cur.readyAt) / 1000) : null }); }
+      { const pi = cur.p; if (store.shuffle && store.shuffle[pi] && store.shuffle[pi].on) setTimeout(() => shuffleNext(pi), 2500); } // mood shuffle: next mood for this profile
+      cur = null; store.openSess = null; save();
+    }
+  }
+}
+function saveOpenSess(){ if (!cur || demo) return; store.openSess = Object.assign({}, cur, { hits: (cur.hits || HIT.hits || []).slice(0, 20), savedAt: Date.now() }); save(); }
+// the page came back (reconnect or reload): put back an unfinished session, and finish it if the Peak is already done
+function resumeOpenSess(){
+  if (!cur && store.openSess && !demo){ const o = store.openSess; if (Date.now() - (o.savedAt || 0) < 3 * 36e5){ cur = o; HIT.hits = (o.hits || []).slice(); } else { store.openSess = null; save(); } }
+  if (!cur) return;
+  if (S.state === 7 && cur.readyAt){ trackSession(8, 5); trackSession(5, 7); return; } // a new session already started: log the old one, track the new one
+  if (cur) trackSession(S.state, S.state); // done or idle now: log it
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveOpenSess(); });
+window.addEventListener('pagehide', saveOpenSess);
+
+/* ===== iPhone app: tracking while the app is closed =====
+   iOS freezes the page in the background, so the app's own tracker (ios/Emberline/BackgroundTracker.swift) reads the
+   Peak instead. Going away: emberBgPause stops the page's polling and hands over the unfinished session. Coming back:
+   emberBgResume gets the sessions it tracked (with hits, so blinkers count) and logs them here like any other. */
+// the exact light data the page would write, so the app plays the same effects on the Peak while it's closed
+function appFx(){
+  const p = S.profiles[S.active] || {};
+  let torch = null; try { if (torchOk() && torchCfg().on) torch = { s: torchCfg().s, e: torchCfg().e, profC: p.tempC, te: TORCH.te || 0 }; } catch(e){}
+  const key = [S.active, S.api, isProxy(), JSON.stringify(phVal(S.active)), store.warnColor, store.warnOn, store.warnSecs, store.bigHit, p.color, p.tempC].join('|');
+  if (appFx.key !== key){
+    const b64 = u8 => { let x = ''; for (const c of u8) x += String.fromCharCode(c); return btoa(x); }, v = {};
+    try { const ph = phVal(S.active); if (ph && S.api !== 2) v.preheat = b64(typeof ph === 'string' ? solidPayload(ph) : moodPayload(ph)); } catch(e){}
+    try { if (store.bigHit !== false){ if (S.api === 2) v.disco = b64(rgbt('#ff00ff')); else { const d = MOODS.excl.find(x => /disco/i.test(x.name)); if (d) v.disco = b64(moodPayload({ kind:'excl', id:d.id, name:d.name })); } } } catch(e){}
+    try { if (store.warnOn !== false){ const hx = store.warnColor || '#ffffff'; v.warn = b64(S.api === 2 ? rgbt(hx) : solidPayload(hx)); v.warnSecs = clamp(+store.warnSecs || 15, 3, 110); } } catch(e){}
+    try { if (S.api === 2) v.back = b64(rgbt(p.color || '#ffffff')); } catch(e){}
+    appFx.key = key; appFx.v = v;
+  }
+  return Object.assign({}, appFx.v, torch ? { torch } : {});
+}
+// the bell's own request, so the app can check for invites and followers while it's closed
+function appNotes(){
+  try {
+    if (!lbUsesPuffco() || !lbStore().joined) return null;
+    const a = acct(), pid = a.data && a.data.user && a.data.user.id;
+    return { url: SB_URL + '/functions/v1/player', key: SB_KEY, body: { puffcoToken: a.auth.accessToken, puffcoId: pid, device: devInfo() }, seen: (NOTE.list || []).map(n => String(n.id)) };
+  } catch(e){ return null; }
+}
+function appCtx(){
+  const o = cur ? { t:cur.t, readyAt:cur.readyAt || 0, p:cur.p, setF:cur.setF || 0, hits:(cur.hits || HIT.hits || []).slice(0, 20), ends:(HIT.ends || []).slice(0, 20) } : null;
+  const p = S.profiles[S.active] || {};
+  return { connected: S.mode === 'live', state: S.state, proxy: isProxy(), api: S.api, open: o, name: p.name || 'Session', color: /^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : '#8a2bff',
+    targetF: Math.round(c2f(S.liveTargetC || p.tempC || 260)), blk: (cur && cur.blk) || +store.bigHitSecs || 8, p: S.active, fx: appFx(), notes: appNotes() };
+}
+if (IS_APP) setInterval(() => { if (!document.hidden) window.EMBER_APP.post('ctx', appCtx()); }, 2000);
+
+/* ===== iPhone app: native extras =====
+   Live Activity (lock screen + Dynamic Island) with the session, a native tap on buttons, and no Path-only settings */
+if (IS_APP){
+  document.documentElement.dataset.app = '1';
+  document.addEventListener('pointerdown', e => { const b = e.target.closest && e.target.closest(HZ_SEL + ', .btn, .pchip, [data-p], #nav > button'); if (b && !b.disabled) window.EMBER_APP.post('haptic', { kind: 'light' }); }, { passive: true });
+  let liveOn = false;
+  setInterval(() => {
+    if (BG.on) return; // the app's own tracker sends it while the app is closed
+    const heating = S.mode === 'live' && (S.state === 7 || S.state === 8);
+    if (!heating){ if (liveOn){ liveOn = false; window.EMBER_APP.post('live', { phase: S.state === 9 ? 'done' : 'idle' }); } return; }
+    liveOn = true;
+    const p = S.profiles[S.active] || {}, hits = (cur && cur.hits) || HIT.hits || [], blk = (cur && cur.blk) || +store.bigHitSecs || 8, last = hits.length ? hits[hits.length - 1] : 0;
+    window.EMBER_APP.post('live', { phase: S.state === 7 ? 'heat' : 'ready', name: p.name || 'Session', color: /^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : '#8a2bff',
+      tempF: Math.round(c2f(S.tempC)), targetF: Math.round(c2f(S.liveTargetC || p.tempC || 260)),
+      readyAt: (cur && cur.readyAt) || 0, endsAt: S.state === 8 && S.total ? Date.now() + Math.max(0, S.total - liveElapsed()) * 1000 : 0,
+      hits: hits.length, lastHit: last, best: hits.length ? Math.max(...hits) : 0, blinker: last >= blk });
+  }, 1000);
+}
+
+/* ===== session card: a story-size picture of your last session, for Instagram Stories, Snapchat and friends =====
+   In the iPhone app it opens the native share sheet; in a browser it uses the browser's share, or downloads it */
+async function sessionCardPng(){
+  const all = rankSessions().slice().sort((a, b) => a.t - b.t), s = all[all.length - 1]; if (!s) return null;
+  const hits = s.hits || [], best = hits.length ? Math.max(...hits) : 0, blinks = hits.filter(h => h >= blinkOf(s)).length;
+  let rp = 0; try { rp = rankFor(all).rp - rankFor(all.slice(0, -1)).rp; } catch(e){}
+  const me = LB.me || lbStore().meCache || {}, name = me.username || store.name || 'Emberline', r = myRank(), len = typeof s.run === 'number' ? s.run : s.dur || 0;
+  const p = S.profiles[s.p] || S.profiles[S.active] || {}, col = /^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : '#8a2bff';
+  try { await document.fonts.load('700 80px "Chakra Petch"'); } catch(e){}
+  const W = 1080, H = 1920, c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, '#0b0a10'); g.addColorStop(.55, '#140a24'); g.addColorStop(1, '#05040a'); x.fillStyle = g; x.fillRect(0, 0, W, H);
+  const glow = (cx, cy, rad, color) => { const rg = x.createRadialGradient(cx, cy, 0, cx, cy, rad); rg.addColorStop(0, color + 'aa'); rg.addColorStop(1, color + '00'); x.fillStyle = rg; x.fillRect(0, 0, W, H); };
+  glow(W * .2, H * .18, 700, col); glow(W * .85, H * .82, 650, '#7300ff');
+  const font = (w, px, fam) => { x.font = `${w} ${px}px ${fam || '"Chakra Petch", system-ui, sans-serif'}`; };
+  x.textAlign = 'center'; x.fillStyle = '#fff';
+  font(700, 64); x.letterSpacing = '18px'; x.fillText('EMBERLINE', W / 2 + 9, 230); x.letterSpacing = '0px';
+  font(600, 44, 'system-ui, sans-serif'); x.fillStyle = 'rgba(255,255,255,.7)'; x.fillText(new Date(s.t).toLocaleDateString([], { weekday:'long', month:'short', day:'numeric' }), W / 2, 310);
+  x.fillStyle = col; font(800, 70, 'system-ui, sans-serif'); x.fillText(s.name || 'Session', W / 2, 470);
+  // the big number: best hit
+  x.fillStyle = '#fff'; font(700, 300); x.fillText(best ? best.toFixed(1) + 's' : '—', W / 2, 820);
+  font(600, 48, 'system-ui, sans-serif'); x.fillStyle = 'rgba(255,255,255,.75)'; x.fillText('best hit', W / 2, 900);
+  if (blinks){ x.fillStyle = '#ffd23f'; font(800, 64, 'system-ui, sans-serif'); x.fillText(`🔥 ${blinks} BLINKER${blinks > 1 ? 'S' : ''}`, W / 2, 1020); }
+  const tiles = [[hits.length, 'hits'], [(rp > 0 ? '+' : '') + rp, 'RP'], [len ? len + 's' : '—', 'length']];
+  tiles.forEach(([v, l], i) => { const cx = W / 2 + (i - 1) * 320, y = 1180;
+    x.fillStyle = 'rgba(255,255,255,.07)'; x.beginPath(); x.roundRect(cx - 140, y - 100, 280, 220, 40); x.fill();
+    x.fillStyle = '#fff'; font(700, 92); x.fillText(String(v), cx, y + 30); font(600, 40, 'system-ui, sans-serif'); x.fillStyle = 'rgba(255,255,255,.7)'; x.fillText(l, cx, y + 90); });
+  x.fillStyle = '#fff'; font(800, 60, 'system-ui, sans-serif'); x.fillText(name, W / 2, 1520);
+  x.fillStyle = col; font(700, 46, 'system-ui, sans-serif'); x.fillText(`${r.tier.n} · ${r.rp} RP this month`, W / 2, 1590);
+  font(600, 38, 'system-ui, sans-serif'); x.fillStyle = 'rgba(255,255,255,.5)'; x.fillText('emberlineapp.github.io/emberline', W / 2, 1800);
+  return c.toDataURL('image/png');
+}
+async function shareSessionCard(){
+  const png = await sessionCardPng(); if (!png){ toast('No session yet'); return; }
+  const text = 'My session on Emberline 🔥';
+  if (IS_APP){ window.EMBER_APP.post('share', { png, text }); return; }
+  try {
+    const blob = await (await fetch(png)).blob(), file = new File([blob], 'emberline-session.png', { type:'image/png' });
+    if (navigator.canShare && navigator.canShare({ files:[file] })){ await navigator.share({ files:[file], text }); return; }
+  } catch(e){ if (e && e.name === 'AbortError') return; }
+  const a = document.createElement('a'); a.href = png; a.download = 'emberline-session.png'; document.body.appendChild(a); a.click(); a.remove(); toast('Saved the picture');
+}
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('[data-sesshare]')){ e.stopPropagation(); shareSessionCard(); } });
+
+/* ===== iPhone app: camera color and music sync (Lights tab) ===== */
+let camLiveAt = 0;
+window.emberCameraLive = hex => { // the Peak follows the camera as you aim
+  if (S.mode !== 'live' || (S.state >= 7 && S.state <= 9) || isProxy() || Date.now() - camLiveAt < 400) return;
+  camLiveAt = Date.now(); ledJob(() => previewWrite(hex).catch(() => {}));
+};
+window.emberCameraColor = hex => {
+  ledJob(previewClear);
+  if (!hex) return;
+  const i = S.active, p = S.profiles[i]; if (!p) return;
+  p.color = hex; p.pal = null; p.mood = null; p.lightDirty = true;
+  if (S.mode === 'live') saveProfile(i).then(() => toast(`${p.name} is now ${hex.toUpperCase()}`)).catch(() => {}); else toast(`Color set. Connect to save it to your ${devWord()}`);
+  render(); try { drawProfiles(); } catch(e){}
+};
+/* ===== iPhone app: music sync =====
+   The app hears the music (bass beats and the tempo) and sends a tick on every beat, early by how long the Peak takes
+   to show a light. The page does NOT write a light per beat: rewriting the light file several times a second made
+   Peaks flash white and reboot. Instead it writes one animated mood (your colors pulsing at the song's BPM) and the
+   Peak plays it smoothly on its own. It's only written again when the tempo really changes or you change a setting,
+   never more than once every 10 seconds, and each write lands on a beat so the pulse starts in time */
+const MUSIC_PAL = { profile:{ n:'Your colors' }, rainbow:{ n:'Rainbow', c:['#ff0040','#ff8a00','#ffe600','#00ff6a','#00c8ff','#7300ff','#ff00d4'] },
+  fire:{ n:'Fire', c:['#ff2a00','#ff6a00','#ffb000','#ff3d1f','#ffd000'] }, ice:{ n:'Ice', c:['#00e5ff','#2a7bff','#bff6ff','#0050ff','#7fd7ff'] },
+  haze:{ n:'Purple haze', c:['#7300ff','#b05bff','#ff00d4','#4a00b0','#e6c4ff'] }, gold:{ n:'Gold', c:['#ffd23f','#ff9a00','#fff1a8','#e0a000','#ffbf3d'] } };
+const MUSIC = { cols:[], bpm:0, wroteBpm:0, wroteAt:0, wroteKey:'', busy:false, lat:.18, n:0, cur:'#7300ff', i:0 };
+const MUSIC_GAP = 10000; // never rewrite the light more often than this
+// a profile counts as "colors" only with 2+ clearly different hues; one-color profiles (all green on Medium) use Rainbow
+function profHues(){ const p = S.profiles[S.active] || {}, pal = (p.pal || []).filter(h => /^#[0-9a-f]{6}$/i.test(h)), hues = [];
+  pal.forEach(h => { const [r, g, b] = Array.from(hexBytes(h)), mx = Math.max(r, g, b), mn = Math.min(r, g, b); if (mx < 60 || mx - mn < 40) return;
+    const d = mx - mn, hu = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4, deg = (hu * 60 + 360) % 360;
+    if (!hues.some(x => Math.min(Math.abs(x.deg - deg), 360 - Math.abs(x.deg - deg)) < 35)) hues.push({ deg, h }); });
+  return hues.map(x => x.h); }
+function musicCols(){
+  const k = store.musicPal || 'rainbow'; // Rainbow unless you pick something else
+  if (k === 'profile'){ const h = profHues(); return (h.length >= 2 ? h : MUSIC_PAL.rainbow.c).slice(0, 8); }
+  return (MUSIC_PAL[k] || MUSIC_PAL.rainbow).c;
+}
+// the mood: P pulses per cycle, one color each. The Peak's speed is whole cycles per 3 minutes, so pick the number of
+// pulses that gets closest to the real tempo
+function musicMood(bpm){
+  const st = store.musicStyle || 'beat';
+  // every color gets one pulse per cycle: use as many of your colors as fit (up to 4, at least 2), whichever count
+  // lands closest to the real tempo (ties go to more colors)
+  // the slow styles pick the nearest slow rhythm the Peak can hit (its slowest speeds are coarse): a pulse every
+  // 4 beats (or 2) for Bar, every 8 (or 4 / 16) for Chill
+  const all = musicCols(), most = Math.max(2, Math.min(4, all.length));
+  const every = st === 'chill' ? [[8, 0], [4, .04], [16, .04]] : st === 'bars' ? [[4, 0], [2, .04], [8, .04]] : [[1, 0]];
+  let best = null;
+  for (const [d, pen] of every) for (let P = most; P >= 2; P--){
+    const rate = bpm / d, sp = clamp(Math.round(rate / (3 * P)), 1, 255), err = Math.abs(sp * 3 * P - rate) / rate, cost = err + pen;
+    if (!best || cost < best.cost - .01) best = { P, sp, err, cost, d };
+  }
+  const cols = Array.from({ length: best.P }, (_, k) => all[Math.floor(k * all.length / best.P) % all.length]);
+  MUSIC.moodCols = cols; // the visualizer shows the same colors in the same order
+  const shape = st === 'beat' ? [1, .62, .38, .22, .12, .06, .02, 0] : [.08, .35, .75, 1, .8, .5, .25, .1]; // a punch on the beat, or a smooth swell
+  const arr = []; cols.forEach(c => shape.forEach(v => arr.push(mixL('#000000', c.toLowerCase(), v))));
+  const lamp = { name:'pikaled2', param:{ bright:255, speed: best.sp, speedDi0: Math.min(best.sp * 2, 255) / 8, speedDi1: Math.min(best.sp * 2, 255), anim:1, plNum:0, plDenom:0,
+    offset: Array(ledCount()).fill(0), color: MoodEngine.packRgb(arr), colorLen: arr.length, diFrac:0 } };
+  return cbor({ lamp, meta:{ version:1, moodName:'Music sync' } });
+}
+function musicSend(on){ // the app only needs to listen; the light data stays here
+  window.EMBER_APP.post('music', Object.assign({ api2:false, style:'beat', sens: +store.musicSens || 1, lat: MUSIC.lat, blobs:['AA=='], dims:['AA=='], flash:['AA=='] }, on == null ? {} : { on }));
+}
+window.emberMusicState = (on, why) => {
+  store.musicOn = !!on; save(); drawAppLights();
+  if (on){ MUSIC.wroteBpm = 0; MUSIC.wroteKey = ''; MUSIC.wroteAt = 0; }
+  if (on && store.musicWant) toast('Music sync is on. Play something with a beat 🎵');
+  if (!on && store.musicWant) toast(why === 'mic' ? 'Music sync needs the microphone. Turn it on in Settings > Emberline' : 'Music sync couldn’t start the mic. Close other apps using it and try again');
+  store.musicWant = false;
+};
+// a beat tick from the app (already early by the Peak's delay). Usually nothing is written: only when the tempo moved,
+// a setting changed, or it's the first lock, and never within 10 s of the last write
+window.emberBeat = (i, kind) => {
+  if (i === -1){ MUSIC.wroteBpm = 0; ledJob(previewClear); return; } // stopped: put the light back
+  const vc = MUSIC.moodCols && MUSIC.moodCols.length ? MUSIC.moodCols : musicCols(); MUSIC.i = (MUSIC.i + 1) % vc.length; MUSIC.cur = vc[MUSIC.i];
+  if (!store.musicOn || S.mode !== 'live' || (S.state >= 7 && S.state <= 9) || S.api === 2 || isProxy() || MUSIC.busy || !(MUSIC.bpm > 0)) return;
+  const key = [store.musicPal, store.musicStyle, S.active].join('|'), moved = !MUSIC.wroteBpm || Math.abs(MUSIC.bpm - MUSIC.wroteBpm) / MUSIC.wroteBpm > .06;
+  const since = Date.now() - MUSIC.wroteAt;
+  if (!(moved || key !== MUSIC.wroteKey) || since < (key !== MUSIC.wroteKey && MUSIC.wroteKey ? 3000 : MUSIC_GAP)) return; // you changed a setting: show it soon
+  try { if (zoneLive.on) zoneLiveStop(true); } catch(e){}
+  MUSIC.busy = true; MUSIC.wroteAt = Date.now(); MUSIC.wroteBpm = MUSIC.bpm; MUSIC.wroteKey = key;
+  let blob; try { blob = musicMood(MUSIC.bpm); } catch(e){ MUSIC.busy = false; return; }
+  const t0 = performance.now();
+  ledJob(() => previewWrite(blob).catch(() => {})).finally(() => {
+    const dt = (performance.now() - t0) / 1000; if (dt > .03 && dt < 1.5){ MUSIC.lat = MUSIC.lat * .6 + dt * .4; window.EMBER_APP.post('music', { lat: MUSIC.lat }); }
+    MUSIC.busy = false;
+  });
+};
+// the visualizer: a circle that breathes with the bass and pops on each beat
+window.emberMusicMeter = (lv, bpm, beat) => {
+  MUSIC.bpm = bpm || 0;
+  const c = $('#musViz'); if (!c) return;
+  c.style.setProperty('--mc', MUSIC.cur || '#7300ff'); c.style.setProperty('--ml', Math.min(1, lv).toFixed(3));
+  if (beat){ c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop'); }
+  const t = $('#musBpm'); if (t){ const s = bpm ? bpm + ' BPM' : 'Finding the beat…'; if (t.textContent !== s) t.textContent = s; }
+};
+function musicToggle(){
+  if (!IS_APP) return;
+  if (store.musicOn){ window.EMBER_APP.post('music', { on:false }); return; }
+  if (isProxy() || S.api === 2) return toast('Music sync works on the Peak Pro for now');
+  store.musicWant = true; try { zoneLiveStop(true); } catch(e){} musicSend(true); // the music mood owns the light now
+}
+function drawAppLights(){
+  const el = $('#appLights'); if (!el) return;
+  el.hidden = !IS_APP; if (!IS_APP) return;
+  const on = !!store.musicOn, st = ['beat', 'bars', 'chill'].includes(store.musicStyle) ? store.musicStyle : 'beat', pk = store.musicPal || 'rainbow', sens = +store.musicSens || 1;
+  const sw = k => { const c = k === 'profile' ? musicCols() : MUSIC_PAL[k].c; return `linear-gradient(90deg,${c.concat(c[0]).join(',')})`; };
+  el.innerHTML = `<div class="mus-head"><div><b>🎵 Music sync</b><small>${on ? 'Listening' : 'Your Peak pulses in time with the music'}</small></div>
+      <label class="toggle" style="margin:0"><input type="checkbox" class="switch" data-music ${on ? 'checked' : ''} aria-label="Music sync"></label></div>
+    ${on ? `<div class="mus-viz" id="musViz"><i></i><span id="musBpm">Finding the beat…</span></div>` : ''}
+    <div class="mus-row"><span>Style</span><div class="seg">${[['beat', 'Pulse'], ['bars', 'Bar'], ['chill', 'Chill']].map(([k, n]) => `<button data-mstyle="${k}" aria-pressed="${st === k}">${n}</button>`).join('')}</div></div>
+    <div class="mus-pals">${Object.entries(MUSIC_PAL).map(([k, v]) => `<button data-mpal="${k}" aria-pressed="${pk === k}"><i style="background:${sw(k)}"></i>${v.n}</button>`).join('')}</div>
+    <div class="mus-row"><span>Sensitivity</span><input type="range" data-msens min="0.5" max="2" step="0.1" value="${sens}" aria-label="Sensitivity"></div>
+    <p class="muted" style="margin:0;font-size:12px">Play it out loud (the mic listens). Keeps going with the app closed, pauses during a session.</p>
+    <div class="mus-sep"></div>
+    <button class="btn small" data-camcolor style="justify-self:start">📷 Color from camera</button>`;
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest) return;
+  if (e.target.closest('[data-camcolor]')){ if (S.mode !== 'live') toast(`Connect your ${devWord()} to see it live`); window.EMBER_APP && window.EMBER_APP.post('camera', {}); }
+  if (e.target.closest('[data-music]')){ e.preventDefault(); musicToggle(); }
+  const ms = e.target.closest('[data-mstyle]'); if (ms){ store.musicStyle = ms.dataset.mstyle; save(); drawAppLights(); } // applied on the next beat (at most every 10 s)
+  const mp = e.target.closest('[data-mpal]'); if (mp){ store.musicPal = mp.dataset.mpal; save(); drawAppLights(); }
+});
+document.addEventListener('change', e => { const r = e.target.closest && e.target.closest('[data-msens]'); if (r){ store.musicSens = +r.value; save(); drawAppLights(); if (IS_APP) window.EMBER_APP.post('music', { sens: store.musicSens }); } });
+setTimeout(() => { store.musicOn = false; drawAppLights(); }, 0); // a fresh start never has music sync running
+/* ===== iPhone app: up to 3 devices at once =====
+   Own a few Puffcos? The app keeps up to 3 of your saved devices connected (ios/Emberline/MultiDevices.swift). The one
+   on screen works like always. The others are tracked by the app itself: sessions, hits and blinkers count, the blinker
+   Disco and the end warning still play, and you get a notification when one is ready. Switching is instant, because the
+   device is already connected. Sessions from the others come here (window.emberSide) and are logged like any other. */
+const SIDE = { st:{}, open:null };
+function multiOn(){ return IS_APP && store.multiDev !== false; }
+// the light data for each kind of device (the app plays it on the Peaks and Proxies that aren't on screen)
+function multiFx(){
+  const k = [store.warnColor, store.warnOn, store.warnSecs, store.bigHit, MOODS.excl.length].join('|'); if (multiFx.k === k) return multiFx.v;
+  const b64 = u8 => { let x = ''; for (const c of u8) x += String.fromCharCode(c); return btoa(x); }, out = {}, sv = S.series, se = S.edition;
+  for (const [name, ser] of [['peak', 'peach'], ['proxy', 'toad']]){
+    const v = {}; S.series = ser; S.edition = null;
+    try { if (store.bigHit !== false){ const d = MOODS.excl.find(x => /disco/i.test(x.name)); if (d) v.disco = b64(moodPayload({ kind:'excl', id:d.id, name:d.name })); } } catch(e){}
+    try { if (store.warnOn !== false){ v.warn = b64(solidPayload(store.warnColor || '#ffffff')); v.warnSecs = clamp(+store.warnSecs || 15, 3, 110); } } catch(e){}
+    out[name] = v;
+  }
+  S.series = sv; S.edition = se;
+  multiFx.k = k; multiFx.v = out; return out;
+}
+function multiDevs(){ // the one on screen first, then the most recent: 3 in all
+  const list = devList(), cur = (S.mode === 'live' && ble.dev && ble.dev.id) || store.lastDeviceId;
+  if (S.mode === 'live' && ble.dev){ const d = list.find(x => x.id === ble.dev.id); if (d && S.api && d.api !== S.api){ d.api = S.api; save(); } } // the original Peak gets no light effects
+  return list.filter(d => d.id).slice().sort((a, b) => (b.id === cur) - (a.id === cur) || (b.last || 0) - (a.last || 0)).slice(0, 3);
+}
+function multiSync(force){
+  if (!IS_APP) return;
+  const msg = { on: multiOn(), devs: multiDevs().map(d => ({ id:d.id, name:d.label || d.name, proxy:d.series === 'toad', api:d.api || 3 })), fx: multiFx(), blk: +store.bigHitSecs || 8 };
+  const key = JSON.stringify(msg); if (!force && key === multiSync.key) return; multiSync.key = key;
+  window.EMBER_APP.post('multi', msg);
+}
+if (IS_APP){ setInterval(() => { if (!document.hidden){ multiSync(); sideCarry(); } }, 2500); setTimeout(() => multiSync(true), 1500); }
+const sideDev = id => devList().find(x => x.id === id);
+const sideTax = () => { try { return rankLock() ? 0 : (RANK_TAX[myRank().tier.n] || 0); } catch(e){ return 0; } };
+function sideLog(s){
+  if (!s || !s.t || !s.dev) return false;
+  if ((store.sessions || []).some(x => x.dev === s.dev && Math.abs(x.t - s.t) < 1500)) return false; // already have it
+  const d = sideDev(s.dev) || {}, run = typeof s.run === 'number' ? s.run : null, tax = sideTax();
+  logSession({ setF: s.setF || undefined, hitAt: s.hitAt, tax: tax && run >= RANK_TAX_SECS ? tax : undefined, blk: champBlink(), t: s.t, p: s.p || 0, name: d.label || d.name || 'Session',
+    target: s.setF || undefined, peak: s.setF || undefined, dur: Math.round(((s.end || Date.now()) - s.t) / 1000), hits: (s.hits || []).slice(0, 20), run, bg: true, side: true, dev: s.dev, series: d.series || 'peach' });
+  return true;
+}
+// switched to a device in the middle of its session: carry on with it here (the hits so far count)
+function sideCarry(){
+  const c = SIDE.open; if (!c) return;
+  if (Date.now() - c.at > 60000){ SIDE.open = null; return; }
+  if (S.mode !== 'live' || !ble.dev || ble.dev.id !== c.dev) return;
+  SIDE.open = null;
+  const o = c.o || {}; if (!o.t || !(S.state === 7 || S.state === 8)) return;
+  const near = (a, b) => a && b && Math.abs(a - b) < 1500;
+  if (!cur || !near(cur.t, o.t)){ const pr = S.profiles[o.p] || {}; cur = { t:o.t, p:o.p, name: pr.name || 'Session', target: pr.tempC ? Math.round(c2f(pr.tempC)) : null, peak: o.setF || 0, hit: !!o.readyAt, batt: S.battery };
+    if (o.readyAt){ cur.readyAt = o.readyAt; cur.tax = sideTax(); cur.blk = champBlink(); } }
+  if (o.readyAt && !cur.readyAt){ cur.readyAt = o.readyAt; cur.hit = true; }
+  if (o.setF) cur.setF = Math.max(cur.setF || 0, o.setF);
+  HIT.hits = (o.hits || []).slice(); HIT.ends = (o.ends || []).slice(); cur.hits = HIT.hits.slice(); saveOpenSess(); render();
+}
+window.emberSide = json => {
+  let m = {}; try { m = JSON.parse(json) || {}; } catch(e){ return; }
+  if (m.type === 'status'){ SIDE.st = {}; (m.devs || []).forEach(d => { if (d && d.id) SIDE.st[d.id] = d; }); drawSide(); const dm = $('#devMenu'); if (dm && !dm.hidden) drawDevMenu(); return; }
+  if (m.type === 'open'){ SIDE.open = { dev:m.dev, o:m.open, at:Date.now() }; return; }
+  if (m.type === 'sessions'){
+    let n = 0; (m.sessions || []).slice().sort((a, b) => a.t - b.t).forEach(s => { if (sideLog(s)) n++; });
+    if (n){ render(); try { drawRank(); } catch(e){} const s = m.sessions[m.sessions.length - 1], d = sideDev(s.dev) || {}, h = s.hits || [];
+      toast(`${d.label || d.name || 'Your other device'}: session tracked${h.length ? ` · ${h.length} hit${h.length > 1 ? 's' : ''}, best ${Math.max(...h).toFixed(1)}s` : ''}`); }
+  }
+};
+function sideWord(x){
+  if (!x || !x.conn) return 'Waiting for it';
+  if (x.st === 7) return 'Heating';
+  if (x.st === 8){ const left = x.endsAt ? Math.max(0, Math.round((x.endsAt - Date.now()) / 1000)) : 0; return `Ready${x.hits ? ` · ${x.hits} hit${x.hits > 1 ? 's' : ''}` : ''}${left ? ` · ${left}s left` : ''}`; }
+  return 'Connected';
+}
+function drawSide(){
+  const el = $('#sideDevs'); if (!el) return;
+  const rows = multiOn() ? Object.values(SIDE.st).filter(x => x.conn && x.id !== currentDevId()) : [];
+  el.hidden = !rows.length; if (!rows.length){ el.innerHTML = ''; return; }
+  el.innerHTML = rows.map(x => { const d = sideDev(x.id) || {}, hot = x.st === 7 || x.st === 8;
+    return `<button class="sd-row${hot ? ' hot' : ''}" data-sdsw="${esc(x.id)}"><img alt="" src="${d.series === 'toad' ? DEV_IMG.proxy : DEV_IMG.peak}"><span class="sd-t"><b>${esc(d.label || d.name || 'Device')}</b><small>${esc(sideWord(x))}</small></span><span class="sd-go">Switch</span></button>`; }).join('');
+}
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-sdsw]'); if (!b) return; const d = sideDev(b.dataset.sdsw); if (d) switchToDevice(d); });
+document.addEventListener('change', e => { const t = e.target.closest && e.target.closest('[data-multi]'); if (!t) return;
+  store.multiDev = !!t.checked; save(); multiSync(true); drawSide(); toast(t.checked ? 'Your devices stay connected (up to 3)' : 'Only the device on screen stays connected'); });
+// the startup animation: with 2 or 3 devices, an icon for each that lights up as it connects (the app connects them all
+// at launch), and it waits a moment longer (up to 5 s) so they're all on when it opens
+if (IS_APP && multiOn()) (() => {
+  const spl = $('#spl'), ds = multiDevs(); if (!spl || ds.length < 2) return;
+  window.emberSplashCap = 5000;
+  const box = document.createElement('div'); box.className = 'spl-devs';
+  box.innerHTML = ds.map(d => `<i data-sid="${esc(d.id)}" title="${esc(d.label || d.name)}"><img alt="" src="${d.series === 'toad' ? DEV_IMG.proxy : DEV_IMG.peak}"></i>`).join('');
+  const note = $('#splNote'); note.parentNode.insertBefore(box, note);
+  window.emberSplashNote('Connecting ' + ds.map(d => d.label || d.name).join(' + ') + '…');
+  const orig = window.emberSplashReady; let pageReady = false;
+  const allOn = () => ds.every(d => (S.mode === 'live' && ble.dev && ble.dev.id === d.id) || (SIDE.st[d.id] && SIDE.st[d.id].conn));
+  const t = setInterval(() => {
+    if (!document.getElementById('spl')){ clearInterval(t); return; }
+    box.querySelectorAll('[data-sid]').forEach(el => { const id = el.dataset.sid; el.classList.toggle('on', (S.mode === 'live' && ble.dev && ble.dev.id === id) || !!(SIDE.st[id] && SIDE.st[id].conn)); });
+    if (pageReady && allOn()){ clearInterval(t); orig && orig(); }
+  }, 150);
+  window.emberSplashReady = () => { pageReady = true; if (allOn()){ clearInterval(t); orig && orig(); } };
+})();
+window.emberBgPause = () => {
+  const c = appCtx(); BG.on = true; try { hitLoopStop(); } catch(e){} saveOpenSess();
+  try { if (phRestore) phEnd(); } catch(e){} // the app plays these from here: put back anything showing so nothing gets stuck on the Peak
+  try { if (discoRestore) ledJob(async () => { const r = discoRestore; discoRestore = null; if (r) await r(); }); } catch(e){}
+  return JSON.stringify(c);
+};
+window.emberBgResume = json => {
+  BG.on = false;
+  let r = {}; try { r = JSON.parse(json || '{}') || {}; } catch(e){}
+  const near = (a, b) => a && b && Math.abs(a - b) < 1500;
+  const taxNow = () => { try { return rankLock() ? 0 : (RANK_TAX[myRank().tier.n] || 0); } catch(e){ return 0; } };
+  const list = (r.sessions || []).slice().sort((a, b) => a.t - b.t);
+  let n = 0, mineDone = false;
+  for (const s of list){
+    const mine = cur && near(cur.t, s.t) ? cur : null; // the session the page was in when the app went away
+    const p = s.p != null ? s.p : mine ? mine.p : S.active, pr = S.profiles[p] || {};
+    const run = typeof s.run === 'number' ? s.run : null, tax = mine && mine.tax != null ? mine.tax : taxNow();
+    const target = mine ? mine.target : pr.tempC ? Math.round(c2f(pr.tempC)) : undefined;
+    const setF = Math.max(s.setF || 0, (mine && mine.setF) || 0) || undefined;
+    logSession({ setF, hitAt: s.hitAt, tax: tax && run >= RANK_TAX_SECS ? tax : undefined, blk: mine ? mine.blk : champBlink(), t: s.t, p, name: mine ? mine.name : (pr.name || 'Session'),
+      target, peak: setF || target, dur: Math.round(((s.end || Date.now()) - s.t) / 1000), batt: mine ? mine.batt : S.battery, hits: (s.hits || []).slice(0, 20), vapor: pr.vapor, sc: sinceClean() + 1, run, bg: true });
+    if (mine){ cur = null; store.openSess = null; mineDone = true; }
+    n++;
+  }
+  if (n){ S.cyclesSinceOdo = (S.cyclesSinceOdo || 0) + n; save(); setTimeout(() => toast(`Tracked ${n} session${n > 1 ? 's' : ''} while the app was closed`), 600); } // so the dab counter catch-up doesn't add them again
+  const o = r.open;
+  if (o && o.t){ // a session still going: carry on with it here
+    if (!cur || !near(cur.t, o.t)){ const pr = S.profiles[o.p] || {}; cur = { t:o.t, p:o.p, name: pr.name || 'Session', target: pr.tempC ? Math.round(c2f(pr.tempC)) : null, peak: o.setF || 0, hit: !!o.readyAt, batt: S.battery };
+      if (o.readyAt){ cur.readyAt = o.readyAt; cur.tax = taxNow(); cur.blk = champBlink(); } }
+    if (o.readyAt && !cur.readyAt){ cur.readyAt = o.readyAt; cur.hit = true; }
+    if (o.setF) cur.setF = Math.max(cur.setF || 0, o.setF);
+    HIT.hits = (o.hits || []).slice(); HIT.ends = (o.ends || []).slice(); cur.hits = HIT.hits.slice(); saveOpenSess();
+  } else if (r.owned && cur && !mineDone){ cur = null; store.openSess = null; save(); } // it ended while away without counting (too short)
+  render(); try { drawRank(); } catch(e){}
+};
+function data(){ return demo || { sessions:store.sessions, lastClean:store.lastClean }; }
+// ranked counts only this Puffco account's sessions (several accounts can share one phone)
+function acctId(){ const a = store.account, id = a && a.data && a.data.user && a.data.user.id; return id != null ? String(id) : (a && a.email ? 'e:' + a.email.toLowerCase() : null); }
+function rankSessions(){
+  if (demo) return demo.sessions;
+  const id = acctId(), all = store.sessions || [];
+  if (!id) return all; // not signed in: just this phone's history (nothing goes to the leaderboard)
+  return all.filter(s => s.acct ? s.acct === id : store.sessOwner === id);
+}
+// sessions saved before accounts were tracked: ask once who they belong to
+function claimPrompt(){
+  const id = acctId(); if (!id || demo || store.sessOwner || document.querySelector('.egg')) return;
+  store.claimAsked = store.claimAsked || {}; if (store.claimAsked[id]) return;
+  const n = (store.sessions || []).filter(s => !s.acct).length; if (!n) return;
+  const who = (store.account && store.account.email) || 'this Puffco account';
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Whose sessions are these">
+    <h2>Are these your sessions?</h2>
+    <p>This phone has <b style="color:var(--fg)">${n} session${n > 1 ? 's' : ''}</b> saved from before. Should they count for ranked on <b style="color:var(--fg)">${esc(who)}</b>?</p>
+    <p style="font-size:14px">Pick no if this is a second account. Only one account can claim them.</p>
+    <button class="btn primary" id="clYes" style="width:100%">Yes, they’re mine</button>
+    <button class="btn" id="clNo" style="width:100%">No, start fresh</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const done = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); try { drawRank(); drawBadgeBook(); drawSocial(); } catch(e){} lbPush(true); };
+  el.querySelector('#clYes').onclick = () => { store.sessOwner = id; save(); done(); toast('Sessions added to your rank'); };
+  el.querySelector('#clNo').onclick = () => { store.claimAsked[id] = true; save(); done(); };
+}
+function logSession(s){
+  if (!s.side && ble.dev && S.mode === 'live'){ s.dev = ble.dev.id; s.series = S.series || 'peach'; } // side: from another of your devices (iPhone app)
+  if (!demo && acctId()) s.acct = acctId();
+  const d = data();
+  let rankBefore = null; try { rankBefore = myRank(); } catch(e){}
+  d.sessions.push(s);
+  try { skinCelebrate(s); } catch(e){}
+  if (demo){ demo.since++; }
+  else { if (d.sessions.length > 5000) d.sessions.splice(0, d.sessions.length - 5000); store.localSince++; save(); }
+  if (S.mode === 'demo') S.odo++;
+  checkClean(true);
+  lbPush(true);
+  rankLockCheck(rankBefore);
+  if (rankBefore) afterSessionLogged(s, rankBefore);
+  setTimeout(() => { try { passRefresh(true); } catch(e){} }, 4500); // Ember Pass challenges
+  { const hh = hotHeadTry(s); if (hh) setTimeout(() => toast(hh.ok ? 'Hot Head done! Mythic badge unlocked' : `Hot Head: ${Math.min(hh.bl, 5)} / 5 blinkers${hh.bl >= 5 ? ', the last one was too early' : ''}`), 3200); }
+}
+
+function rankLock(){ if (IS_TEST && store.testRankLock > Date.now()) return store.testRankLock; try { const sv = LB.me && LB.me.locked_until ? Date.parse(LB.me.locked_until) : 0, u = Math.max(rankFor(rankSessions()).lockedUntil, sv || 0); return u > Date.now() ? u : 0; } catch(e){ return 0; } } // the server can lock you too // testRankLock: fake lock from the test tools
+function rankLockCheck(before){ // say it once, the moment the lock starts
+  const u = rankLock(); if (!u || (before && before.lockedUntil === u)) return;
+  setTimeout(() => rankLockAlert(u), 800);
+}
+function rankLockAlert(u){
+  alert(`Either you're hacking or you need to take a break.\n\nYou're locked out of ranked for 24 hours. Sessions until ${new Date(u).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })} won't earn RP.`);
+}
+
+/* ================= clean tracking ================= */
+// each Peak / Proxy has its own dab counter, so each gets its own "count at last clean". One shared number
+// compared a Proxy's small count to a Peak's big one and the meter sat at 0
+const cleanKey = () => (ble.dev && ble.dev.id) || store.lastDeviceId || 'none';
+const cleanBase = () => { const b = store.cleanBases && store.cleanBases[cleanKey()]; return typeof b === 'number' ? b : null; };
+function setCleanBase(v){ store.cleanBases = store.cleanBases || {}; store.cleanBases[cleanKey()] = v; store.cleanBaseOdo = v; }
+function cleanBaseSync(){
+  if (S.odo == null || S.odoFor !== cleanKey()) return;
+  const b = cleanBase();
+  if (b == null){
+    // first time on this device: the old shared number only fits if it was this device's (counter just past it)
+    const old = store.cleanBaseOdo, used = Object.values(store.cleanBases || {}), first = !used.length;
+    const fits = old != null && S.odo >= old && S.odo - old < 1000 && !used.includes(old);
+    setCleanBase(fits ? old : S.odo - (first ? Math.min(store.localSince || 0, S.odo) : 0)); save();
+  } else if (S.odo < b){ setCleanBase(S.odo); save(); } // counter went backwards (reset or a different device): start over
+}
+function sinceClean(){
+  if (demo) return demo.since;
+  if (S.odo != null && S.odoFor === cleanKey() && cleanBase() != null && S.mode === 'live') return Math.max(0, S.odo - cleanBase());
+  return store.localSince;
+}
+let lastWarned = -1;
+function checkClean(fresh){
+  const n = sinceClean(), every = store.cleanEvery;
+  if (fresh && n >= every && lastWarned !== n){ lastWarned = n; buzz([80,60,80]); toast(`Time to clean: ${n} dabs since last clean`); }
+}
+function markCleaned(){
+  const now = Date.now();
+  if (demo){ demo.since = 0; demo.lastClean = now; }
+  else {
+    store.localSince = 0; store.lastClean = now; store.cleanLog.push({t:now, odo:S.odo, onTime: sinceClean() <= store.cleanEvery});
+    if (S.odo != null) setCleanBase(S.odo);
+    save();
+  }
+  toast('Clean logged. Counter reset.'); render(); setTimeout(() => { try { passRefresh(true); } catch(e){} }, 2500);
+}
+
+/* ================= actions ================= */
+// Boost the way the Puffco app does it: write the total added temp (°C) and time (s) to the override paths
+const BOOST = { temp: 0, time: 0 };
+async function boostCmd(){
+  if (!needLive('boost')) return;
+  if (torchLive()) return torchRetorch(); // Torch dab: Boost torches it again
+  if (!isProxy()) return modeCmd(9); // the Peak's own boost button command
+  const p = S.profiles[S.active] || {}, addC = (p.boostF || 0) * 5 / 9, addS = p.boostT || 0;
+  try {
+    if (addC > 0){ BOOST.temp += addC; await ble.wf32('/p/app/tmpo', BOOST.temp); }
+    if (addS > 0){ BOOST.time += addS; await ble.wf32('/p/app/timo', BOOST.time); }
+    buzz(15); toast(`Boosted +${store.unit === 'F' ? Math.round(p.boostF || 0) + '°F' : Math.round(addC) + '°C'} +${addS}s`);
+  } catch(e){ toast('Boost failed: ' + (e.message || e)); }
+}
+async function modeCmd(code){
+  if (S.mode === 'live'){ try { await ble.write('/p/app/mc', new Uint8Array([code])); if (code === 8 && isProxy()){ await sleep(100); await ble.write('/p/app/mc', new Uint8Array([2])); } } catch(e){ toast('Command failed: '+e.message); } }
+  else needLive('use it');
+}
+async function selectProfile(i){
+  if (S.mode === 'live' && (S.state === 7 || S.state === 8)){ if (i !== S.active) toast('You can switch profiles after this session'); return; } // no switching mid-session
+  S.active = i; hcsHold = Date.now() + 1500; render();
+  if (S.mode === 'live'){ try { await ble.write('/p/app/hcs', new Uint8Array([i])); applyProfileBright(i); previewProfile(i); } catch(e){ toast('Could not switch profile'); } }
+}
+async function saveProfile(i){
+  const p = S.profiles[i];
+  if (S.mode !== 'live'){ toast(`Connect your ${devWord()} to save. Your edits are kept here for now.`); render(); return; }
+  try {
+    await ble.write(`/u/app/hc/${i}/name`, new Uint8Array([...enc.encode(p.name).slice(0,20), 0]));
+    await ble.wf32(`/u/app/hc/${i}/temp`, p.tempC);
+    await ble.wf32(`/u/app/hc/${i}/time`, p.time);
+    try { await ble.wf32(`/u/app/hc/${i}/btmp`, p.boostF * 5 / 9); await ble.wf32(`/u/app/hc/${i}/btim`, p.boostT); } catch(e){ toast('Boost settings not supported on this firmware'); }
+    try { await ble.wf32(`/u/app/hc/${i}/intn`, p.vapor); } catch(e){}
+    if (p.lightDirty && isProxy()){ await writeProfileColor(i, p.color || '#ffffff'); p.lightDirty = false; }
+    if (p.lightDirty){
+      if (p.mood && S.api === 2 && await api2Mood(i, p.mood).catch(() => false)){ if (S.active === i){ try { await api2Mood('temp', p.mood); } catch(e){} } }
+      else if (p.mood && S.api !== 2){ const blob = moodPayload(p.mood); await ble.writeBlob(`/u/app/hc/${i}/colr`, blob); if (S.active === i){ try { await ble.writeBlob('/p/app/thc/colr', blob); } catch(e){} } }
+      else await writeProfileColor(i, p.color);
+      p.lightDirty = false;
+    }
+    if (S.api === 2){ try { await ble.write(`/u/app/hc/${i}/phcl`, rgbt(phHex(i) || p.color)); } catch(e){} }
+    if (S.active === i) await ble.write('/p/app/hcs', new Uint8Array([i]));
+    store.profSaved = store.profSaved || []; store.profSaved[i] = true; save();
+    toast(`Saved "${p.name}" to your ${devWord()}`);
+  } catch(e){ toast('Save failed: ' + e.message); }
+}
+// Proxy: write a light file and read it back, trying each write style until the Proxy keeps it
+async function proxyColr(path, blob){
+  const same = async () => { try { const r = await ble.readAll(path); return r.length === blob.length && r.every((b, k) => b === blob[k]); } catch(e){ return false; } };
+  const tries = [() => ble.write(path, blob, 0, 4), () => ble.writeBlob(path, blob), () => ble.write(path, blob, 0, 1), () => ble.write(path, blob, 0, 0)], errs = [];
+  for (let n = 0; n < tries.length; n++){
+    try { await tries[n](); } catch(e){ errs.push((n + 1) + ':' + (e.message || e)); continue; }
+    if (await same()) return n + 1;
+    errs.push((n + 1) + ':no change');
+  }
+  throw new Error(path.replace('/u/app/hc/', 'P').replace('/colr', '') + ' ' + errs.join(', '));
+}
+async function writeProfileColor(i, hex){
+  if (isProxy()){ const b = proxyBlob(hex); await proxyColr(`/u/app/hc/${i}/colr`, b); if (S.active === i){ try { await proxyColr('/p/app/thc/colr', b); } catch(e){} } return; }
+  if (S.api === 2){
+    await ble.write(`/u/app/hc/${i}/colr`, rgbt(hex));
+    for (const s of ['phcl','accl']){ try { await ble.write(`/u/app/hc/${i}/${s}`, rgbt(hex)); } catch(e){} }
+    if (S.active === i) for (const s of ['colr','phcl','accl']){ try { await ble.write(`/p/app/thc/${s}`, rgbt(hex)); } catch(e){} }
+  } else {
+    const blob = solidPayload(hex);
+    await ble.writeBlob(`/u/app/hc/${i}/colr`, blob);
+    if (S.active === i){ try { await ble.writeBlob('/p/app/thc/colr', blob); } catch(e){} }
+  }
+}
+async function setLantern(on){
+  if (!needLive('use the lantern')){ drawLightsState(); return; }
+  S.lantern = on;
+  try {
+    if (on){ if (store.lanternMood && S.api !== 2){ try { await ble.writeBlob('/p/app/ltrn/colr', moodPayload(store.lanternMood)); } catch(e){ await writeLanternColor(store.lantern); } } else await writeLanternColor(store.lantern); }
+    await ble.write('/p/app/ltrn/cmd', new Uint8Array([on?1:0]));
+  } catch(e){ toast('Lantern failed: '+e.message); }
+}
+async function writeLanternColor(hex){
+  if (isProxy()) return proxyColr('/p/app/ltrn/colr', proxyBlob(hex));
+  if (S.api === 2) await ble.write('/p/app/ltrn/colr', rgbt(hex));
+  else await ble.writeBlob('/p/app/ltrn/colr', solidPayload(hex));
+}
+async function setStealth(on){
+  if (!needLive('use stealth mode')){ drawLightsState(); return; }
+  S.stealth = on;
+  if (S.mode === 'live'){ try { await ble.write('/u/app/ui/stlm', new Uint8Array([on?1:0])); } catch(e){ toast('Stealth failed'); } }
+}
+/* LED brightness is one setting on the Peak, so Emberline keeps one per profile and applies it when that profile is active */
+function brightFor(i){
+  if (!Array.isArray(store.brightBase)) store.brightBase = (store.bright || [255,255,255,255]).slice(); // default for profiles you haven't set
+  const b = (store.brightByProfile || {})[i]; return Array.isArray(b) ? b : store.brightBase;
+}
+function brightProf(){ return typeof moodTarget === 'number' && moodTarget >= 0 && moodTarget <= 3 ? moodTarget : S.active; }
+let brEdit = null;
+async function writeBright(b){
+  if (isProxy()){ // Proxy: one brightness for the whole light, a whole number where 256 = full (it reads 256 out of the box)
+    const v = new Uint8Array(4); new DataView(v.buffer).setInt32(0, Math.round((b[0] / 255) * 256), true);
+    await ble.write('/u/app/ui/lbrt', v); store.bright = b.slice(); return;
+  }
+  await ble.write('/u/app/ui/lbrt', new Uint8Array(b)); store.bright = b.slice();
+}
+async function applyProfileBright(i){
+  const b = brightFor(i); if (!b || S.mode !== 'live') return;
+  if (Date.now() < introBrightUntil) return; // the intro puts it back when it ends
+  if (Array.isArray(store.bright) && b.join() === store.bright.join()) return; // already showing
+  try { await writeBright(b); save(); } catch(e){}
+}
+async function applyBrightness(){
+  const i = brightProf(), p = S.profiles[i] || {};
+  (store.brightByProfile = store.brightByProfile || {})[i] = (brEdit || store.bright).slice(); save();
+  if (i !== S.active){ toast(`Saved for ${p.name || 'P' + (i + 1)}. It applies when you switch to it.`); return; }
+  if (!needLive('change brightness')) return;
+  try { await writeBright(brightFor(i)); save(); toast(`Brightness applied to ${p.name || 'P' + (i + 1)}`); } catch(e){ toast('Brightness failed'); }
+}
+async function applyScheme(sc){
+  store.ledScheme = sc.c.slice(); store.lantern = sc.l || sc.c[1]; save();
+  sc.c.forEach((c,i) => { S.profiles[i].color = c; S.profiles[i].mood = null; });
+  render();
+  if (S.mode !== 'live'){ toast(`${sc.n} saved here. Connect to send it to your ${devWord()}.`); return; }
+  toast(`Writing ${sc.n} to your ${devWord()}…`);
+  try { for (let i=0;i<4;i++) await writeProfileColor(i, sc.c[i]); if (S.lantern) await writeLanternColor(store.lantern); toast(`${sc.n} applied`); if (isProxy()) previewProfile(S.active); }
+  catch(e){ toast('Color write failed: '+e.message); }
+}
+
+async function dumpLights(){
+  const out = $('#dumpOut'), cp = $('#bDumpCopy');
+  if (S.mode !== 'live'){ toast('Connect your Peak first'); return; }
+  const btn = $('#bDump'); btn.disabled = true; btn.textContent = 'Reading…';
+  const res = { app:'Emberline', when:new Date().toISOString(), device:S.name, ledApi:S.api, slots:[] };
+  try { res.fwApi = (await ble.u32('/p/sys/fw/api')) & 0xffff; } catch(e){}
+  const grab = async (label, path, extra) => {
+    const row = Object.assign({ label, path }, extra || {});
+    try {
+      const raw = S.api === 2 ? await ble.read(path, 8) : await ble.readAll(path);
+      row.raw = toHex(raw);
+      if (S.api === 3){ const end = raw.length; let trimmed = raw; while (trimmed.length && trimmed[trimmed.length-1] === 0) trimmed = trimmed.slice(0,-1);
+        try { row.decoded = cborDecode(trimmed); } catch(e){ row.decodeError = e.message; } }
+    } catch(e){ row.error = e.message; }
+    res.slots.push(row);
+  };
+  for (let i=0;i<4;i++){
+    let name = S.profiles[i].name; try { name = await ble.str(`/u/app/hc/${i}/name`) || name; } catch(e){}
+    await grab(`Profile ${i+1}`, `/u/app/hc/${i}/colr`, { name });
+    if (S.api === 2){ for (const sfx of ['phcl','accl']) await grab(`Profile ${i+1} ${sfx}`, `/u/app/hc/${i}/${sfx}`); }
+  }
+  await grab('Lantern', '/p/app/ltrn/colr');
+  await grab('Active heat cycle', '/p/app/thc/colr');
+  out.value = JSON.stringify(res);
+  out.hidden = false; cp.hidden = false;
+  btn.disabled = false; btn.textContent = 'Read lights from Peak';
+  toast('Light data ready. Tap Copy.');
+}
+$('#bDump').onclick = dumpLights;
+$('#bDumpCopy').onclick = async () => {
+  const out = $('#dumpOut');
+  try { await navigator.clipboard.writeText(out.value); toast('Copied. Paste it to Claude.'); }
+  catch(e){ out.focus(); out.select(); toast('Press and hold the text, then Copy'); }
+};
+
+/* ================= demo simulator ================= */
+let sim = null;
+function buildDemo(){
+  const sessions = []; const now = Date.now();
+  let seed = 7; const rnd = () => (seed = (seed*16807) % 2147483647) / 2147483647;
+  for (let d=29; d>=0; d--){
+    const base = new Date(now - d*DAY); base.setHours(0,0,0,0);
+    const weekend = [0,5,6].includes(base.getDay());
+    const n = Math.round((weekend ? 6 : 3.5) + rnd()*3 - 1.5);
+    for (let k=0;k<n;k++){
+      const hr = rnd() < .7 ? 18 + rnd()*5 : 11 + rnd()*7;
+      const t = base.getTime() + hr*3600000;
+      if (t > now) continue;
+      const p = rnd() < .5 ? 1 : rnd() < .6 ? 2 : rnd() < .6 ? 0 : 3;
+      const target = Math.round(c2f(S.profiles[p].tempC));
+      sessions.push({ t, p, name:S.profiles[p].name, target, peak:target + Math.round(rnd()*6-3), dur:S.profiles[p].time + 25, batt:Math.round(30+rnd()*70) });
+    }
+  }
+  sessions.sort((a,b)=>a.t-b.t);
+  demo = { sessions, since:138, lastClean: now - 26*DAY };
+}
+function stopSim(){ clearInterval(sim); sim = null; }
+function simCmd(code){
+  const p = S.profiles[S.active];
+  if (code === 7 && (S.state === 5)){
+    p._boosted = 0; S.liveTargetC = null; const prev = S.state; S.state = 7; S.elapsed = 0; S.total = 20; trackSession(prev, 7);
+    stopSim();
+    sim = setInterval(() => {
+      const prev = S.state, tgt = p.tempC + (p._boosted || 0) * p.boostF * 5 / 9;
+      if (S.state === 7){ S.tempC += (tgt - S.tempC) * .09 + 1.2; S.elapsed += .25; if (S.tempC >= tgt - 1){ S.tempC = tgt; S.state = 8; S.elapsed = 0; S.total = p.time; buzz(120); } }
+      else if (S.state === 8){ S.elapsed += .25; S.tempC = tgt + Math.sin(Date.now()/400); const ph = S.elapsed % 9; hitSample(ph > 1.5 && ph < 4.5 ? .6 : 0, performance.now()); if (S.elapsed >= S.total){ S.state = 9; S.elapsed = 0; S.total = 8; } }
+      else if (S.state === 9){ S.elapsed += .25; S.tempC -= 6; if (S.elapsed >= S.total){ S.state = 5; } }
+      else { S.tempC = Math.max(22, S.tempC - 8); if (S.tempC <= 22) stopSim(); }
+      trackSession(prev, S.state); render();
+    }, 250);
+  } else if (code === 9 && S.state === 8){
+    const bp = S.profiles[S.active]; S.total += bp.boostT; bp._boosted = (bp._boosted || 0) + 1;
+    S.tempC += bp.boostF * 5 / 9; toast(`Boost ${fmtDelta(bp.boostF)} · +${bp.boostT}s`);
+  }
+  else if (code === 9 && S.state === 7){ toast('Boost works once the session is ready'); }
+  else if (code === 8 && S.state >= 7 && S.state <= 9){ const prev = S.state; S.state = 5; trackSession(prev, 5); }
+  render();
+}
+
+/* ================= themes ================= */
+const THEMES = [
+  { id:'nightfall', n:'Nightfall', dark:true, v:{tint2:'#6b4dff',bg:'#0b0a10',surface:'#1d1a28','surface-2':'#272337',line:'#35304a',fg:'#f1edf7',muted:'#a39db6',accent:'#ff9d4d','accent-ink':'#1b1206'} },
+  { id:'glacier', n:'Glacier', dark:true, v:{tint2:'#2f6bff',bg:'#060d10',surface:'#132224','surface-2':'#1a2d30',line:'#26403f',fg:'#e6f4f3',muted:'#8fb0ad',accent:'#5ce1e6','accent-ink':'#041a1b'} },
+  { id:'orchid', n:'Orchid', dark:true, v:{tint2:'#7a3dff',bg:'#0d0710',surface:'#211628','surface-2':'#2c1e35',line:'#3e2b4a',fg:'#f7ecfb',muted:'#b79cc4',accent:'#f472d0','accent-ink':'#26071d'} },
+  { id:'forest', n:'Forest', dark:true, v:{tint2:'#12b3a0',bg:'#070b08',surface:'#172019','surface-2':'#1f2b21',line:'#2d3d2f',fg:'#eaf3e6',muted:'#9db39a',accent:'#a3e635','accent-ink':'#142005'} },
+  { id:'paper', n:'Paper', dark:false, v:{tint2:'#7aa2ff',bg:'#f3f1f7',surface:'#ffffff','surface-2':'#ebe7f2',line:'#d9d3e4',fg:'#1c1826',muted:'#6c6680',accent:'#d8621a','accent-ink':'#ffffff'} },
+  { id:'sky', n:'Sky', dark:false, v:{tint2:'#a35cff',bg:'#eef4fa',surface:'#ffffff','surface-2':'#e1ebf5',line:'#cbd9e8',fg:'#122033',muted:'#5d7189',accent:'#2563eb','accent-ink':'#ffffff'} },
+  { id:'auto', n:'Match phone', dark:null, v:null },
+  { id:'gold', n:'Aurum', dark:true, gold:true, v:{tint2:'#ffdf8a',bg:'#080604',surface:'#17120a','surface-2':'#211a0e',line:'#3a2e16',fg:'#fbf3df',muted:'#c2ad7d',accent:'#e9bb4f','accent-ink':'#1c1303'} }
+];
+const goldUnlockedNow = () => (IS_TEST && window.EMBER_GOLD_BYPASS) || blinkerCount() >= GOLD_GOAL || store.goldUnlocked;
+const SEM_DARK = {good:'#30d158',warn:'#ffd60a',bad:'#ff453a','glass-edge':'rgba(255,255,255,.16)','glass-hi':'rgba(255,255,255,.22)'}, SEM_LIGHT = {good:'#34c759',warn:'#d69e00',bad:'#ff3b30','glass-edge':'rgba(255,255,255,.7)','glass-hi':'rgba(255,255,255,.9)'};
+const COCKPIT = { bg:'#03060f', surface:'#0a1530', 'surface-2':'#0e1d40', line:'#1b3368', fg:'#eef3fc', muted:'#8ea3c7', accent:'#2a7bff', 'accent-ink':'#ffffff', tint2:'#e8261c', good:'#2fd07a', warn:'#ffc400', bad:'#ff3b30', 'glass-edge':'#1b3368', 'glass-hi':'rgba(255,255,255,.06)' };
+function setStatusBar(){
+  const cs = getComputedStyle(document.documentElement), bg = (cs.getPropertyValue('--bg') || '#0b0a10').trim();
+  const rgb = bg.startsWith('#') ? hexBytes(bg.length === 4 ? '#' + [...bg.slice(1)].map(c => c + c).join('') : bg) : [11,10,16];
+  const dark = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255 < .5;
+  const set = (name, val) => { let m = document.querySelector(`meta[name="${name}"]`); if (!m){ m = document.createElement('meta'); m.name = name; document.head.appendChild(m); } m.content = val; };
+  set('theme-color', bg.startsWith('#') ? bg : '#0b0a10');
+  set('color-scheme', dark ? 'dark' : 'light');
+  set('apple-mobile-web-app-status-bar-style', dark ? 'black-translucent' : 'default');
+}
+/* ===================== SECRET SKINS ===================== */
+const SKIN_VARS = {
+  block: { bg:'#2a1f15', surface:'#c6c6c6', 'surface-2':'#8b8b8b', line:'#555555', fg:'#ffffff', muted:'#d0d0d0', accent:'#a24bff', 'accent-ink':'#ffffff', tint2:'#55ff55', good:'#55ff55', warn:'#ffaa00', bad:'#ff5555', 'glass-edge':'#000000', 'glass-hi':'#ffffff' },
+  heist: { bg:'#120a1c', surface:'#141018', 'surface-2':'#1c1722', line:'#333333', fg:'#ffffff', muted:'#cfc6d8', accent:'#f0c850', 'accent-ink':'#000000', tint2:'#72cc72', good:'#72cc72', warn:'#f0c850', bad:'#e0402f', 'glass-edge':'transparent', 'glass-hi':'transparent' }
+};
+const PX_PAL = { k:'#000', w:'#fff', r:'#e2242b', R:'#8a0c12', o:'#ff8c1a', y:'#ffd84a', l:'#ffe9a8', p:'#a24bff', P:'#5c169e', g:'#55ff55', G:'#2a8a1a', s:'#9a9a9a', S:'#5a5a5a', d:'#3a3a3a', b:'#3fa9ff', B:'#1a5fa8', n:'#8a5a2b', N:'#5a3a1a', t:'#e8b896', h:'#3a2414', e:'#f2efe6' };
+function pxSprite(rows, map){
+  const c = document.createElement('canvas'); c.width = rows[0].length; c.height = rows.length; const x = c.getContext('2d');
+  rows.forEach((r, j) => [...r].forEach((ch, i) => { if (ch !== '.'){ x.fillStyle = (map && map[ch]) || PX_PAL[ch]; x.fillRect(i, j, 1, 1); } }));
+  return c.toDataURL();
+}
+const PX = {};
+function pxInit(){
+  if (PX.ok) return; PX.ok = true;
+  PX.heart = pxSprite(['.kk.kk.','krrkrrk','krwrrrk','krrrrRk','.krrRk.','..kRk..','...k...']);
+  PX.half = pxSprite(['.kk.kk.','krrkddk','krwrddk','krrrddk','.krrdk.','..kRk..','...k...']);
+  PX.empty = pxSprite(['.kk.kk.','kddkddk','kdddddk','kdddddk','.kdddk.','..kdk..','...k...']);
+  PX.home = pxSprite(['....k.....','...kok....','...koyk...','..kooyk.k.','..koyyokok','.koyyyyook','.koyylyyok','kooylllyok','koyylllyok','.kooyyyok.','..kkoookk.','....kkk...']);
+  PX.prof = pxSprite(['kkkkkkkkkkkk','knnnnnnnnnnk','knNNNNNNNNnk','kkkkkkkkkkkk','knnnnyynnnnk','knnnnyynnnnk','knnnnnnnnnnk','knNNNNNNNNnk','knnnnnnnnnnk','kkkkkkkkkkkk']);
+  PX.stats = pxSprite(['kkkkkkkkkkk','keeeeeeeeek','keeeeeeegek','keeeeeeegek','keeeebeegek','keeeebeegek','kepeebeegek','kepeebeegek','keeeeeeeeek','kkkkkkkkkkk']);
+  PX.social = pxSprite(['kkkkkkkk','khhhhhhk','khttttkk','kttwtwtk','kttttttk','ktthhttk','kkkkkkkk','.kppppk.','kppppppk','kppppppk']);
+  PX.set = pxSprite(['...kk...','.k.ss.k.','.kssssk.','kssddssk','kssddssk','.kssssk.','.k.ss.k.','...kk...']);
+  PX.adv = pxSprite(['....k.....','...kgk....','...kggk...','..kgggk.k.','..kgllgkgk','.kglllllgk','.kgllwllgk','kgglwwwlgk','kglwwwwlgk','.kgglllgk.','..kkgggkk.','....kkk...']);
+}
+function skinStreak(){
+  const days = new Set((data().sessions || []).map(s => startOfDay(s.t)));
+  let d = startOfDay(Date.now()), n = 0;
+  if (!days.has(d)) d -= DAY;
+  while (days.has(d) && n < 99){ n++; d -= DAY; }
+  return n;
+}
+function skinApply(){
+  const ui = store.ui;
+  if (ui === 'block'){
+    pxInit();
+    document.querySelectorAll('#nav > button').forEach(b => { if (!b.querySelector('.skin-ic')){ const im = new Image(); im.className = 'skin-ic'; im.alt = ''; im.src = PX[b.dataset.v] || PX.home; b.prepend(im); } });
+  }
+  if (ui === 'heist' && !skinApply.sky){
+    skinApply.sky = true;
+    try {
+      const W = 480, H = 900, c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+      const g = x.createRadialGradient(W * .7, H, 20, W * .7, H, H * .95);
+      g.addColorStop(0, '#ff7a3d'); g.addColorStop(.22, '#d6406a'); g.addColorStop(.5, '#5a1f6e'); g.addColorStop(.85, '#120a1c'); g.addColorStop(1, '#0b0612');
+      x.fillStyle = g; x.fillRect(0, 0, W, H);
+      let px = 0; const r = mulberry(7);
+      while (px < W){ const w = 22 + r() * 40, h = H * (.12 + r() * .3);
+        x.fillStyle = '#0b0612'; x.fillRect(px, H - h, w, h);
+        if (r() < .3){ x.fillRect(px + w / 2 - 2, H - h - 26, 4, 26); }
+        x.fillStyle = 'rgba(255,200,120,.55)';
+        for (let wy = H - h + 8; wy < H - 6; wy += 10) for (let wx = px + 5; wx < px + w - 5; wx += 8) if (r() < .22) x.fillRect(wx, wy, 3, 5);
+        px += w + 3; }
+      document.documentElement.style.setProperty('--skin-sky', `url(${c.toDataURL('image/jpeg', .8)}) center bottom/cover no-repeat`);
+      const m = $('#skinMap'); if (m){ const y = m.getContext('2d'); y.fillStyle = '#2d3b30'; y.fillRect(0, 0, 96, 96); y.strokeStyle = '#9aa39b'; y.lineWidth = 3;
+        [14, 44, 74].forEach(v => { y.beginPath(); y.moveTo(v, 0); y.lineTo(v + 8, 96); y.stroke(); y.beginPath(); y.moveTo(0, v); y.lineTo(96, v - 6); y.stroke(); });
+        y.fillStyle = '#3f6fae'; y.fillRect(60, 0, 36, 22); y.fillStyle = '#a24bff'; y.beginPath(); y.arc(70, 58, 5, 0, 7); y.fill(); y.strokeStyle = '#000'; y.lineWidth = 1.5; y.stroke(); }
+    } catch(e){}
+  }
+  skinTick();
+}
+function mulberry(a){ return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function skinTick(){
+  const ui = store.ui;
+  if (ui === 'block'){
+    pxInit();
+    const el = $('#skinHearts'); if (!el) return;
+    const halves = S.battery == null ? 20 : Math.round(S.battery / 5), k = 'h' + halves;
+    if (el._k !== k){ el._k = k; el.innerHTML = Array.from({ length: 10 }, (_, i) => `<img alt="" src="${halves >= (i + 1) * 2 ? PX.heart : halves === i * 2 + 1 ? PX.half : PX.empty}">`).join(''); }
+  } else if (ui === 'heist'){
+    const st = skinStreak(), n = (data().sessions || []).length;
+    setHTML($('#skinStars'), Array.from({ length: 5 }, (_, i) => `<span class="${i < st ? 'on' : ''}">★</span>`).join(''));
+    setHTML($('#skinCash'), '$' + n.toLocaleString());
+    const hp = $('#skinHp'), ar = $('#skinAr');
+    if (hp) hp.style.width = (S.battery == null ? 100 : S.battery) + '%';
+    if (ar) ar.style.width = Math.max(0, 100 - sinceClean() / (store.cleanEvery || 150) * 100) + '%';
+  }
+}
+function skinCelebrate(s){
+  if (store.ui === 'block'){
+    pxInit();
+    const a = document.createElement('div'); a.className = 'adv';
+    a.innerHTML = `<img alt="" src="${PX.adv}"><div><b>Advancement Made!</b><span>${s && s.hits && s.hits.length ? 'Best hit ' + Math.max(...s.hits).toFixed(1) + 's' : 'Session complete'}</span></div>`;
+    document.body.appendChild(a); requestAnimationFrame(() => requestAnimationFrame(() => a.classList.add('show')));
+    setTimeout(() => { a.classList.remove('show'); setTimeout(() => a.remove(), 600); }, 4200);
+  } else if (store.ui === 'heist'){
+    const p = document.createElement('div'); p.className = 'passed';
+    const best = s && s.hits && s.hits.length ? Math.max(...s.hits) : 0;
+    p.innerHTML = `<h2>Session passed</h2><p>${best ? 'Best hit ' + best.toFixed(1) + 's' : 'Respect +'}</p>`;
+    document.body.appendChild(p); requestAnimationFrame(() => p.classList.add('show'));
+    setTimeout(() => p.remove(), 3800);
+  }
+}
+const LOOKS = [
+  { id:'glass', n:'Liquid Glass', d:'The normal look' },
+  { id:'cockpit', n:'Cockpit', d:'Car dashboard' },
+  { id:'block', n:'Block', d:'Blocky survival game' },
+  { id:'heist', n:'Heist', d:'Open-world crime game' }
+];
+function drawLooks(){
+  const el = $('#uiLooks'); if (!el) return;
+  setHTML(el, LOOKS.map(l => `<button class="look" data-ui="${l.id}" aria-pressed="${(store.ui || 'glass') === l.id}"><span class="pv pv-${l.id}"></span><b>${l.n}</b><small>${l.d}</small></button>`).join(''));
+  [...el.children].forEach(b => b.setAttribute('aria-pressed', b.dataset.ui === (store.ui || 'glass')));
+  $('#looksCard').hidden = !store.eggUi && (store.ui || 'glass') === 'glass';
+  $('#uiNote').hidden = (store.ui || 'glass') === 'glass';
+}
+// easter egg: tap the Settings title 5 times
+const eggTaps = [];
+function eggPop(){
+  if (document.querySelector('.egg')) return;
+  const first = !store.eggUi;
+  store.eggUi = true; save(); drawLooks();
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Easter egg">
+    <svg class="egg-egg" viewBox="0 0 84 100"><defs><linearGradient id="eggG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe9a8"/><stop offset=".5" stop-color="#c264ff"/><stop offset="1" stop-color="#5c169e"/></linearGradient></defs><path d="M42 4C20 4 6 44 6 64a36 36 0 0 0 72 0C78 44 64 4 42 4z" fill="url(#eggG)" stroke="#000" stroke-width="3"/><path d="M12 56l12-8 10 8 10-8 10 8 10-8 8 6" fill="none" stroke="#fff" stroke-width="4" stroke-linejoin="round"/><circle cx="30" cy="78" r="4" fill="#fff"/><circle cx="52" cy="80" r="3" fill="#fff"/><circle cx="44" cy="30" r="3" fill="#fff" opacity=".8"/></svg>
+    <h2>${first ? 'You found a secret!' : 'Secret looks'}</h2>
+    <p>${first ? 'Two hidden looks are now unlocked: Block and Heist. Cockpit lives here now too.' : 'Pick a look below.'}</p>
+    <button class="btn primary" id="eggGo" style="width:100%">Close</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const bits = document.createElement('div'); bits.className = 'egg-bits';
+  const cols = ['#c264ff', '#ffd84a', '#55ff55', '#3fa9ff', '#ff6f91', '#ffffff'];
+  bits.innerHTML = Array.from({ length: 40 }, (_, i) => { const a = Math.random() * Math.PI * 2, d = 140 + Math.random() * 220;
+    return `<i style="background:${cols[i % cols.length]};--dx:${Math.cos(a) * d}px;--dy:${Math.sin(a) * d}px;--r:${Math.random() * 720 - 360}deg;animation-delay:${Math.random() * .15}s"></i>`; }).join('');
+  document.body.appendChild(bits); setTimeout(() => bits.remove(), 1700);
+  const close = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); const c = $('#looksCard'); if (c) c.scrollIntoView({ behavior:'smooth', block:'center' }); };
+  const opened = Date.now(); // ignore leftover taps from spamming the title
+  el.querySelector('#eggGo').addEventListener('click', () => { if (Date.now() - opened > 700) close(); });
+}
+function applyTheme(){
+  const root = document.documentElement;
+  let t = THEMES.find(x => x.id === store.theme) || THEMES[0];
+  if (t.gold && !goldUnlockedNow()) t = THEMES.find(x => x.id === 'orchid');   // locked: fall back
+  const keys = ['bg','surface','surface-2','line','fg','muted','accent','accent-ink','good','warn','bad','tint2','glass-edge','glass-hi'];
+  keys.forEach(k => root.style.removeProperty('--'+k));
+  if (t.v){
+    root.setAttribute('data-user-theme', t.id);
+    Object.entries(Object.assign({}, t.v, t.dark ? SEM_DARK : SEM_LIGHT)).forEach(([k,v]) => root.style.setProperty('--'+k, v));
+    root.style.colorScheme = t.dark ? 'dark' : 'light';
+  } else { root.removeAttribute('data-user-theme'); root.style.removeProperty('color-scheme'); }
+  setTimeout(setStatusBar, 0);
+  root.toggleAttribute('data-gold', !!t.gold);
+  if (store.accent && !t.gold){
+    root.style.setProperty('--accent', store.accent);
+    const [r,g,b] = hexBytes(store.accent); const lum = (0.299*r+0.587*g+0.114*b)/255;
+    root.style.setProperty('--accent-ink', lum > .6 ? '#15121a' : '#ffffff');
+  }
+  if (store.ui === 'cockpit'){
+    root.setAttribute('data-ui','cockpit');
+    Object.entries(COCKPIT).forEach(([k,v]) => root.style.setProperty('--'+k, v));
+    root.style.colorScheme = 'dark';
+    buildCluster();
+  } else if (SKIN_VARS[store.ui]){
+    root.setAttribute('data-ui', store.ui);
+    Object.entries(SKIN_VARS[store.ui]).forEach(([k,v]) => root.style.setProperty('--'+k, v));
+    root.style.colorScheme = 'dark';
+  } else root.removeAttribute('data-ui');
+  try { skinApply(); } catch(e){}
+  const bg = getComputedStyle(root).getPropertyValue('--bg').trim();
+  document.querySelectorAll('meta[name=theme-color]').forEach(m => { if (bg) m.content = bg; });
+  if (bg && bg.startsWith('#') && bg.length >= 7){ const [r,g,b] = hexBytes(bg), dark = (0.299*r+0.587*g+0.114*b)/255 < .5;
+    const sc = dark ? 'dark' : 'light'; document.querySelectorAll('meta[name=color-scheme],meta[name=supported-color-schemes]').forEach(m => m.content = sc);
+    document.documentElement.style.colorScheme = sc; document.body.style.background = bg; }
+}
+// c = Low, Medium, High, Peak profile colors; l = signature lantern color
+const LED_SCHEMES = [
+  { g:'Puffco defaults', n:'Stock', c:['#0050ff','#00ff40','#ff0000','#ffffff'], l:'#ffffff' },
+  { g:'Puffco defaults', n:'Stock soft', c:['#3aa0ff','#39d98a','#ff5a5a','#fff4e0'], l:'#fff4e0' },
+  { g:'Puffco defaults', n:'Onyx', c:['#4a4a55','#8a8a99','#c9c9d6','#ffffff'], l:'#8a8a99' },
+  { g:'Puffco defaults', n:'Pearl', c:['#fff6ea','#ffe9d1','#f9d9e4','#ffffff'], l:'#fff6ea' },
+  { g:'Limited editions', n:'Flourish', c:['#3dff8a','#8cff4a','#ff4fb8','#d12bff'], l:'#ff4fb8' },
+  { g:'Limited editions', n:'Daybreak', c:['#ffd24a','#ff9a1f','#ff5a14','#d4001a'], l:'#ff7a1a' },
+  { g:'Limited editions', n:'Storm', c:['#9fb4cc','#4e6a8f','#2b3fbf','#7de2ff'], l:'#4e6a8f' },
+  { g:'Limited editions', n:'Indiglow', c:['#3a2bff','#5b2bff','#8a3dff','#00e0ff'], l:'#5b2bff' },
+  { g:'Limited editions', n:'Opal', c:['#ffe0f4','#b6f0ff','#c9ffd9','#fff3b0'], l:'#e8f6ff' },
+  { g:'Limited editions', n:'Guardian', c:['#0f7a4a','#1fae6a','#63e0a0','#e8c35a'], l:'#1fae6a' },
+  { g:'Limited editions', n:'Ultraviolet', c:['#3d00a8','#6a00ff','#a100ff','#e05cff'], l:'#6a00ff' },
+  { g:'Limited editions', n:'Desert', c:['#ffe2a8','#f2b85a','#d98a2b','#b85a1f'], l:'#f2b85a' },
+  { g:'Limited editions', n:'Phoenix', c:['#ffcc33','#ff7a00','#ff2a00','#b3001b'], l:'#ff4a00' },
+  { g:'Limited editions', n:'Plasma', c:['#00d4ff','#6a5bff','#d63dff','#ff3da6'], l:'#b04dff' },
+  { g:'Other Puffco colorways', n:'Bloom', c:['#e6d4ff','#c9a8ff','#b48cf2','#f2c4ff'], l:'#c9a8ff' },
+  { g:'Other Puffco colorways', n:'Pine', c:['#0b3d2a','#12603f','#2f8f5f','#9fd9a8'], l:'#12603f' },
+  { g:'Other Puffco colorways', n:'Sapphire', c:['#001a8c','#0033cc','#1f66ff','#8ab4ff'], l:'#0033cc' },
+  { g:'Other Puffco colorways', n:'Zest', c:['#e6ff3d','#c4f000','#ffd000','#ff9a00'], l:'#c4f000' },
+  { g:'Other Puffco colorways', n:'Canyon', c:['#f2a06b','#d9683a','#b8431f','#7a2410'], l:'#d9683a' },
+  { g:'Other Puffco colorways', n:'Slate', c:['#6b7a8c','#8c9bad','#b0bccb','#e3e9f0'], l:'#8c9bad' },
+  { g:'Other Puffco colorways', n:'Mocha', c:['#5a3a26','#8a5a3a','#c08a5e','#f2d3b0'], l:'#c08a5e' },
+  { g:'Extras', n:'Sunset', c:['#ffb347','#ff7a45','#ff3d6e','#b43dff'], l:'#ff7a45' },
+  { g:'Extras', n:'Ocean', c:['#9be8ff','#35c4f0','#1f7cff','#2b3dff'], l:'#35c4f0' },
+  { g:'Extras', n:'Aurora', c:['#6affc8','#27e3a1','#6a7dff','#d14cff'], l:'#27e3a1' },
+  { g:'Extras', n:'Candy', c:['#ff9ad5','#c38bff','#7dd3fc','#fef08a'], l:'#ff9ad5' },
+  { g:'Extras', n:'Toxic', c:['#d9ff3d','#8cff3d','#3dff7a','#3dffd0'], l:'#8cff3d' }
+];
+// basic colors matching the official app's picker
+const QUICK_COLORS = ['#0050ff','#00ff40','#ff0000','#ffffff','#ff7a00','#ffe600','#00e5ff','#a100ff','#ff3da6','#ff00ff'];
+
+/* ================= rendering ================= */
+const fmtT = c => store.unit === 'F' ? Math.round(c2f(c)) : Math.round(c);
+const U = () => '°' + store.unit;
+function setConn(cls, txt){ const b = $('#connBtn'); b.className = 'navbtn pill ' + cls; $('#connTxt').textContent = txt; }
+let view = 'home', raf = 0;
+function setHTML(el, html){ if (el && el._h !== html){ el._h = html; el.innerHTML = html; } }
+
+/* haptics: only on the moments that matter (start/stop/boost, picking a profile or vapor level, saving lights, marking cleaned) */
+const HZ_SEL = '#bBoost, #bCleaned, #ltSave, #homeChips .pchip, .seg.vap button, .seg.hseg button, #nav > button, .bv-art, .soc-follow, .bv-close, .crop [data-c="ok"]';
+function applyHaptics(){
+  if (document.documentElement.dataset.ui === 'cockpit' || IS_APP) return; // the iPhone app taps natively (see the pointerdown listener below)
+  document.querySelectorAll('[data-bv] > .hz').forEach(x => x.remove());
+  document.querySelectorAll(HZ_SEL).forEach(el => {
+    if (el.closest('.soc-list')){ const x = el.querySelector(':scope > .hz'); if (x){ x.remove(); el.classList.remove('hz-host'); } return; } // no haptic on Follow in the friends / search lists
+    let sw = el.querySelector(':scope > .hz');
+    if (!sw){ sw = document.createElement('input'); sw.type = 'checkbox'; sw.setAttribute('switch', ''); sw.className = 'hz'; sw.tabIndex = -1; sw.setAttribute('aria-hidden', 'true'); el.classList.add('hz-host'); el.appendChild(sw); }
+    if (sw.disabled !== !!el.disabled) sw.disabled = !!el.disabled;
+  });
+}
+function render(){ if (raf) return; raf = requestAnimationFrame(() => { raf = 0; draw(); applyHaptics(); applyWall(); }); }
+
+function fmtDur(sec){ const m = Math.max(1, Math.round(sec / 60)); return m < 60 ? m + ' min' : Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm'; }
+const BOLT = '<svg class="bolt" viewBox="0 0 12 16" aria-hidden="true"><path d="M7 0 0 9h4.5L4 16l8-10H7.5z"/></svg>';
+function chargeLine(){
+  if (S.battery >= 100) return `<span class="chg-line">${BOLT}Fully charged</span>`;
+  const eta = S.chgEta != null ? S.chgEta - (Date.now() - (S.chgEtaAt || Date.now())) / 1000 : S.chgGuess;
+  return `<span class="chg-line">${BOLT}${eta && eta > 0 ? 'Full in ' + fmtDur(eta) : 'Charging'}</span>`;
+}
+function draw(){
+  // header
+  $('#devName').firstChild.textContent = S.mode === 'live' ? (S.devName || S.name) : 'Emberline';
+    $('#devSub').textContent = S.mode === 'live' ? (isProxy() ? `Proxy${S.charging ? ' · charging' : ''}` : `${S.edition ? S.edition + ' ' : ''}${['Opal', 'Indiglow', 'Guardian'].includes(S.edition) ? 'Peak' : 'Peak Pro'} · ${CHAMBERS[S.chamber] ?? 'Chamber ?'}${S.charging ? ' · charging' : ''}`) : S.mode === 'demo' ? `Demo mode · ${isProxy() ? 'Proxy' : CHAMBERS[S.chamber] ?? '3D Chamber'}` : 'Not connected';
+  const bt = $('#batt'); bt.style.visibility = 'visible'; bt.hidden = !(S.mode === 'live' && S.battery != null); // hidden takes no space, so the device name gets the room
+  { const sb = $('#shareBtn'); if (sb) sb.hidden = !bt.hidden; } // share sits where the battery goes when nothing's connected
+  bt.querySelector('b').style.width = (S.battery || 0) + '%';
+  bt.querySelector('b').style.background = S.battery < 20 ? 'var(--bad)' : S.battery < 40 ? 'var(--warn)' : 'var(--good)';
+  bt.querySelector('span').textContent = S.battery + '%';
+  if (store.ui === 'block' || store.ui === 'heist') skinTick();
+  if (bt.classList.contains('chg') !== !!S.charging) bt.classList.toggle('chg', !!S.charging);
+  if (!bt.querySelector('.bolt')) bt.querySelector('i').insertAdjacentHTML('beforeend', BOLT);
+  if (view === 'home') drawHome();
+  if (view === 'stats'){
+    // only rebuild the charts when the numbers changed; redrawing on every Bluetooth poll made scrolling stutter
+    const sig = [data().sessions.length, store.account && store.account.syncedAt, sinceClean(), store.unit, S.mode].join('|');
+    if (sig !== drawStats.sig){ drawStats.sig = sig; drawStats(); }
+  }
+  if (view === 'lights' || view === 'prof') drawLightsState();
+}
+
+function drawHome(){
+  const p = S.profiles[S.active], target = p.tempC;
+  setProfileColor(p.color, p.pal);
+  const mode = S.state === 7 ? 'heat' : S.state === 8 ? 'ready' : S.state === 9 ? 'fade' : 'idle';
+  const wrap = $('#gWrap');
+  if (wrap.dataset.mode !== mode){
+    if (wrap.dataset.mode === 'ready'){ wrap.dataset.exit = '1'; clearTimeout(wrap._ex); wrap._ex = setTimeout(() => delete wrap.dataset.exit, 520); }
+    else delete wrap.dataset.exit;
+    wrap.dataset.mode = mode;
+  }
+  if (mode === 'ready'){ const t = $('#lgTime'), l = Math.max(0, Math.round(S.total - liveElapsed())) + 's'; if (t.textContent !== l) t.textContent = l; }
+  $('.ambient').classList.toggle('session', mode !== 'idle');
+  const cl = $('#cluster'); if (cl.dataset.mode !== mode){ cl.dataset.mode = mode; $('#ckStage').dataset.mode = mode; }
+  cl.style.setProperty('--pc', p.color);
+  setHTML($('#ckSeg'), S.profiles.map((q,i) => `<button data-p="${i}" aria-pressed="${i===S.active}" aria-label="${esc(q.name)}"><i style="background:${q.color}"></i>${esc((q.name||'P').slice(0,1).toUpperCase())}${i+1}</button>`).join(''));
+  $('#ckSign').textContent = store.cleanEvery;
+  setHTML($('#ckBatt'), `<svg width="16" height="9" viewBox="0 0 16 9" style="vertical-align:0;margin-right:3px"><rect x=".5" y=".5" width="13" height="8" rx="1" fill="none" stroke="#c7d3ea"/><rect x="14" y="2.5" width="1.5" height="4" fill="#c7d3ea"/><rect x="2" y="2" width="${(10 * (S.battery || 0) / 100).toFixed(1)}" height="5" fill="#c7d3ea"/></svg>${S.battery == null ? '--' : S.battery + '%'}`);
+  const heatingNow = S.state >= 7 && S.state <= 9;
+  if (!heatingNow) S.liveTargetC = null;
+  const shownTarget = heatingNow && S.liveTargetC ? S.liveTargetC : target;
+  $('#gTarget').textContent = `Target ${fmtT(shownTarget)}${U()} · ${p.time}s · ${vaporName(p.vapor)}`;
+  $('#adjustRow').hidden = !heatingNow;
+  { const q = $('#homeQuick'), lb = $('#bLantern'); if (q){ q.hidden = S.mode !== 'live'; if (lb){ lb.setAttribute('aria-pressed', String(!!S.lantern)); lb.disabled = heatingNow; const t = lb.querySelector('span'); const w = S.lantern ? 'Lantern on' : 'Lantern'; if (t.textContent !== w) t.textContent = w; } } } // quick lantern switch
+  try { const tc = $('#torchCard'); if (tc && tc.hidden === torchOk()) drawTorch(); } catch(e){} // the Torch dab card (Rich only)
+  setHTML($('#bBoost'), `<span class="bst"><span>Boost</span><small>+${store.unit === 'F' ? Math.round(p.boostF) : Math.round(p.boostF * 5 / 9)}° +${p.boostT}s</small></span>`);
+  const noCh = S.mode === 'live' && !isProxy() && S.chamber === 0, cb = $('#chamberBanner');
+  cb.hidden = !noCh;
+  if (noCh) cb.innerHTML = '<div class="grow"><b>No chamber detected</b>Seat the chamber firmly to heat up.</div>';
+  const live = S.mode === 'live';
+  const st = $('#gState'); st.textContent = live ? (STATE_NAMES[S.state] || 'Idle') : C.state === 'reconnecting' ? 'Reconnecting' : 'Not connected';
+  st.className = 'state-chip' + (live && (S.state === 7 || S.state === 9) ? ' heat' : live && S.state === 8 ? ' ready' : '');
+  { const b = $('#bStart'), t = live ? 'Start' : 'Connect', n = [...b.childNodes].find(x => x.nodeType === 3); if (n){ if (n.nodeValue !== t) n.nodeValue = t; } else b.prepend(t); }
+  const left = Math.max(0, Math.round(S.total - liveElapsed()));
+  setHTML($('#gTimer'), S.state === 8 ? `${left}s left` : S.state === 7 ? 'Heating up…' : live && S.charging ? chargeLine() : '&nbsp;');
+  { const h = hitText(), g = $('#gHit'); if (g.innerHTML !== h) g.innerHTML = h; }
+  const heating = S.state >= 7 && S.state <= 9, running = S.state === 7 || S.state === 8; // 9 = just finished: you can start the next one right away
+  $('#bStart').disabled = (live && running) || (live && !isProxy() && S.chamber === 0) || (!live && (C.state === 'connecting' || C.state === 'reconnecting'));
+  if (live && heating) holdWake(); else releaseWake(); $('#bStop').disabled = !heating; $('#bBoost').disabled = !running;
+  { const act = $('#bStart').parentElement, run = live && running; if (act.classList.contains('run') !== run){ act.classList.toggle('run', run); act.classList.remove('morph'); void act.offsetWidth; act.classList.add('morph'); } }
+
+  if (!$('#homeChips').classList.contains('gd-on')) setHTML($('#homeChips'), S.profiles.map((q,i) => `<button class="pchip" data-p="${i}" aria-pressed="${i===S.active}" ${live && running && i !== S.active ? 'disabled style="opacity:.4"' : ''}><b><span class="sw" style="background:${q.pal && q.pal.length > 1 ? `conic-gradient(${q.pal.concat(q.pal[0]).join(',')})` : q.color}"></span>${esc(q.name)}</b><span>${fmtT(q.tempC)}°</span></button>`).join(''));
+
+  const n = sinceClean(), every = store.cleanEvery, pct = clamp(n/every, 0, 1);
+  $('#cleanTxt').textContent = `${n} / ${every}`;
+  const bar = $('#cleanBar'); bar.style.width = (pct*100) + '%';
+  bar.style.background = n >= every ? 'var(--bad)' : pct >= .85 ? 'var(--warn)' : 'var(--good)';
+  const lc = data().lastClean;
+  $('#cleanSub').textContent = lc ? `Last cleaned ${ago(lc)}` : 'No clean logged yet';
+  const bn = $('#cleanBanner');
+  if (n >= every){ bn.hidden = false; bn.className = 'banner bad'; bn.innerHTML = `<div class="grow"><b>Clean your Peak</b>${n} dabs since the last clean. Q-tip and ISO the chamber, then tap Mark cleaned.</div>`; }
+  else if (every - n <= 15){ bn.hidden = false; bn.className = 'banner warn'; bn.innerHTML = `<div class="grow"><b>Clean coming up</b>${every - n} dabs until your next clean.</div>`; }
+  else bn.hidden = true;
+
+  const ss = data().sessions, today = startOfDay(Date.now());
+  const todayN = ss.filter(s => s.t >= today).length;
+  const wk = ss.filter(s => s.t >= today - 6*DAY).length;
+  setHTML($('#homeTiles'), tile('Today', todayN, 'sessions') + tile('Lifetime', S.odo ?? '—', 'dabs on device'));
+}
+function tile(l, n, s){ return `<div class="tile"><div class="label">${l}</div><div class="n">${n}</div><div class="s">${s}</div></div>`; }
+function startOfDay(t){ const d = new Date(t); d.setHours(0,0,0,0); return d.getTime(); }
+function ago(t){ const d = Math.floor((Date.now()-t)/DAY); return d <= 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`; }
+
+function drawProfiles(){ drawProfilesInner(); syncRanges(); applyHaptics(); }
+function drawProfilesInner(){
+  { const a = $('#profSub'), b = $('#lightsLbl'); if (a) a.textContent = `Changes save straight to your ${devWord()}`; if (b) b.textContent = `${devWord()} lights`; }
+  $('#profList').innerHTML = (S.mode === 'live' ? '' : '<div class="banner"><div class="grow"><b>Not connected</b>These are placeholder profiles. Connect to load and edit the ones on your ' + devWord() + '.</div></div>') + S.profiles.map((p,i) => `
+    <div class="card pcard">
+      <div class="pcard-head">
+        <button class="pdot" data-golights="${i}" style="${p.mood ? swatchStyle(p.mood) : 'background:' + p.color}" aria-label="Change ${esc(p.name)} lights"><span class="pdot-pen" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></span></button>
+        <input type="text" id="pn${i}" data-i="${i}" maxlength="16" value="${esc(p.name)}" aria-label="Profile ${i+1} name">
+        <span class="label">P${i+1}</span>
+      </div>
+
+      <div class="field"><div class="row between"><span class="muted">Temperature</span><span class="val" id="ptv${i}">${fmtT(p.tempC)}${U()}</span></div>
+        <input type="range" id="pt${i}" data-i="${i}" min="400" max="644" step="1" value="${Math.round(c2f(p.tempC))}"></div>
+      <div class="field"><div class="row between"><span class="muted">Duration</span><span class="val" id="pdv${i}">${p.time}s</span></div>
+        <input type="range" id="pd${i}" data-i="${i}" min="15" max="120" step="5" value="${p.time}"></div>
+      <div class="field"><div class="row between"><span class="muted">Vapor</span>${isProxy() ? '' : is3DXL() ? '<span class="xl-tag on">3DXL</span>' : '<span class="xl-tag">Extreme needs 3DXL</span>'}</div>
+        <div class="seg vap" data-vi="${i}">${VAPOR.filter(o => !(o.xl && isProxy())).map(o => `<button data-vap="${o.v}" aria-pressed="${Math.abs(p.vapor - o.v) < .01}" ${o.xl && !is3DXL() ? 'disabled' : ''}>${o.n}</button>`).join('')}</div></div>
+      <div class="boostbox">
+        <div class="row between"><span class="bb-title">Boost</span><span class="muted" style="font-size:13px" id="pbsum${i}">${fmtDelta(p.boostF)} · +${p.boostT}s per tap</span></div>
+        <div class="field"><div class="row between"><span class="muted">Adds temperature</span><span class="val" id="pbfv${i}">${fmtDelta(p.boostF)}</span></div>
+          <input type="range" id="pbf${i}" data-i="${i}" min="0" max="36" step="1" value="${p.boostF}"></div>
+        <div class="field"><div class="row between"><span class="muted">Adds time</span><span class="val" id="pbtv${i}">+${p.boostT}s</span></div>
+          <input type="range" id="pbt${i}" data-i="${i}" min="0" max="60" step="5" value="${p.boostT}"></div>
+      </div>
+      <div class="row ph-row" style="margin:2px 0 10px"><span class="grow" style="min-width:0"><span class="muted">Preheat light</span><small class="ph-note">${phLabel(i)}</small></span>${phVal(i) ? `<button class="btn small ghost" data-phoff="${i}">Off</button>` : ''}<button class="btn small" data-phmood="${i}">Moods</button><span class="colorbtn" style="${phSwatch(i)}"><input type="color" data-ph="${i}" value="${phColor(i) || '#ff3b30'}" aria-label="Preheat color for ${esc(p.name)}"></span></div>
+      <div class="row between"><span class="muted" style="font-size:13px">${i===S.active ? 'Active profile' : ''}</span><button class="btn small primary" data-save="${i}">Save to ${devWord()}</button></div>
+    </div>`).join('');
+}
+
+function drawLights(){
+  const bp = brightProf(); brEdit = (brightFor(bp) || store.bright).slice();
+  if ($('#brightFor')) $('#brightFor').textContent = (S.profiles[bp] || {}).name || 'P' + (bp + 1);
+  $('#brightList').innerHTML = (isProxy() ? ['Lights'] : ['Base','Middle','Glass','Logo']).map((n,i) => `
+    <div class="field"><div class="row between"><span class="muted">${n}</span><span class="val" id="bv${i}">${Math.round(brEdit[i]/2.55)}%</span></div>
+    <input type="range" id="br${i}" data-i="${i}" min="0" max="255" value="${brEdit[i]}"></div>`).join('');
+  const cur = JSON.stringify(store.ledScheme);
+  const groups = [...new Set(LED_SCHEMES.map(s => s.g))];
+  if ($('#ledSchemes')) $('#ledSchemes').innerHTML = groups.map(g => `<div class="sgroup"><div class="label">${g}</div><div class="swatches">` +
+    LED_SCHEMES.map((s,i) => s.g !== g ? '' : `<button class="scheme" data-led="${i}" aria-pressed="${JSON.stringify(s.c)===cur}"><span class="bars">${s.c.map(c=>`<i style="background:${c}"></i>`).join('')}</span><b>${s.n}</b></button>`).join('') + '</div></div>').join('');
+  $('#lanternColor').value = store.lantern; drawLightsState();
+  drawLightsState();
+}
+function drawLightsState(){ $('#tLantern').checked = S.lantern; $('#tStealth').checked = S.stealth; const n = $('#lanternMoodName'); if (n) n.textContent = store.lanternMood ? store.lanternMood.name || 'Mood' : 'None, using the color'; const sw = $('#lanternSw'); if (sw) sw.style.cssText = store.lanternMood ? swatchStyle(store.lanternMood) : 'background:' + store.lantern; }
+
+function drawCelDev(){
+  const el = $('#celDev'); if (!el) return;
+  const dev = lbStore().dev || (LB.me && LB.me.dev);
+  if (!dev && !isRich()){ el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = `<span class="label">Dev · accounts</span><div class="tiles" id="devCounts" style="margin:0"><p class="muted" style="margin:0;font-size:13px">Counting…</p></div>
+    <button class="btn small" data-devcount style="justify-self:start">Refresh</button>
+    ${dev ? `<span class="label">Dev · preview animations</span>
+    <p class="muted" style="margin:0;font-size:13px">Only you see this. Nothing here changes your points.</p>
+    <div class="row"><button class="btn small" data-cel="pop">Session pop</button>${RANK_TIERS.slice(1).map((t, i) => `<button class="btn small" data-cel="${i + 1}">${RANK_TIERS[i].n} → ${t.n}</button>`).join('')}<button class="btn small" data-cel="aurum">Aurum unlock</button></div>` : ''}`;
+  devCounts();
+}
+// how many accounts Emberline has (Rich and devs): all time, this month, and Premium right now
+let devCountAt = 0;
+async function devCounts(force){
+  const el = $('#devCounts'); if (!el || (!force && Date.now() - devCountAt < 60000 && el.dataset.done)) return;
+  devCountAt = Date.now();
+  const count = async q => { try { const r = await fetch(SB_URL + '/rest/v1/players?select=id' + q, { method:'HEAD', headers:{ apikey:SB_KEY, Authorization:'Bearer ' + SB_KEY, Prefer:'count=exact' } }); const n = +((r.headers.get('content-range') || '').split('/')[1]); return r.ok && Number.isFinite(n) ? n : null; } catch(e){ return null; } };
+  const [all, month, banned] = await Promise.all([count(''), count('&month=eq.' + lbMonth()), count('&banned=is.true')]);
+  let prem = null; try { const rows = await sbRows('/rest/v1/players?select=awards&awards=not.is.null&limit=5000'); prem = rows.filter(r => premAward(r.awards)).length; } catch(e){}
+  const v = x => x == null ? '—' : x;
+  el.innerHTML = tile('Accounts', v(all), 'all time') + tile('Active', v(month), 'this month') + tile('Premium', v(prem), 'right now') + tile('Banned', v(banned), 'accounts');
+  el.dataset.done = '1';
+}
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('[data-devcount]')) devCounts(true); });
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-cel]'); if (!b) return;
+  const k = b.dataset.cel;
+  if (k === 'pop'){ show('home'); setTimeout(() => sessionPop({ hits:[3.2, 8.6, 5.1], run:52 }, 11), 450); return; }
+  if (k === 'aurum'){ celebrate({ kind:'aurum', tier:4 }); return; }
+  const t = +k; celebrate({ kind: t >= RANK_TIERS.findIndex(x => x.n === 'Champion') ? 'champion' : 'rank', tier: t, from: t - 1 });
+});
+function drawSettings(){
+  try { drawCelDev(); } catch(e){}
+  $('#themeList').innerHTML = THEMES.map(t => {
+    if (t.gold){
+      const n = Math.max(0, Math.min(blinkerCount(), GOLD_GOAL)), open = goldUnlockedNow(), pct = n / GOLD_GOAL;
+      return `<button class="scheme gold-tile${open ? ' open' : ''}" data-theme-id="gold" aria-pressed="${store.theme === 'gold'}">
+        <span class="gt-face"><svg class="gt-ring" viewBox="0 0 44 44"><circle cx="22" cy="22" r="19" class="gt-trk"/><circle cx="22" cy="22" r="19" class="gt-prog" style="stroke-dasharray:${(119.4 * pct).toFixed(1)} 200"/></svg>
+          ${open ? '<svg class="gt-crown" viewBox="0 0 24 24"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/></svg>' : '<svg class="gt-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>'}</span>
+        <b>Aurum</b><small>${open ? 'Exclusive' : `${n} / ${GOLD_GOAL} blinkers`}</small></button>`;
+    }
+    const v = t.v || THEMES[0].v, v2 = t.v || THEMES[4].v;
+    const bars = t.v ? [v.bg, v.surface, v.accent, v.fg] : [THEMES[0].v.bg, THEMES[0].v.accent, v2.bg, v2.accent];
+    return `<button class="scheme" data-theme-id="${t.id}" aria-pressed="${store.theme===t.id}"><span class="bars">${bars.map(c=>`<i style="background:${c}"></i>`).join('')}</span><b>${t.n}</b></button>`;
+  }).join('');
+  const acc = store.accent || getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  $('#accColor').value = /^#[0-9a-f]{6}$/i.test(acc) ? acc : '#ff9d4d'; $('#accSw').style.background = 'var(--accent)';
+  document.querySelectorAll('#unitSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.u === store.unit));
+  $('#cleanEvery').value = store.cleanEvery;
+  drawLooks();
+  $('#sinceEdit').value = sinceClean();
+  $('#tAll').checked = store.showAll;
+  $('#tAuto').checked = store.autoConnect !== false;
+  $('#tSelFlash').checked = store.selFlash !== false;
+  $('#tWarn').checked = store.warnOn !== false;
+  $('#tBigHit').checked = store.bigHit !== false; $('#bigHitSecs').value = store.bigHitSecs || 8; $('#bigHitRow').style.opacity = store.bigHit === false ? .45 : 1;
+  $('#warnSecs').value = store.warnSecs || 15; $('#warnColor').value = store.warnColor || '#ffffff';
+  $('#warnRow').style.opacity = store.warnOn === false ? .45 : 1;
+  const fsOk = FS.supported();
+  $('#tFull').checked = fsOk && FS.active(); $('#tFull').disabled = !fsOk;
+  $('#fsNote').textContent = fsOk ? (IS_PATH ? 'Hides Path browser’s bars' : 'Hides the browser bars') : 'This browser doesn’t let pages go full screen. Path browser does.';
+  $('#dataInfo').textContent = `${store.sessions.length} sessions and ${store.cleanLog.length} cleans saved on this phone. History lives in this browser only.`;
+}
+
+/* ---------- charts ---------- */
+function niceMax(v){ if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); for (const m of [1,2,2.5,5,10]) if (m*p >= v) return m*p; return 10*p; }
+function barSVG(vals, labels, {hiLast=true, every=1, h=150} = {}){
+  const W=320, H=h, L=26, R=6, T=16, B=20, iw=W-L-R, ih=H-T-B;
+  const max = niceMax(Math.max(...vals, 1)); const bw = iw/vals.length;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  [0, .5, 1].forEach(f => { const y = T + ih*(1-f); s += `<line class="grid" x1="${L}" x2="${W-R}" y1="${y}" y2="${y}"/><text x="${L-5}" y="${y+3}" text-anchor="end">${+(max*f).toFixed(1)}</text>`; });
+  vals.forEach((v,i) => {
+    const bh = ih * v / max, x = L + i*bw + bw*.16, y = T + ih - bh, hi = hiLast && i === vals.length-1;
+    s += `<rect class="bar${hi?' hi':''}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw*.68).toFixed(1)}" height="${Math.max(bh, v>0?2:0).toFixed(1)}" rx="3"/>`;
+    if (hi && v > 0) s += `<text class="vlabel" x="${(x+bw*.34).toFixed(1)}" y="${(y-4).toFixed(1)}" text-anchor="middle">${v}</text>`;
+    if (i % every === 0) s += `<text x="${(L + i*bw + bw/2).toFixed(1)}" y="${H-5}" text-anchor="middle">${labels[i]}</text>`;
+  });
+  return s + '</svg>';
+}
+function lineSVG(vals, unit){
+  if (vals.length < 2) return '<p class="muted" style="margin:0">Log a few sessions to see a trend.</p>';
+  const W=320, H=150, L=34, R=10, T=18, B=14, iw=W-L-R, ih=H-T-B;
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = Math.max(5, (hi-lo)*.15);
+  lo = Math.floor((lo-pad)/10)*10; hi = Math.ceil((hi+pad)/10)*10;
+  const X = i => L + iw * i/(vals.length-1), Y = v => T + ih*(1-(v-lo)/(hi-lo));
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
+  [lo, (lo+hi)/2, hi].forEach(v => s += `<line class="grid" x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${L-5}" y="${Y(v)+3}" text-anchor="end">${Math.round(v)}°</text>`);
+  const pts = vals.map((v,i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`);
+  s += `<path class="area" d="M${X(0)},${T+ih} L${pts.join(' L')} L${X(vals.length-1)},${T+ih} Z"/>`;
+  s += `<path class="ln" d="M${pts.join(' L')}"/>`;
+  const lx = X(vals.length-1), ly = Y(vals[vals.length-1]);
+  s += `<circle class="pt" cx="${lx}" cy="${ly}" r="4.5"/><text class="vlabel" x="${lx-2}" y="${ly-9}" text-anchor="end">${vals[vals.length-1]}${unit}</text>`;
+  return s + '</svg>';
+}
+
+/* ===== monthly rank badges: a symbol per month, colored by tier, year on the ribbon; Champion shines ===== */
+const RB_TIERS = [
+  { n:'Ember',    c:['#ffb08f','#ff6a3d','#a8321a'] },
+  { n:'Flame',    c:['#ffd08a','#ff9f0a','#b35f00'] },
+  { n:'Blaze',    c:['#fff2a0','#ffd60a','#a88a00'] },
+  { n:'Inferno',  c:['#ff9db3','#ff2d55','#9a0f2e'] },
+  { n:'Champion', c:['#fff4c9','#e9bb4f','#8a6115'], champ:true },
+  { n:'Legend',   c:['#e8f8ff','#b46bff','#2a0a66'], champ:true, legend:true }
+];
+const RB_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+let rbUid = 0;
+const rbTierIdx = n => Math.max(0, RB_TIERS.findIndex(t => t.n === n));
+const RB_ICON = [
+  /* Jan snowflake */ g => `<g stroke="${g.s}" stroke-width="4" stroke-linecap="round" fill="none">${[0,60,120].map(a=>`<g transform="rotate(${a} 30 30)"><path d="M30 6 V54"/><path d="M23 12 L30 19 L37 12 M23 48 L30 41 L37 48"/></g>`).join('')}</g><circle cx="30" cy="30" r="5" fill="${g.f}"/>`,
+  /* Feb heart */ g => `<path d="M30 52 C10 38 4 28 6 18 C8 9 20 6 30 16 C40 6 52 9 54 18 C56 28 50 38 30 52Z" fill="${g.f}"/><path d="M16 17 C18 13 22 12 25 14" stroke="rgba(255,255,255,.6)" stroke-width="3" fill="none" stroke-linecap="round"/>`,
+  /* Mar clover */ g => `<g fill="${g.f}"><circle cx="30" cy="17" r="11"/><circle cx="18" cy="31" r="11"/><circle cx="42" cy="31" r="11"/></g><path d="M30 32 Q32 46 40 54" stroke="${g.s}" stroke-width="4" fill="none" stroke-linecap="round"/>`,
+  /* Apr raindrop */ g => `<path d="M30 4 C30 4 48 26 48 38 A18 18 0 0 1 12 38 C12 26 30 4 30 4Z" fill="${g.f}"/><path d="M21 38 A9 9 0 0 0 28 47" stroke="rgba(255,255,255,.6)" stroke-width="3" fill="none" stroke-linecap="round"/>`,
+  /* May flower */ g => `<g fill="${g.f}">${[0,72,144,216,288].map(a=>`<ellipse cx="30" cy="15" rx="8" ry="12" transform="rotate(${a} 30 30)"/>`).join('')}</g><circle cx="30" cy="30" r="8" fill="${g.s2}"/>`,
+  /* Jun sun */ g => `<g stroke="${g.s}" stroke-width="4" stroke-linecap="round">${[0,45,90,135,180,225,270,315].map(a=>`<path d="M30 3 V10" transform="rotate(${a} 30 30)"/>`).join('')}</g><circle cx="30" cy="30" r="14" fill="${g.f}"/>`,
+  /* Jul firework */ g => `<g stroke="${g.s}" stroke-width="3.5" stroke-linecap="round">${[0,30,60,90,120,150,180,210,240,270,300,330].map((a,i)=>`<path d="M30 ${i%2?12:6} V${i%2?19:15}" transform="rotate(${a} 30 30)"/>`).join('')}</g><path d="M30 20 L33 27 L40 30 L33 33 L30 40 L27 33 L20 30 L27 27Z" fill="${g.f}"/>`,
+  /* Aug wave */ g => `<path d="M4 40 C14 40 14 22 26 22 C36 22 38 32 32 34 C28 35 27 30 30 29 C40 26 46 40 56 40 V54 H4Z" fill="${g.f}"/><path d="M4 48 C12 44 18 50 26 46 C34 42 40 50 56 46" stroke="rgba(255,255,255,.45)" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
+  /* Sep leaf */ g => `<path d="M30 4 L35 16 L46 11 L43 23 L55 24 L46 33 L52 40 L38 39 L36 48 L30 42 L24 48 L22 39 L8 40 L14 33 L5 24 L17 23 L14 11 L25 16Z" fill="${g.f}"/><path d="M30 20 V58" stroke="${g.s}" stroke-width="3.5" stroke-linecap="round"/>`,
+  /* Oct pumpkin */ g => `<path d="M30 14 C31 9 33 6 37 4" stroke="#5b8c2a" stroke-width="4.5" fill="none" stroke-linecap="round"/><path d="M33 9 C40 6 46 9 46 13 C41 14 36 13 33 9Z" fill="#6fae34"/>
+     <g fill="${g.f}"><ellipse cx="17" cy="35" rx="13" ry="17"/><ellipse cx="43" cy="35" rx="13" ry="17"/><ellipse cx="30" cy="35" rx="13" ry="19"/></g>
+     <path d="M23 20 C20 28 20 42 23 52 M37 20 C40 28 40 42 37 52" stroke="${g.s2}" stroke-width="2.2" fill="none" opacity=".55"/>
+     <path d="M12 26 C10 30 10 36 12 40" stroke="rgba(255,255,255,.55)" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
+  /* Nov acorn */ g => `<path d="M30 6 V12" stroke="${g.s2}" stroke-width="4" stroke-linecap="round"/><path d="M12 24 C12 14 48 14 48 24 C48 28 12 28 12 24Z" fill="${g.s2}"/><path d="M15 27 H45 C45 42 38 52 30 56 C22 52 15 42 15 27Z" fill="${g.f}"/><path d="M21 32 C21 38 23 43 26 47" stroke="rgba(255,255,255,.55)" stroke-width="2.5" fill="none" stroke-linecap="round"/>`,
+  /* Dec tree */ g => `<path d="M30 6 L33 11 L38 12 L34 15 L35 20 L30 17 L25 20 L26 15 L22 12 L27 11Z" fill="#fff6c8"/><g fill="${g.f}"><path d="M30 16 L44 32 H16Z"/><path d="M30 24 L48 44 H12Z"/></g><rect x="26" y="44" width="8" height="10" rx="2" fill="${g.s2}"/>`
+];
+
+function rankBadge(m, t, size, year){
+  const T = RB_TIERS[t], id = 'rb' + (rbUid++), C = T.c; const YEAR = year || new Date().getFullYear();
+  const g = { f:`url(#${id}g)`, s:C[1], s2:C[2] };
+  const champ = !!T.champ;
+  return `<svg viewBox="-6 -8 152 178" role="img" aria-label="${RB_MONTHS[m]} ${YEAR}, ${T.n} badge"${size ? ` width="${size}"` : ''}>
+    <defs>
+      <linearGradient id="${id}g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${C[0]}"/><stop offset=".5" stop-color="${C[1]}"/><stop offset="1" stop-color="${C[2]}"/></linearGradient>
+      <linearGradient id="${id}r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${C[0]}"/><stop offset=".45" stop-color="${C[1]}"/><stop offset="1" stop-color="${C[2]}"/></linearGradient>
+      <radialGradient id="${id}bg" cx=".5" cy=".35" r=".7"><stop offset="0" stop-color="${C[1]}" stop-opacity=".28"/><stop offset="1" stop-color="#120e19"/></radialGradient>
+      <clipPath id="${id}c"><circle cx="70" cy="64" r="52"/></clipPath>
+      <linearGradient id="${id}sh" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".75"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    </defs>
+    ${champ ? `<circle class="rb-glow" cx="70" cy="64" r="66" fill="${C[1]}" opacity=".28"/>` : ''}
+    ${T.legend ? `<circle cx="70" cy="64" r="64" fill="none" stroke="#7af0ff" stroke-width="2" stroke-dasharray="4 6" opacity=".9"/>` : ''}
+    <!-- medallion -->
+    <circle cx="70" cy="64" r="60" fill="url(#${id}r)"/>
+    <circle cx="70" cy="64" r="55" fill="#120e19"/>
+    <circle cx="70" cy="64" r="52" fill="url(#${id}bg)" stroke="${C[1]}" stroke-opacity=".5" stroke-width="1.5"/>
+    ${champ ? [0,45,90,135,180,225,270,315].map(a=>`<circle cx="70" cy="8" r="2.4" fill="${C[0]}" transform="rotate(${a} 70 64)"/>`).join('') : ''}
+    <g transform="translate(29 23) scale(1.37)">${RB_ICON[m](g)}</g>
+    ${champ ? `<g clip-path="url(#${id}c)"><rect class="rb-shine" x="40" y="0" width="34" height="130" fill="url(#${id}sh)"/></g>
+      <path class="rb-spark" style="animation-delay:.2s" d="M112 18 l2 6 l6 2 l-6 2 l-2 6 l-2 -6 l-6 -2 l6 -2z" fill="#fff8dc"/>
+      <path class="rb-spark" style="animation-delay:1.1s" d="M24 98 l1.6 4.4 l4.4 1.6 l-4.4 1.6 l-1.6 4.4 l-1.6 -4.4 l-4.4 -1.6 l4.4 -1.6z" fill="#fff8dc"/>
+      <path class="rb-spark" style="animation-delay:1.7s" d="M30 26 l1.3 3.7 l3.7 1.3 l-3.7 1.3 l-1.3 3.7 l-1.3 -3.7 l-3.7 -1.3 l3.7 -1.3z" fill="#fff8dc"/>` : ''}
+    <!-- ribbon with the year -->
+    <path d="M22 122 H118 L110 136 L118 150 H22 L30 136Z" fill="url(#${id}r)"/>
+    <path d="M22 122 H118 L110 136 L118 150 H22 L30 136Z" fill="none" stroke="rgba(0,0,0,.25)"/>
+    <text x="70" y="141" text-anchor="middle" font-family="ui-rounded,'SF Pro Rounded',system-ui,sans-serif" font-weight="800" font-size="15" letter-spacing="2" fill="${t === 2 || (champ && !T.legend) ? '#2a1c05' : '#fff'}">${YEAR}</text>
+    ${T.legend ? `<path d="M48 4 L55 -6 L62 2 L70 -10 L78 2 L85 -6 L92 4 L88 12 H52Z" fill="url(#${id}r)" stroke="#2a0a66" stroke-width="1.5"/><circle cx="70" cy="-6" r="2.4" fill="#7af0ff"/>` : ''}
+    ${champ ? `<g clip-path="url(#${id}c)"></g>` : ''}
+  </svg>`;
+}
+
+// dev badge: only shows for players marked dev in the Supabase table (the app can't set it)
+function devBadge(size){
+  const id = 'dv' + (rbUid++);
+  return `<svg class="dev-badge" viewBox="0 0 64 64" width="${size}" height="${size}" role="img" aria-label="Emberline developer">
+    <defs><linearGradient id="${id}g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff9d4d"/><stop offset=".5" stop-color="#d23cff"/><stop offset="1" stop-color="#6b4dff"/></linearGradient>
+      <clipPath id="${id}c"><path d="M32 3 L57 12 V31 C57 46 46 56 32 61 C18 56 7 46 7 31 V12Z"/></clipPath>
+      <linearGradient id="${id}s" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".6"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
+    <path d="M32 3 L57 12 V31 C57 46 46 56 32 61 C18 56 7 46 7 31 V12Z" fill="url(#${id}g)"/>
+    <path d="M32 8 L52 15 V31 C52 43 43 51 32 55 C21 51 12 43 12 31 V15Z" fill="#140f1e"/>
+    <path d="M24 22 L16 30 L24 38 M40 22 L48 30 L40 38 M35 18 L29 42" stroke="url(#${id}g)" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="32" y="51" text-anchor="middle" font-family="ui-rounded,'SF Pro Rounded',system-ui,sans-serif" font-weight="800" font-size="8" letter-spacing="1.5" fill="#fff">DEV</text>
+    <g clip-path="url(#${id}c)"><rect class="rb-shine" x="0" y="-4" width="16" height="72" fill="url(#${id}s)"/></g>
+  </svg>`;
+}
+// past months you've played, newest first, with the tier you finished on
+function badgeHistory(){
+  const ss = rankSessions(); if (!ss.length) return [];
+  const now = new Date(), out = [], seen = new Set();
+  for (const s of ss){ const d = new Date(s.t); const k = d.getFullYear() * 12 + d.getMonth(); if (k >= now.getFullYear() * 12 + now.getMonth()) continue; seen.add(k); }
+  [...seen].sort((a, b) => b - a).slice(0, 24).forEach(k => { const y = Math.floor(k / 12), m = k % 12; const r = rankFor(ss, new Date(y, m, 15)); out.push({ y, m, t: rbTierIdx(r.tier.n), rp: r.rp }); });
+  return out;
+}
+
+/* ===== celebrations: rank ups, Champion, Aurum unlock, and the end-of-session pop in the gauge ===== */
+const CEL_REDUCE = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let celQueue = Promise.resolve();
+function celebrate(o){ celQueue = celQueue.then(() => celShow(o)).catch(() => {}); return celQueue; }
+function celShow({ kind, tier, from }){
+  return new Promise(done => {
+    const champ = kind === 'champion', aurum = kind === 'aurum';
+    const T = RANK_TIERS[tier] || RANK_TIERS[0], cc = aurum ? '#e9bb4f' : T.c;
+    const el = document.createElement('div');
+    el.className = 'cel' + (champ || aurum ? ' champ' : '') + (!aurum && T.n === 'Legend' ? ' legend' : '');
+    el.style.setProperty('--cc', cc);
+    const sparks = Array.from({ length: champ || aurum ? 26 : 16 }, (_, i) => { const a = (i / (champ || aurum ? 26 : 16)) * 360 + Math.random() * 12, d = 110 + Math.random() * 90;
+      return `<i class="cel-spark" style="--a:${a}deg;--d:${d}px;--t:${(0.6 + Math.random() * .5).toFixed(2)}s"></i>`; }).join('');
+    const flakes = champ || aurum ? `<div class="cel-flakes">${Array.from({ length: 34 }, () => `<i style="--x:${(Math.random() * 100).toFixed(0)}%;--dl:${(Math.random() * 1.8).toFixed(2)}s;--s:${(0.6 + Math.random() * .8).toFixed(2)};--r:${(Math.random() * 360).toFixed(0)}deg"></i>`).join('')}</div>` : '';
+    const art = aurum
+      ? `<div class="cel-crest"><svg viewBox="0 0 24 24"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/></svg></div>`
+      : `<div class="cel-badge">${rankBadge(new Date().getMonth(), tier, undefined)}</div>`;
+    const kicker = aurum ? `${typeof GOLD_GOAL !== 'undefined' ? GOLD_GOAL : 100} blinkers` : champ ? (tier === RANK_TIERS.length - 1 ? 'Top tier reached' : 'Elite tier') : 'Rank up';
+    const title = aurum ? 'Aurum' : T.n;
+    const sub = aurum ? 'Exclusive gold theme unlocked' : from != null ? `${RANK_TIERS[from].n} → ${T.n} · ${RB_MONTHS[new Date().getMonth()]}` : RB_MONTHS[new Date().getMonth()];
+    el.innerHTML = `${champ || aurum ? '<div class="cel-rays"></div>' : ''}${flakes}
+      <div class="cel-stage">
+        <div class="cel-fx"><span class="cel-ring"></span><span class="cel-ring r2"></span><span class="cel-ring r3"></span>${sparks}</div>
+        ${art}
+        <span class="cel-kicker">${kicker}</span>
+        <h2 class="cel-title">${title}</h2>
+        <span class="cel-sub">${sub}</span>
+        <span class="cel-tap">Tap to continue</span>
+      </div>`;
+    document.body.appendChild(el);
+    buzz(champ || aurum ? [80, 60, 80, 60, 160] : [60, 60, 120]);
+    if (S.mode === 'live' && !(S.state >= 7 && S.state <= 9)) flashPeak(cc, champ || aurum ? 3 : 2);
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+    let closed = false;
+    const close = () => { if (closed) return; closed = true; el.classList.remove('on'); el.classList.add('off'); setTimeout(() => { el.remove(); done(); }, 450); };
+    setTimeout(() => el.addEventListener('click', close), 600);
+    setTimeout(close, champ || aurum ? 7000 : 4500);
+  });
+}
+// end of a session: show what it earned inside the gauge ring
+// rank tax: big red "-3 RP" drops onto the gauge when preheat finishes (charged if the session runs 30s+)
+function champBlink(){ try { return !rankLock() && /^(Champion|Legend)$/.test(myRank().tier.n) ? CHAMP_BLINK : undefined; } catch(e){ return undefined; } }
+const bigHitAt = () => Math.max(+store.bigHitSecs || 8, (cur && cur.blk) || 0); // the celebration waits for a blinker that counts
+function taxPop(force){
+  let tier = force; if (!tier){ try { if (rankLock()) return 0; tier = myRank().tier.n; } catch(e){ return 0; } }
+  const amt = RANK_TAX[tier]; if (!amt) return 0;
+  const wrap = $('#gWrap'); if (!wrap) return amt;
+  const el = document.createElement('div'); el.className = 'tax-pop';
+  el.innerHTML = `<b>−${amt}<small> RP</small></b><span>Rank tax · ${tier}</span>`;
+  wrap.appendChild(el); buzz([40, 30, 40]);
+  setTimeout(() => el.remove(), 2600);
+  return amt;
+}
+function sessionPop(s, gained){
+  const wrap = $('#gWrap'); if (!wrap) return;
+  let el = $('#sessPop');
+  if (!el){ el = document.createElement('div'); el.id = 'sessPop'; el.className = 'sess-pop'; wrap.appendChild(el); }
+  const hits = s.hits || [], best = hits.length ? Math.max(...hits) : 0, bl = hits.filter(h => h >= blinkOf(s)).length;
+  const secs = s.run != null ? s.run : s.dur;
+  el.innerHTML = `<span class="sp-k">Session done</span>
+    <b class="sp-rp">${gained > 0 ? '+' : ''}${gained}<small> RP</small></b>
+    <div class="sp-rows">
+      ${hits.length ? `<span><b>${hits.length}</b> hit${hits.length === 1 ? '' : 's'}</span><span>best <b>${best.toFixed(1)}s</b></span>` : '<span>No hits timed</span>'}
+      ${bl ? `<span class="sp-bl"><b>${bl}</b> blinker${bl === 1 ? '' : 's'}</span>` : ''}
+      ${secs ? `<span><b>${secs}s</b> session</span>` : ''}
+    </div>${gained <= 0 && notCounted(s) ? `<span class="sp-why" style="display:block;margin-top:6px;font-size:12px;opacity:.85">${notCounted(s)}</span>` : ''}`;
+  wrap.classList.remove('sp-on'); void wrap.offsetWidth; wrap.classList.add('sp-on');
+  clearTimeout(sessionPop._t); sessionPop._t = setTimeout(() => wrap.classList.remove('sp-on'), 7000);
+  el.onclick = () => { clearTimeout(sessionPop._t); wrap.classList.remove('sp-on'); };
+}
+function afterSessionLogged(s, before){
+  try {
+    const after = myRank();
+    const gained = after.rp - before.rp;
+    if (view === 'home') sessionPop(s, gained); else toast(`Session done · ${gained > 0 ? '+' : ''}${gained} RP${gained <= 0 && notCounted(s) ? '. ' + notCounted(s) : ''}`);
+    const bi = RANK_TIERS.findIndex(t => t.n === before.tier.n), ai = RANK_TIERS.findIndex(t => t.n === after.tier.n);
+    if (ai > bi) setTimeout(() => celebrate({ kind: ai >= RANK_TIERS.findIndex(x => x.n === 'Champion') ? 'champion' : 'rank', tier: ai, from: bi }), view === 'home' ? 2600 : 600);
+    if (view === 'stats') drawRank();
+  } catch(e){}
+}
+
+/* ===== Rank points (RP): monthly, resets on the 1st =====
+   session +1 (first dab of the day +3 instead), blinker (8s+ hit) +5, Extreme vapor +1 on each of those,
+   a dab past 120 since your last clean costs -1 instead of earning its session point */
+const RANK_TIERS = [ { n:'Ember', min:0, c:'#ff6a3d' }, { n:'Flame', min:50, c:'#ff9f0a' }, { n:'Blaze', min:150, c:'#ffd60a' }, { n:'Inferno', min:300, c:'#ff2d55' }, { n:'Champion', min:500, c:'#e9bb4f' }, { n:'Legend', min:5000, c:'#b46bff' } ];
+const RANK_DIRTY = 120, RANK_DAY_SESS = Infinity; // every session after the first earns its point
+const RANK_TAX = { Blaze:3, Inferno:5, Champion:8, Legend:10 }, RANK_TAX_SECS = 30; // rank tax: high tiers pay RP for every session that runs 30s+
+const CHAMP_BLINK = 11; // Champions and Legends need an 11s hit for a blinker to count (everyone else 8s)
+const blinkOf = s => (s && s.blk) || 8; // the blinker length a session was played under
+const RANK_MIN_F = 450, RANK_TEMP_FROM = Date.parse('2026-10-07T21:00:00Z'); // from this update on, a session only counts if its profile was set to 450°F or hotter
+const lowTemp = s => { const f = typeof s.setF === 'number' ? s.setF : s.target; return s.t >= RANK_TEMP_FROM && typeof f === 'number' && f < RANK_MIN_F; }; // the device's real target wins over the profile we think was picked
+// why a session earned no RP (shown under it, so a 0 doesn't look like a bug)
+function notCounted(s){ const lk = rankLock(); return lk && s.t >= lk - RANK_LOCK_MS ? 'Not counted: locked out of ranked' : lowTemp(s) ? `Not counted for ranked: set below ${RANK_MIN_F}°F (232°C). Ranked needs ${RANK_MIN_F}°F or hotter.` : typeof s.run === 'number' && s.run < 20 ? 'Not counted: shorter than 20s' : ''; }
+const rankTier = rp => RANK_TIERS.slice().reverse().find(t => rp >= t.min) || RANK_TIERS[0];
+const RANK_DAY_MAX = 1000, RANK_LOCK_MS = 864e5; // going past 1000 RP in one day locks you out of ranked for 24h
+// Double RP events: sessions and blinkers in the window count 2x (local time). Never back-dated: it would land a day's worth of RP at once
+const DOUBLE_RP = [{ from: new Date(2026, 9, 25).getTime(), to: new Date(2026, 9, 26, 6).getTime(), n:'Double RP weekend', id:'2026-10-dbl' }];
+const dblAt = t => DOUBLE_RP.find(e => t >= e.from && t < e.to) || null;
+const dblNow = () => dblAt(Date.now());
+function rankFor(sessions, when){
+  const d = new Date(when || Date.now()), m0 = new Date(d.getFullYear(), d.getMonth(), 1).getTime(), m1 = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
+  const ss = sessions.filter(s => s.t >= m0 && s.t < m1 && !(typeof s.run === 'number' && s.run < 20) && !lowTemp(s)).sort((a, b) => a.t - b.t); // ranked only counts sessions that ran 20s+
+  const r = { lockedUntil:0, locked:0, tax:0, taxed:0, rp:0, sessions:0, firsts:0, blinkers:0, extreme:0, dirty:0, sessPts:0, firstPts:0, blinkPts:0 };
+  const seen = new Map(), dayRp = new Map(), dayRaw = new Map(); let lockUntil = 0; // dayRaw: the day without Double RP bonus, so the bonus can't cause a lock
+  for (const s of ss){
+    if (s.t < lockUntil){ r.locked++; continue; } // locked out of ranked: nothing counts for 24h
+    const ext = typeof s.vapor === 'number' && vaporName(s.vapor) === 'Extreme' ? 1 : 0;
+    const day = new Date(s.t).toDateString(), first = !seen.has(day), nth = (seen.get(day) || 0);
+    const bl = (s.hits || []).filter(h => h >= blinkOf(s)).length;
+    const tax = typeof s.run === 'number' && s.run >= RANK_TAX_SECS ? s.tax || 0 : 0; // set when preheat finished, from the tier you were in then
+    const dr = dayRp.get(day) || 0, g = x => (s.sc > RANK_DIRTY ? -1 : (first ? 3 + ext : 1 + ext) * x) + bl * (5 + ext) * x - tax;
+    let x2 = s.sc > RANK_DIRTY || !dblAt(s.t) ? 1 : 2; if (x2 === 2 && dr + g(2) > RANK_DAY_MAX) x2 = 1; // the bonus never trips the daily lock
+    const raw = dayRaw.get(day) || 0;
+    if (raw + g(1) <= RANK_DAY_MAX && dr + g(x2) > RANK_DAY_MAX){ dayRaw.set(day, raw + g(1)); seen.set(day, nth + 1); r.sessions++; continue; } // bonus already filled today: this one earns nothing, no lock
+    const gain = g(x2);
+    if (raw + g(1) > RANK_DAY_MAX){ lockUntil = r.lockedUntil = s.t + RANK_LOCK_MS; r.locked++; continue; } // over 1000 RP in a day: this session doesn't count and ranked locks
+    dayRp.set(day, dr + gain); dayRaw.set(day, raw + g(1)); seen.set(day, nth + 1);
+    if (s.sc > RANK_DIRTY){ r.dirty++; r.rp -= 1; }
+    else if (first){ r.firsts++; r.firstPts += (3 + ext) * x2; r.rp += (3 + ext) * x2; r.extreme += ext; r.bonus = (r.bonus || 0) + (3 + ext) * (x2 - 1); }
+    else if (nth <= RANK_DAY_SESS){ r.sessions++; r.sessPts += (1 + ext) * x2; r.rp += (1 + ext) * x2; r.extreme += ext; r.bonus = (r.bonus || 0) + (1 + ext) * (x2 - 1); }
+    else r.sessions++; // past the daily cap: no session points, blinkers still count
+    if (tax){ r.tax += tax; r.taxed++; r.rp -= tax; }
+    r.blinkers += bl; r.blinkPts += bl * (5 + ext) * x2; r.rp += bl * (5 + ext) * x2; r.extreme += bl * ext; if (x2 > 1) r.bonus = (r.bonus || 0) + bl * (5 + ext);
+  }
+  r.rp = Math.max(0, r.rp);
+  r.tier = RANK_TIERS.slice().reverse().find(t => r.rp >= t.min);
+  r.next = RANK_TIERS.find(t => t.min > r.rp) || null;
+  r.reset = new Date(m1);
+  return r;
+}
+// your rank this month: from this phone's sessions, but never below what the leaderboard already has for you
+// (sessions from another phone or site still count)
+function myRank(){
+  // your rank this month: this phone's sessions, but never below the leaderboard. Points you earn here are
+  // added on top of what the leaderboard already had (sessions from another phone or site still count).
+  const r0 = rankFor(rankSessions()), net = demo ? 0 : duelNet(), me = demo ? null : (LB.me || lbStore().meCache), m = lbMonth(), id = acctId() || 'local';
+  const r = !net ? r0 : (rp => Object.assign({}, r0, { rp, tier: RANK_TIERS.slice().reverse().find(t => rp >= t.min), next: RANK_TIERS.find(t => t.min > rp) || null }))(Math.max(0, r0.rp + net)); // 1v1 wins and losses
+  if (!me || me.month !== m) return r;
+  const S0 = me.rp || 0, L = r.rp;
+  let base = store.rpBase && store.rpBase.month === m && store.rpBase.id === id ? store.rpBase : null;
+  let rp = base ? Math.max(L, base.S + (L - base.L)) : L;
+  const sent = store.rpSent && store.rpSent.month === m && store.rpSent.id === id ? store.rpSent.rp : null;
+  if (S0 > rp && S0 !== sent){ base = store.rpBase = { month: m, id, S: S0, L }; rp = S0; save(); } // leaderboard knows more than we do: start counting from there
+  if (rp === L) return r;
+  return Object.assign({}, r, { rp, blinkers: Math.max(r.blinkers, me.blinkers || 0), tier: RANK_TIERS.slice().reverse().find(t => rp >= t.min), next: RANK_TIERS.find(t => t.min > rp) || null, synced: true });
+}
+function drawRank(){ drawRankInner(); applyHaptics(); }
+// "Last session" box on the rank card: what you did and what it was worth
+function lastSessionHtml(){
+  const all = rankSessions().slice().sort((a, b) => a.t - b.t), s = all[all.length - 1]; if (!s) return '';
+  const hits = s.hits || [], best = hits.length ? Math.max(...hits) : 0, blinks = hits.filter(h => h >= blinkOf(s)).length;
+  const m0 = new Date(); m0.setDate(1); m0.setHours(0, 0, 0, 0);
+  let rp = 0, parts = ''; try { if (s.t >= m0.getTime()){ const A = rankFor(all), B = rankFor(all.slice(0, -1)), d = k => (A[k] || 0) - (B[k] || 0); rp = A.rp - B.rp;
+    const p = [], ses = d('sessPts') + d('firstPts'), bp = d('blinkPts'), tx = d('tax'); // where the RP came from, so the rank tax doesn't look like a bug
+    if (d('dirty')) p.push('−1 dirty (past 120 dabs)'); else if (ses) p.push(`+${ses} ${d('firsts') ? 'first dab of the day' : 'session'}`);
+    if (bp) p.push(`+${bp} blinker${d('blinkers') === 1 ? '' : 's'}`); if (tx) p.push(`−${tx} rank tax`);
+    if (p.length > 1 || tx) parts = p.join(' · '); } } catch(e){}
+  const mins = Math.round((Date.now() - s.t) / 60000), when = mins < 1 ? 'just now' : mins < 60 ? mins + 'm ago' : mins < 1440 ? Math.round(mins / 60) + 'h ago' : new Date(s.t).toLocaleDateString([], { month:'short', day:'numeric' });
+  const len = typeof s.run === 'number' ? s.run : s.dur || 0;
+  const why = notCounted(s) || (s.t < m0.getTime() ? 'From last month' : '');
+  return `<div class="last-sess"><div class="row between"><span class="label">Last session</span><span class="row" style="gap:8px"><span class="muted" style="font-size:12px">${esc(s.name || 'Session')} · ${when}</span><button class="btn small" data-sesshare style="padding:4px 10px;min-height:0">Share</button></span></div>
+    <div class="ls-grid"><div><b>${rp > 0 ? '+' + rp : rp}</b><span>RP</span></div><div><b>${hits.length}</b><span>hit${hits.length === 1 ? '' : 's'}</span></div><div><b>${best ? best.toFixed(1) + 's' : '-'}</b><span>best hit</span></div><div><b>${blinks}</b><span>blinker${blinks === 1 ? '' : 's'}</span></div><div><b>${len ? len + 's' : '-'}</b><span>length</span></div></div>
+    ${parts && !why ? `<p class="muted" style="margin:0;font-size:12px">${parts}</p>` : ''}${why ? `<p class="muted" style="margin:0;font-size:12px">${why}</p>` : ''}</div>`;
+}
+function drawRankInner(){
+  const el = $('#rankCard'); if (!el) return;
+  const r = myRank(), t = r.tier, nx = r.next;
+  const pct = nx ? Math.round((r.rp - t.min) / (nx.min - t.min) * 100) : 100;
+  const dirtyNow = sinceClean() > RANK_DIRTY, lockU = rankLock();
+  el.style.setProperty('--tc', t.c);
+  el.innerHTML = `
+    <div class="row between"><span class="label">Rank this month</span><span class="muted" style="font-size:12px">Resets ${r.reset.toLocaleDateString([], { month:'short', day:'numeric' })}</span></div>
+    ${dblNow() ? `<div class="dbl-rp" data-dbl role="button"><b>🔥 2x RP</b><span>${esc(dblNow().n)} · sessions and blinkers count double until ${new Date(dblNow().to).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })}${r.bonus ? ` · +${r.bonus} bonus so far` : ''}</span></div>` : ''}
+    <div class="rank-top"><div class="rank-medal" data-bv="${bvKeyNow(rbTierIdx(t.n))}">${rankBadge(new Date().getMonth(), rbTierIdx(t.n), 84)}</div>
+      <div><div class="rank-name">${t.n}</div><div class="rank-rp"><b>${r.rp}</b> RP</div></div></div>
+    <div class="rank-bar"><i style="width:${pct}%"></i></div>
+    <div class="rank-next"><span>${nx ? `${nx.min - r.rp} RP to ${nx.n}` : 'Top tier reached'}</span><span>${t.n}${nx ? ' → ' + nx.n : ''}</span></div>
+    <div class="rank-rows">
+      <div><span>Blinkers · ${r.blinkers}</span><b>+${r.blinkPts}</b></div>
+      <div><span>First dab of the day · ${r.firsts}</span><b>+${r.firstPts}</b></div>
+      <div><span>Other sessions · ${r.sessions}</span><b>+${r.sessPts}</b></div>
+      ${r.tax ? `<div class="neg"><span>Rank tax · ${r.taxed}</span><b>−${r.tax}</b></div>` : ''}
+      ${r.extreme ? `<div><span>Extreme bonus (included above)</span><b>+${r.extreme}</b></div>` : ''}
+      ${r.dirty ? `<div class="neg"><span>Dabs past ${RANK_DIRTY} without cleaning · ${r.dirty}</span><b>−${r.dirty}</b></div>` : ''}
+    </div>
+    ${lastSessionHtml()}
+    ${dirtyNow ? `<div class="banner warn" style="padding:10px 14px;font-size:14px"><div class="grow"><b>Losing points</b>Every dab costs 1 RP until you clean.</div></div>` : ''}
+    ${lockU ? `<div class="banner warn" style="padding:10px 14px;font-size:14px"><div class="grow"><b>Locked out of ranked</b>Take a break. Sessions won't earn RP until ${new Date(lockU).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })}.</div></div>` : ''}
+    ${(() => { const h = badgeHistory(), dev = LB.me && LB.me.dev; if (!h.length && !dev) return '';
+        return `<div class="rb-shelf-wrap"><span class="label">Your badges</span><div class="rb-shelf">${dev ? `<div class="rb-item" data-bv="dev">${devBadge(54)}<span>Developer</span></div>` : ''}${h.map(b => `<div class="rb-item" data-bv="${b.y}-${String(b.m + 1).padStart(2, '0')}:${b.t}">${rankBadge(b.m, b.t, 58, b.y)}<span>${RB_MONTHS[b.m].slice(0, 3)} · ${RB_TIERS[b.t].n}</span></div>`).join('')}</div></div>`; })()}
+    <details class="rank-how"><summary>How points work</summary>
+      <div class="how-list">
+        <div><span>Blinker <small>a single hit of 8s or longer (11s in Champion and Legend)</small></span><b class="pos">+5</b></div>
+        <div><span>First dab of the day</span><b class="pos">+3</b></div>
+        <div><span>Every other session</span><b class="pos">+1</b></div>
+        <div><span>On Extreme vapor <small>added to each of the above</small></span><b class="pos">+1</b></div>
+        <div><span>Each dab after ${RANK_DIRTY} without cleaning <small>replaces that session's point</small></span><b class="neg">−1</b></div>
+        <div><span>Rank tax <small>each 30s+ session in Blaze / Inferno / Champion / Legend</small></span><b class="neg">−3 / −5 / −8 / −10</b></div>
+      </div>
+      <div class="how-tiers">${RANK_TIERS.map((t, i) => `<span style="--c:${t.c}">${rankBadge(new Date().getMonth(), i)}${t.n}<small>${t.min}</small></span>`).join('')}</div>
+      <p class="how-note">Points reset on the 1st of every month. Sessions only count if your profile is set to 450°F (232°C) or hotter.</p>
+    </details>`;
+}
+/* ===== Leaderboard (Supabase) ===== */
+const SB_URL = 'https://auwzabwikloobzvgcdaa.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1d3phYndpa2xvb2J6dmdjZGFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA4ODExOTUsImV4cCI6MjEwNjQ1NzE5NX0.dESN5nYqgX087fzd27txEXf6fEKraF4D0RW8MaUuv6w'; // public anon key
+const LB = { rows:null, me:null, err:'', busy:false, edit:false, avatar:null, lastPush:0, timer:null };
+function lbStore(){ if (!store.lb) store.lb = {}; return store.lb; }
+const lbMonth = (d = new Date()) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+async function sbRows(path){
+  if (!sbRows.noBan){ try { return await sbJSON(path + '&banned=is.false', { method:'GET' }); } catch(e){ if (e.status !== 400) throw e; sbRows.noBan = true; } }
+  return sbJSON(path, { method:'GET' });
+}
+async function sbJSON(path, opts = {}){
+  const res = await fetch(SB_URL + path, Object.assign({}, opts, { headers: Object.assign({ apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' }, opts.headers || {}) }));
+  let body = null; try { body = await res.json(); } catch(e){}
+  if (!res.ok) { const e = new Error((body && (body.error || body.msg || body.message)) || ('HTTP ' + res.status)); e.status = res.status; e.code = body && body.error; e.status2 = body && body.status; e.detail = body && body.detail; throw e; }
+  return body;
+}
+function lbUsesPuffco(){ const a = acct(); return !!(a && a.auth && a.auth.accessToken); } // ranked login = Puffco login
+// which Peak this is, for the dev page (serial when the Peak shares one, plus this phone's Bluetooth id for it)
+function devInfo(){
+  const d = ble.dev || null, id = (d && d.id) || store.lastDeviceId; if (!id) return undefined;
+  const ser = (store.devSerial || {})[id];
+  return { serial: ser || undefined, ble: String(id).replace(/[^A-Za-z0-9:._-]/g, '').slice(0, 80), model: S.edition || undefined, fw: S.fw || undefined };
+}
+async function readSerial(){
+  const id = ble.dev && ble.dev.id; if (!id) return;
+  store.devSerial = store.devSerial || {}; store.devSerialTried = store.devSerialTried || {};
+  if (store.devSerial[id] || store.devSerialTried[id]) return; // only look once per Peak
+  store.devSerialTried[id] = true; save();
+  const paths = ['/p/sys/hw/ser', '/p/sys/hw/sern', '/p/sys/hw/sn', '/p/sys/hw/uid', '/p/sys/uid', '/p/sys/hw/did', '/p/sys/id', '/p/sys/hw/mac', '/p/sys/bt/mac'];
+  for (const p of paths){
+    try {
+      const r = await ble.read(p, 32); if (!r || !r.length) continue;
+      const txt = new TextDecoder().decode(r).split('\0')[0].trim();
+      const val = /^[A-Za-z0-9:._-]{4,40}$/.test(txt) ? txt : [...r].map(b => b.toString(16).padStart(2, '0')).join('');
+      if (/^0+$|^f+$/i.test(val) || val.length < 4) continue;
+      store.devSerial[id] = val.slice(0, 64); store.devSerialPath = p; save(); return;
+    } catch(e){ if (/timed out/i.test(e.message || '')) return; } // a timeout means this Peak won't answer: stop, don't hold up live readings
+  }
+}
+async function lbCall(body){
+  const send = async () => {
+    if (!lbUsesPuffco()){ const e = new Error('Sign in to Puffco first'); e.code = 'puffco_required'; throw e; }
+    const a = acct(); let pid = a.data && a.data.user && a.data.user.id;
+    if (pid == null){ try { const me = await authed('/api/users/me'); pid = me && me.id; if (a.data && a.data.user && pid != null) a.data.user.id = pid; } catch(_){} } // phone-side Puffco check
+    const id = { puffcoToken: acct().auth.accessToken, puffcoId: pid, device: devInfo() };
+    if (store.inviteRef) id.ref = store.inviteRef; // who invited you (the server only uses it on a new profile)
+    const r = await sbJSON('/functions/v1/player', { method:'POST', body: JSON.stringify(Object.assign(id, body)) });
+    const pl = r && r.player; // done with the invite once it stuck, or once it can't anymore (profile over 7 days old, or your own link)
+    if (store.inviteRef && pl && (pl.referred_by || Date.now() - Date.parse(pl.created_at) > 7 * 864e5 || pl.id === store.inviteRef || String(pl.username || '').toLowerCase() === store.inviteRef.toLowerCase())){ delete store.inviteRef; save(); }
+    return r;
+  };
+  try { return await send(); }
+  catch(e){
+    if (e.code === 'puffco_auth' && lbUsesPuffco()){
+      // does the login still work from this phone? (this also refreshes it if needed)
+      let phoneOk = false; try { await authed('/api/users/me'); phoneOk = true; } catch(_){}
+      if (!phoneOk) throw e; // really expired: sign in again
+      try { return await send(); }
+      catch(e2){ if (e2.code === 'puffco_auth'){ const b = new Error('Puffco refused the leaderboard server’s check (code ' + (e2.status2 || '?') + '). Update the player function in Supabase to the newest code.'); b.code = 'puffco_blocked'; b.message2 = b.message; throw b; } throw e2; }
+    }
+    throw e;
+  }
+}
+// the devices you own, shown on your profile ("peak:Onyx", "peak", "proxy")
+function myGear(){
+  const out = [];
+  try { devList().forEach(d => { const k = d.series === 'toad' ? 'proxy' + (d.edition && d.edition !== 'Onyx' ? ':' + String(d.edition).replace(/[^A-Za-z0-9 ]/g, '').slice(0, 24) : '') : 'peak' + (d.edition ? ':' + String(d.edition).replace(/[^A-Za-z0-9 ]/g, '').slice(0, 24) : ''); if (!out.includes(k)) out.push(k); }); } catch(e){}
+  return out.slice(0, 6);
+}
+// special edition colors, matched to the Puffco web app's edition themes
+const EDITION_STYLE = {
+  Desert:{ c:['#B29F8D', '#7d6a58'] }, Flourish:{ c:['#467352', '#2c5236'] }, Storm:{ c:['#3856AB', '#8099FF'] },
+  Daybreak:{ c:['#DEA26C', '#7D1E20'] }, Plasma:{ c:['#CC00FF', '#F66300'] }, Glacier:{ c:['#D8F8FA', '#65B9C8'], light:true },
+  Pearl:{ c:['#E8E8E8', '#B3B3B3'], light:true }, Opal:{ c:['#C1C1C1', '#838383'], light:true }, Indiglow:{ c:['#5C71CF', '#701F78'] },
+  Guardian:{ c:['#8a8a8a', '#4a4a4a'] }, Haze:{ c:['#C3C7E8', '#7A7D91'], light:true }, Pine:{ c:['#3f5b45', '#22342a'] }
+};
+// tint a profile card with the owner's special edition (limited editions first)
+function edCard(el, gear){
+  if (!el) return; const eds = (gear || []).map(k => k.includes(':') ? k.split(':')[1] : '').filter(e => EDITION_STYLE[e]);
+  const e = eds.find(x => LIMITED_ED.includes(x)) || eds[0], st = e && EDITION_STYLE[e];
+  el.classList.toggle('ed-card', !!st);
+  if (st){ el.style.setProperty('--e1', st.c[0]); el.style.setProperty('--e2', st.c[1]); } else { el.style.removeProperty('--e1'); el.style.removeProperty('--e2'); }
+}
+const LIMITED_ED = ['Opal', 'Indiglow', 'Guardian', 'Desert', 'Flourish', 'Storm', 'Daybreak', 'Plasma', 'Glacier'];
+function gearHtml(list, empty){
+  if (!list || !list.length) return empty ? '<div class="gear"><span class="label">Gear</span><span class="muted" style="font-size:13px">Not shared yet</span></div>' : '';
+  const ic = k => k.startsWith('proxy')
+    ? '<svg viewBox="0 0 24 24"><path d="M10 3h4l1 5H9z"/><rect x="7" y="8" width="10" height="3" rx="1"/><rect x="7" y="11" width="10" height="10" rx="3"/></svg>'
+    : '<svg viewBox="0 0 24 24"><path d="M10 2h4v9h-4z"/><path d="M8 11h8l1 3H7z"/><rect x="6" y="14" width="12" height="8" rx="2"/></svg>';
+  const ed = k => k.includes(':') ? k.split(':')[1] : '';
+  const name = k => (k.startsWith('proxy') ? 'Proxy' : ['Opal', 'Indiglow', 'Guardian'].includes(ed(k)) ? 'Peak' : 'Peak Pro') + (ed(k) ? ' · ' + ed(k) : ''); // Opal, Indiglow and Guardian are original Peaks
+  const chip = k => { const st = EDITION_STYLE[ed(k)]; if (!st) return `<span class="gear-chip">${ic(k)}${esc(name(k))}</span>`;
+    return `<span class="gear-chip ed${st.light ? ' light' : ''}" style="--e1:${st.c[0]};--e2:${st.c[1]}">${ic(k)}${esc(name(k))}${LIMITED_ED.includes(ed(k)) ? '<small>Limited</small>' : ''}</span>`; };
+  return `<div class="gear"><span class="label">Gear</span><div class="gear-list">${list.map(chip).join('')}</div></div>`;
+}
+// your stats for your profile: this month's counted sessions, hits, best hit, days you dabbed, and all-time blinkers
+// days in a row with a session, up to today (or yesterday, so it doesn't reset before your first dab of the day)
+function dabStreak(){
+  const day = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); }, have = new Set(rankSessions().map(x => day(x.t)));
+  let d = day(Date.now()); if (!have.has(d)) d -= 864e5;
+  let n = 0; while (have.has(d) && n < 3650){ n++; d = day(d - 12 * 36e5); }
+  return n;
+}
+function myStats(){
+  const d = new Date(), m0 = new Date(d.getFullYear(), d.getMonth(), 1).getTime(), all = rankSessions();
+  const ss = all.filter(s => s.t >= m0 && !(typeof s.run === 'number' && s.run < 20) && !lowTemp(s)), hits = ss.flatMap(s => s.hits || []);
+  return { sessions: ss.length, hits: hits.length, best: hits.length ? Math.round(Math.max(...hits) * 10) / 10 : 0,
+    days: new Set(ss.map(s => new Date(s.t).toDateString())).size, clean: sinceClean(), cleanEvery: +store.cleanEvery || 150, streak: dabStreak(), blAll: Math.max(all.reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0), serverBlinkers()), // never lower than another device already sent
+    ...duelPubStats() };
+}
+// 1v1 record for your profile: real matches only (no bot or demo), all time. Never lower than what another device sent
+function duelPub(){
+  if (!store.duelPub){ const h = (store.duelHist || []).filter(x => !x.bot); store.duelPub = { w: h.filter(x => x.r === 'win').length, l: h.filter(x => x.r === 'lose').length, d: h.filter(x => x.r === 'draw').length }; }
+  return store.duelPub;
+}
+function duelPubStats(){ const p = duelPub(), me = LB.me || lbStore().meCache, st = (me && me.stats) || {}; return { dw: Math.max(p.w, +st.dw || 0), dl: Math.max(p.l, +st.dl || 0), dd: Math.max(p.d, +st.dd || 0) }; }
+function lbPayload(){
+  // test build: never change RP on the leaderboard, only send what the server already has
+  { const m = lbMonth(), me = LB.me || lbStore().meCache; if (!me) return { gear: myGear(), month: m }; const same = me.month === m;
+    return { rp: same ? me.rp || 0 : 0, tier: same ? me.tier : 'Ember', blinkers: same ? me.blinkers || 0 : 0, month: m, gear: myGear() }; }
+  const r = myRank(), m = lbMonth(), me = LB.me && LB.me.month === m ? LB.me : null;
+  const rp = r.rp, bl = Math.max(r.blinkers, me ? me.blinkers || 0 : 0);
+  return { stats: myStats(), rp, base: me ? me.rp || 0 : undefined, tier: rp > r.rp && me ? me.tier : r.tier.n, blinkers: bl, month: m, gear: myGear() }; // base: the leaderboard RP this built on, so the server lets the rank tax lower it
+}
+async function lbPush(force){
+  const L = lbStore(); if (!L.joined || !lbUsesPuffco()) return;
+  // never push before we know what the server has (a new phone or computer would send 0 RP)
+  if (!LB.me){ try { await lbRestore(); } catch(e){} if (!LB.me) return; }
+  if (!force && Date.now() - LB.lastPush < 60000) return;
+  LB.lastPush = Date.now();
+  try { const pl = lbPayload(), r = await lbCall(pl); store.rpSent = { month: pl.month, id: acctId() || 'local', rp: pl.rp }; if (r && r.player){ LB.me = r.player; lbStore().meCache = r.player; save(); } } catch(e){}
+}
+async function lbLoad(force){
+  if (!force && LB.rows && Date.now() - (LB.loadedAt || 0) < 60000) return drawLeaderboard(); // switching tabs: use the list from under a minute ago (every request is a Supabase log line)
+  LB.loadedAt = Date.now();
+  try {
+    LB.rows = await sbRows(`/rest/v1/players?select=*&month=eq.${lbMonth()}&banned=not.is.true&order=rp.desc,updated_at.asc&limit=1000`); // banned players don't show
+    lbMarkSeen(LB.rows);
+    LB.err = '';
+    setTimeout(avShrink, 4000);
+  } catch(e){ LB.err = 'Couldn’t load the leaderboard. Check your connection.'; }
+  drawLeaderboard();
+}
+function lbTierColor(n){ const t = RANK_TIERS.find(x => x.n === n); return t ? t.c : '#888'; }
+/* ---- Premium: an optional supporter tier. Not required. After someone pays in a Discord ticket, add 'premium' to their
+   players.awards in Supabase and they get: a gold star by their name, a custom profile banner, the Premium badge and early features ---- */
+const PREM_BANNERS = {
+  aurora: ['Aurora', 'linear-gradient(120deg,#00e5ff,#7a00ff 55%,#ff00d4)'],
+  gold:   ['Gold',   'linear-gradient(120deg,#7a4a00,#ffd23f 50%,#fff1a8)'],
+  sunset: ['Sunset', 'linear-gradient(120deg,#ff5f6d,#ff9a3c 55%,#ffd36e)'],
+  ember:  ['Ember',  'linear-gradient(120deg,#3a0000,#ff2200 50%,#ffcc00)'],
+  ocean:  ['Ocean',  'linear-gradient(120deg,#002f6c,#00b4db 60%,#9ff3ff)'],
+  forest: ['Forest', 'linear-gradient(120deg,#0b3d20,#30d158 60%,#c8ffb0)'],
+  candy:  ['Candy',  'linear-gradient(120deg,#ff7ad9,#ffd6f5 50%,#7afcff)'],
+  galaxy: ['Galaxy', 'radial-gradient(circle at 20% 30%,#ff00d4 0,transparent 38%),radial-gradient(circle at 80% 65%,#00e5ff 0,transparent 38%),linear-gradient(120deg,#0b0420,#2a0b5c)'],
+  mono:   ['Mono',   'linear-gradient(120deg,#111,#555 50%,#eee)']
+};
+// awards: 'premium' (no end) or 'premium:YYYY-MM-DD' (Premium through that day)
+const premAward = aw => Array.isArray(aw) && aw.some(a => a === 'premium' || (/^premium:\d{4}-\d{2}-\d{2}$/.test(a) && a.slice(8) >= new Date().toISOString().slice(0, 10)));
+const premEnds = r => { const a = r && Array.isArray(r.awards) ? r.awards.filter(x => /^premium:\d{4}-\d{2}-\d{2}$/.test(x)).sort().pop() : null; return a && !r.awards.includes('premium') ? a.slice(8) : null; };
+const isPremRow = r => !!r && (premAward(r.awards) || (IS_TEST && store.testPrem && LB.me && r.id === LB.me.id));
+const isPremium = () => isPremRow(LB.me || lbStore().meCache);
+const bnrIsImg = b => typeof b === 'string' && (b.startsWith(SB_URL + '/storage/') || /^data:image\/(jpeg|gif);base64,/.test(b)); // an uploaded picture or GIF
+const premBannerOf = r => isPremRow(r) ? (PREM_BANNERS[r.banner] || bnrIsImg(r.banner) ? r.banner : 'aurora') : null;
+const premBannerCss = id => bnrIsImg(id) ? `center/cover no-repeat url("${id}")` : PREM_BANNERS[id][1];
+const premBannerHtml = id => bnrIsImg(id) ? `<span class="bnr bnr-img" aria-hidden="true"><img src="${esc(id)}" alt="" loading="lazy"></span>` : `<span class="bnr" aria-hidden="true" style="background:${PREM_BANNERS[id][1]}"></span>`;
+// a picture for your banner: center crop to 720x220, small JPEG (about 40 KB). A GIF goes up as it is
+// (redrawing it would freeze it), and the banner crops it on screen instead
+const BNR_GIF_MAX = 5e6;
+function bannerResize(file){
+  if (file.type === 'image/gif') return new Promise((resolve, reject) => {
+    if (file.size > BNR_GIF_MAX) return reject(new Error(`That GIF is ${(file.size / 1e6).toFixed(1)} MB. Banners can be up to 5 MB, try a shorter or smaller one`));
+    const fr = new FileReader(); fr.onload = () => resolve(String(fr.result).replace(/^data:[^;]*;/, 'data:image/gif;')); fr.onerror = () => reject(new Error('Couldn’t read that GIF')); fr.readAsDataURL(file);
+  });
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => { const W = 720, H = 220, sc = Math.max(W / img.width, H / img.height), w = W / sc, h = H / sc, c = document.createElement('canvas'); c.width = W; c.height = H;
+      const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, (img.width - w) / 2, (img.height - h) / 2, w, h, 0, 0, W, H); URL.revokeObjectURL(url);
+      let q = .8, d = c.toDataURL('image/jpeg', q); while (d.length > 110000 && q > .4){ q -= .1; d = c.toDataURL('image/jpeg', q); } resolve(d); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Couldn’t read that picture')); };
+    img.src = url;
+  });
+}
+let premUid = 0;
+function premStar(size){ // tap it: what Premium is
+  const id = 'pst' + (premUid++);
+  return `<svg class="prem-star" data-prem viewBox="0 0 24 24" width="${size}" height="${size}" role="button" aria-label="Premium"><defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff4c9"/><stop offset=".5" stop-color="#ffd23f"/><stop offset="1" stop-color="#e09a00"/></linearGradient></defs><path d="M12 2.2l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.1l-5.9 3.1 1.2-6.5L2.5 9.1l6.6-.9z" fill="url(#${id})" stroke="#7a4a00" stroke-width=".8" stroke-linejoin="round"/></svg>`;
+}
+/* ===== a rare "support Emberline" nudge for people without Premium =====
+   Not in the first 3 days or before 5 sessions, at most once a week and only on about 1 in 3 opens, and every 3 weeks
+   once someone has said "Not now" 3 times. Never mid-session, in a 1v1 or group sesh, or over another popup */
+function supportNudge(force){
+  const st = store.support || {}, now = Date.now();
+  if (!force){
+    if (isPremium() || demo || document.hidden || greetOpen || document.querySelector('.egg, .welcome:not([hidden])')) return;
+    if ((S.state >= 7 && S.state <= 9) || DUEL.on || SESH.on) return;
+    if (!st.first){ store.support = { first: now }; save(); return; }
+    if (now - st.first < 3 * 864e5 || (store.sessions || []).length < 5) return;
+    if (now - (st.at || 0) < ((st.no || 0) >= 3 ? 21 : 7) * 864e5) return;
+    if (Math.random() > .35) return;
+  }
+  store.support = Object.assign({}, st, { at: now }); save();
+  const el = document.createElement('div'); el.className = 'egg'; el.style.zIndex = 235;
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Support Emberline" style="gap:12px">
+    <div style="font-size:40px;line-height:1">🔥</div>
+    <h2 style="margin:0">Enjoying Emberline?</h2>
+    <p class="muted" style="margin:0;font-size:15px">Emberline is free and made by one person. Premium keeps it running, and you get a gold star, Premium moods, Puffco's limited edition colorways, GIF profile pictures and banners.</p>
+    <button class="btn primary" data-sup="go" style="width:100%">See Premium ${premStar(18)}</button>
+    <button class="btn" data-sup="no" style="width:100%">Not now</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now(), shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.addEventListener('click', e => {
+    if (Date.now() - opened < 400) return;
+    const b = e.target.closest('[data-sup]');
+    if (b && b.dataset.sup === 'go'){ shut(); setTimeout(premInfo, 280); return; }
+    if (b || e.target === el){ store.support = Object.assign({}, store.support, { no: (store.support.no || 0) + 1 }); save(); shut(); }
+  });
+}
+setTimeout(() => { try { supportNudge(); } catch(e){} }, 25000);
+const PREM_PERKS = [['⭐', 'Premium star', 'Next to your name everywhere'], ['🎆', 'Premium moods', 'Rich Plasma, Rich Flourish, Gold Rush, Aurora Drift'],
+  ['💎', 'Limited editions', 'Every limited edition Puffco mood'], ['🎨', 'Custom banner', 'Styles, your photo or a GIF'],
+  ['🖼️', 'GIF profile pic', 'Moves everywhere your picture shows'], ['🚀', 'Early access', 'New features before everyone'],
+  ['🏅', 'Premium badge', 'Legendary, for your showcase'], ['👑', 'Midas Touch & more', 'Premium-only weekly badges']];
+/* ===== a personal thank-you the first time an account shows up as Premium (again after it lapsed, never on renewals) ===== */
+function premThanksCheck(force){
+  const me = LB.me || lbStore().meCache; if (!me || !me.id) return;
+  const k = 'premThanked:' + me.id;
+  if (!isPremRow(me) && !force){ if (store[k]){ delete store[k]; save(); } return; }
+  if (store[k] && !force) return;
+  if (!force && (document.querySelector('.egg') || greetOpen || document.hidden || (S.state >= 7 && S.state <= 9) || DUEL.on)) return; // later, when nothing else is up
+  store[k] = Date.now(); save();
+  const name = me.username || 'friend', el = document.createElement('div'); el.className = 'egg prem pm-thanks'; el.style.zIndex = 245;
+  const conf = Array.from({ length: 36 }, (_, i) => `<i style="left:${(i * 37) % 100}%;background:${['#ffd23f', '#ff9a3c', '#fff1a8', '#b46bff', '#ffffff'][i % 5]};animation-duration:${2.2 + (i % 7) * .35}s;animation-delay:${(i % 9) * .12}s"></i>`).join('');
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Thank you">
+    <div class="pm-confetti">${conf}</div>
+    <div class="pm-hero"><i class="pm-rays"></i><div class="pm-star">${premStar(64)}</div>
+      <h2>Thank you, <span class="pm-gold">${esc(name)}</span>!</h2></div>
+    <p style="margin:0;font-size:15px">You’re officially <b>Premium</b>. Emberline is free for everyone because of people like you. It means a lot. 🙏</p>
+    <div class="pm-unlocks"><span>⭐ Gold star</span><span>🎆 Premium moods</span><span>💎 Limited editions</span><span>🎨 Banners</span><span>🖼️ GIF profile pic</span><span>👑 Weekly Premium badges</span></div>
+    <button class="btn pm-buy" data-pt="moods" style="width:100%">Try the Premium moods</button>
+    <button class="btn" data-pt="close" style="width:100%">Let’s go</button></div>`;
+  document.body.appendChild(el); applyHaptics(); buzz([60, 80, 60]);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now(), shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.addEventListener('click', e => { if (Date.now() - opened < 500) return; const b = e.target.closest('[data-pt]');
+    if (b && b.dataset.pt === 'moods'){ shut(); show('lights'); setTimeout(() => { const g = [...document.querySelectorAll('#moodLib .label')].find(x => /Premium moods/.test(x.textContent)); if (g) g.scrollIntoView({ block:'center', behavior:'smooth' }); }, 350); return; }
+    if (b || e.target === el) shut(); });
+}
+setInterval(() => { try { premThanksCheck(); } catch(e){} }, 6000);
+/* ===== Premium by card (Stripe) =====
+   The checkout link carries your player id (client_reference_id). When the payment goes through, Stripe tells the
+   stripe edge function, which turns Premium on until the paid month ends (and keeps extending it on each renewal). */
+const STRIPE_LINK = 'https://buy.stripe.com/7sY00cbWEcaS7rV8uagYU00';
+const STRIPE_PORTAL = 'https://billing.stripe.com/p/login/7sY00cbWEcaS7rV8uagYU00'; // cancel, change card, receipts (sign in with the email you paid with)
+const stripeOn = () => true; // the card checkout is on for everyone
+function stripeUrl(){ const me = LB.me || lbStore().meCache; return me && me.id ? STRIPE_LINK + '?client_reference_id=' + encodeURIComponent(me.id) : null; }
+function stripeBlock(isPrem){
+  const url = stripeUrl();
+  if (isPrem) return `<p class="muted" style="margin:0;font-size:14px">Paying by card? It renews every month on its own. You can cancel any time and keep Premium until the month you paid for ends.</p>
+    <a class="btn" href="${STRIPE_PORTAL}" target="_blank" rel="noopener" style="width:100%;text-align:center;text-decoration:none">Manage or cancel Premium</a>`;
+  return `<div class="pm-price"><b>$10<i>/month</i></b><small>Card or Apple Pay · turns on in about a minute · cancel any time</small></div>
+    ${url ? `<a class="btn pm-buy" href="${url}" target="_blank" rel="noopener" data-stripe style="width:100%;text-align:center;text-decoration:none">Get Premium ✨</a>`
+          : `<button class="btn primary" disabled style="width:100%">Make your profile in Social first</button>`}
+    <a href="${STRIPE_PORTAL}" target="_blank" rel="noopener" style="text-align:center;font-size:13px;color:var(--muted)">Already subscribed? Manage or cancel</a>`;
+}
+// back from the checkout: ask the server once a few times so Premium shows right away
+// the checkout opens outside the page: in the iPhone app that's your default browser (Apple Pay works there).
+// Path keeps it inside Path (handing it to Safari with x-safari- just showed Path's error page), and cards work there
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('[data-stripe]')){ store.stripeAt = Date.now(); save(); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && store.stripeAt && Date.now() - store.stripeAt < 30 * 60000) stripeCheck(0); });
+async function stripeCheck(n){
+  if (isPremium()){ store.stripeAt = 0; save(); return; }
+  try { const r = await lbCall({ action:'me' }); if (r && r.player){ LB.me = r.player; lbStore().meCache = r.player; save(); } } catch(e){}
+  if (isPremium()){ store.stripeAt = 0; save(); try { drawPremCard(); drawSocial(); } catch(e){} premThanksCheck(); return; } // the thank-you
+  if (n < 6) setTimeout(() => stripeCheck(n + 1), 5000);
+}
+function premInfo(asFree){ // asFree: test tools, see it the way someone without Premium does
+  if (document.querySelector('.egg.prem')) return;
+  const me = !asFree && isPremium(), el = document.createElement('div'); el.className = 'egg prem'; el.style.zIndex = 240;
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Emberline Premium" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
+    <div class="pm-hero"><i class="pm-rays"></i><div class="pm-star">${premStar(56)}</div><h2>Emberline <span class="pm-gold">Premium</span></h2>${me ? `<span class="label" style="color:#ffd23f">You’re Premium. Thank you!${premEnds(LB.me || lbStore().meCache) ? ' · until ' + new Date(premEnds(LB.me || lbStore().meCache) + 'T12:00').toLocaleDateString([], { month:'short', day:'numeric' }) : ''}</span>` : '<span class="muted" style="font-size:13px">Here’s how your profile would look</span>'}</div>
+    ${premPreview()}
+    <div class="pm-perks">${PREM_PERKS.map(([i, t, d]) => `<div class="pm-perk"><span>${i}</span><b>${t}</b><small>${d}</small></div>`).join('')}</div>
+    ${asFree || stripeOn() ? stripeBlock(me) : `<div style="display:grid;gap:4px"><b>How to get it</b>
+      <ol style="margin:0;padding-left:20px;color:var(--muted);font-size:14px;display:grid;gap:2px"><li>Join the Emberline Discord.</li><li>Open a ticket.</li><li>Pay with Cash App, Zelle, Venmo or Apple Pay.</li><li>We turn on Premium for your username. It shows the next time you open Emberline.</li></ol></div>
+    <a class="btn primary" href="${DISCORD_URL}" target="_blank" rel="noopener" style="width:100%;text-align:center;text-decoration:none">Join the Discord</a>`}
+    <button class="btn" id="premX" style="width:100%">Close</button></div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now(), shut = () => { clearInterval(cyc); el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  // the preview banner cycles through every style until you tap one
+  const keys = Object.keys(PREM_BANNERS), setB = k => { const pv = el.querySelector('.prem-prev'); if (!pv) return; pv.querySelector('.bnr').style.background = PREM_BANNERS[k][1]; pv.dataset.k = k;
+    el.querySelectorAll('[data-pvb]').forEach(x => x.classList.toggle('on', x.dataset.pvb === k)); const n = el.querySelector('.prem-prev-n'); if (n) n.textContent = PREM_BANNERS[k][0] + ' banner'; };
+  let cyc = setInterval(() => { if (!document.body.contains(el)) return clearInterval(cyc); const pv = el.querySelector('.prem-prev'); setB(keys[(keys.indexOf(pv.dataset.k) + 1) % keys.length]); }, 2200);
+  el.addEventListener('click', e => { if (Date.now() - opened < 350) return; const c = e.target.closest('[data-pvb]'); if (c){ clearInterval(cyc); setB(c.dataset.pvb); return; } if (e.target === el || e.target.id === 'premX') shut(); });
+}
+// your own profile card, dressed up as Premium (the real one only changes once Premium is turned on)
+function premPreview(){
+  const me = LB.me || lbStore().meCache || {}, name = me.username || store.name || 'You', k0 = premBannerOf(me) || 'aurora', k = bnrIsImg(k0) ? 'aurora' : k0; // an uploaded picture: the preview shows the styles
+  let tier = 'Ember', rp = 0; try { const r = myRank(); tier = r.tier.n; rp = r.rp; } catch(e){}
+  return `<div class="prem-prev has-bnr" data-k="${k}"><span class="bnr" aria-hidden="true" style="background:${PREM_BANNERS[k][1]}"></span>
+      <div class="prem-prev-in">${lbAvatar(me.avatar_url, name, 64)}<b>${esc(name)}${premStar(20)}</b><span class="muted" style="font-size:13px"><span style="color:${lbTierColor(tier)};font-weight:700">${esc(tier)}</span> · ${rp} RP</span>
+      <div class="prem-prev-b">${SPB.badge(spbById('premium'), 46)}<small>Premium</small></div></div>
+      <span class="prem-prev-n">${PREM_BANNERS[k][0]} banner</span></div>
+    <div class="prem-pvbs">${Object.entries(PREM_BANNERS).map(([id, [n, css]]) => `<button type="button" data-pvb="${id}" class="${id === k ? 'on' : ''}" style="background:${css}" aria-label="${n}"></button>`).join('')}</div>`;
+}
+function drawPremCard(){ const s = $('#premCardStar'); if (s) s.innerHTML = premStar(34); const t = $('#premCardTxt'); if (t && isPremium()) t.textContent = 'You’re Premium. Thank you for keeping Emberline running!'; }
+setTimeout(() => { const ac = $('#alertsCard'); if (ac) ac.onclick = alertsSetup; }, 0);
+setTimeout(() => { drawPremCard(); const c = $('#premCard'); if (c) c.onclick = () => { drawPremCard(); premInfo(); }; }, 0);
+// a tap on any Premium star opens the popup (and doesn't open the row it sits in)
+document.addEventListener('click', e => { const s = e.target.closest && e.target.closest('[data-prem]'); if (!s || s.closest('.egg.prem')) return; e.stopPropagation(); e.preventDefault(); premInfo(); }, true);
+// banner picker in Edit profile (Premium only)
+function premBannerPicker(){
+  if (!isPremium()) return '';
+  const cur = LB.bannerImg || LB.bannerDraft || premBannerOf(LB.me || lbStore().meCache), pic = LB.bannerImg || (bnrIsImg(cur) ? cur : null);
+  return `<div style="display:grid;gap:6px"><span class="label">Profile banner ${premStar(14)}</span><div class="prem-bnrs">
+    <label class="prem-bnr prem-up${pic && cur === pic ? ' on' : ''}" for="premBnrFile" ${pic ? `data-bnr="${esc(pic)}" style="background:${premBannerCss(pic)}"` : ''}><span>${pic ? 'Your picture' : '＋ Upload'}</span></label>
+    ${Object.entries(PREM_BANNERS).map(([k, [n, css]]) => `<button type="button" class="prem-bnr${k === cur ? ' on' : ''}" data-bnr="${k}" style="background:${css}" aria-label="${n} banner"><span>${n}</span></button>`).join('')}</div>
+    <span class="muted" style="font-size:12px">Upload any picture or GIF (up to 5 MB). It’s cropped to a wide strip.</span></div>`;
+}
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-bnr]'); if (!b || e.target.closest('input')) return; if (b.classList.contains('prem-up') && !b.dataset.bnr) return; // the upload tile opens the file picker
+  const v = b.dataset.bnr; if (bnrIsImg(v)){ LB.bannerDraft = null; if (v.startsWith('data:')) LB.bannerImg = v; } else { LB.bannerDraft = v; LB.bannerImg = null; }
+  document.querySelectorAll('.prem-bnr').forEach(x => x.classList.toggle('on', x === b)); });
+// the file picker lives on the page itself, not in the Edit profile card: on iPhone, picking a photo backgrounds Emberline and the card
+// can be drawn again while you choose, which used to drop the picture you picked (profile pictures already worked this way)
+const premBnrInput = (() => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.id = 'premBnrFile'; i.hidden = true; document.body.appendChild(i); return i; })();
+premBnrInput.addEventListener('change', async e => {
+  if (!e.target.files || !e.target.files[0]) return;
+  try { const d = await bannerResize(e.target.files[0]); LB.bannerImg = d; LB.bannerDraft = null;
+    const t = document.querySelector('.prem-up'); if (!t){ toast('Banner ready. Tap Save profile'); return; } t.dataset.bnr = d; t.style.background = premBannerCss(d); t.querySelector('span').textContent = d.startsWith('data:image/gif') ? 'Your GIF' : 'Your picture';
+    document.querySelectorAll('.prem-bnr').forEach(x => x.classList.toggle('on', x === t)); toast(d.startsWith('data:image/gif') ? 'GIF banner ready. Tap Save profile' : 'Banner picture ready. Tap Save profile');
+  } catch(err){ toast(err.message || 'Couldn’t use that picture'); }
+  e.target.value = '';
+});
+// Premium: a GIF profile picture goes up as it is (redrawing it would freeze it), the circle crops it on screen
+const AV_GIF_MAX = 5e6;
+function avGif(file){
+  return new Promise((resolve, reject) => {
+    if (file.size > AV_GIF_MAX) return reject(new Error(`That GIF is ${(file.size / 1e6).toFixed(1)} MB. Profile GIFs can be up to 5 MB, try a shorter or smaller one`));
+    const fr = new FileReader(); fr.onload = () => resolve(String(fr.result).replace(/^data:[^;]*;/, 'data:image/gif;')); fr.onerror = () => reject(new Error('Couldn’t read that GIF')); fr.readAsDataURL(file);
+  });
+}
+const AV_PX = 160; // profile pictures: 160px (shown at 84px at most), about a quarter of the old 320px size
+// once per account: an old big profile picture gets shrunk and saved again, so everyone downloads less
+let avTried = false;
+function avShrink(){
+  const me = LB.me; if (avTried || !me || !me.avatar_url || /\.gif\?/.test(me.avatar_url) || !lbUsesPuffco() || (store.avSmall || {})[me.id]) return;
+  const img = new Image(); img.crossOrigin = 'anonymous';
+  img.onload = async () => {
+    try {
+      const mark = () => { store.avSmall = Object.assign({}, store.avSmall, { [me.id]: true }); save(); };
+      if (img.naturalWidth <= AV_PX){ mark(); return; }
+      const c = document.createElement('canvas'); c.width = c.height = AV_PX; const g = c.getContext('2d'); g.imageSmoothingQuality = 'high';
+      const s = Math.min(img.naturalWidth, img.naturalHeight); g.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, AV_PX, AV_PX);
+      const r = await lbCall(Object.assign({ avatar: c.toDataURL('image/jpeg', .8) }, lbPayload())); if (r && r.player){ LB.me = r.player; lbStore().meCache = r.player; } mark(); // with the month and RP: a picture-only save made the server reset the tier to Ember
+    } catch(e){}
+  };
+  avTried = true; img.src = me.avatar_url;
+}
+function lbAvatar(url, name, size){
+  const ok = typeof url === 'string' && url.startsWith(SB_URL + '/storage/');
+  return ok ? `<img class="lb-av" src="${esc(url)}" alt="" loading="lazy" decoding="async" style="width:${size}px;height:${size}px">` // lazy: only pictures you scroll to download (Supabase bandwidth)
+            : `<span class="lb-av lb-ini" style="width:${size}px;height:${size}px">${esc((name || '?').slice(0, 1).toUpperCase())}</span>`;
+}
+function lbResize(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => { const s = Math.min(img.width, img.height), c = document.createElement('canvas'); c.width = c.height = AV_PX;
+      c.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, AV_PX, AV_PX); URL.revokeObjectURL(url); resolve(c.toDataURL('image/jpeg', .82)); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That picture couldn’t be opened.')); };
+    img.src = url;
+  });
+}
+const LB_ERRS = { banner_too_big:'That banner is too big. Pictures up to 150 KB after cropping, GIFs up to 5 MB.', banner_not_gif:'That file isn’t a real GIF.', banner_upload:'Couldn’t save the banner. Try again.', name_cooldown:'You can only change your username once every 3 days.', banned:'This account is banned from ranked and social. Ask in the Emberline Discord if you think this is a mistake.', puffco_required:'Sign in to Puffco in Settings to join ranked.', username_invalid:'Usernames are 3 to 20 letters, numbers, _ or .', username_taken:'That username is taken.', username_required:'Pick a username first.', avatar_too_big:'That picture is too big. Profile GIFs can be up to 5 MB.', avatar_not_gif:'That file isn’t a real GIF.', avatar_upload:'Couldn’t save the picture. Try again.', puffco_auth:'Your Puffco sign-in expired. Sign in again in Settings.', auth:'Couldn’t sign you in. Try again.' };
+
+/* ---- badge showcase: up to 3 badges on your profile ---- */
+function showBadge(key, size, row){
+  if (key === 'dev') return devBadge(size);
+  if (key && key.startsWith('sp:')){ const b = spbById(key.slice(3)); return b ? SPB.badge(b, size) : ''; }
+  const m = /^(\d{4})-(\d{2}):(now|[0-5])$/.exec(key || ''); if (!m) return '';
+  const t = m[3] === 'now' ? rbTierIdx(row && row.tier) : +m[3];
+  return rankBadge(+m[2] - 1, t, size, +m[1]);
+}
+function showName(key, row){
+  if (key === 'dev') return 'Developer';
+  if (key && key.startsWith('sp:')){ const b = spbById(key.slice(3)); return b ? b.name : ''; }
+  const m = /^(\d{4})-(\d{2}):(now|[0-5])$/.exec(key || ''); if (!m) return '';
+  const t = m[3] === 'now' ? rbTierIdx(row && row.tier) : +m[3];
+  return RB_MONTHS[+m[2] - 1].slice(0, 3) + ' · ' + RB_TIERS[t].n + (m[3] === 'now' ? ' (now)' : '');
+}
+function earnedBadges(){
+  const out = [];
+  { const me = LB.me || lbStore().meCache; if (me && me.dev) out.push('dev'); }
+  const now = new Date(), cur = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  out.push(cur + ':now');
+  badgeHistory().forEach(b => out.push(b.y + '-' + String(b.m + 1).padStart(2, '0') + ':' + b.t));
+  const st = spbStatus(); SPB_ALL.forEach(b => { if (st[b.id] && st[b.id].got) out.push('sp:' + b.id); });
+  return out;
+}
+function showcaseEditor(){
+  if (!LB.pick) LB.pick = ((LB.me && LB.me.showcase) || []).slice(0, 3);
+  const row = { tier: myRank().tier.n }, earned = earnedBadges(), P = LB.pick;
+  return `<div class="row between"><span class="label">Showcase badges</span><span class="muted" style="font-size:13px">${P.length} / 3</span></div>
+    <div class="sc-slots">${[0,1,2].map(i => P[i] ? `<button class="sc-slot filled" data-scrm="${i}" aria-label="Remove ${esc(showName(P[i], row))}"><span class="sc-n">${i+1}</span><span class="sc-x">✕</span>${showBadge(P[i], undefined, row)}</button>` : `<div class="sc-slot"><span class="sc-n">${i+1}</span><span class="sc-plus">+</span></div>`).join('')}</div>
+    <p class="muted" style="margin:0;font-size:13px">Tap badges you’ve earned to add them. Tap a slot to remove one, or swipe it sideways to change the order.</p>
+    <div class="sc-pick">${earned.map(k => { const i = P.indexOf(k); return `<button class="sc-pk" data-sck="${k}" aria-pressed="${i >= 0}" ${i < 0 && P.length >= 3 ? 'disabled' : ''}>${i >= 0 ? `<span class="sc-num">${i+1}</span>` : ''}${showBadge(k, undefined, row)}<span>${esc(showName(k, row))}</span></button>`; }).join('')}</div>`;
+}
+function openPlayer(r){
+  let el = $('#lbProfile'); if (!el){ el = document.createElement('div'); el.id = 'lbProfile'; el.className = 'welcome'; document.body.appendChild(el); }
+  const sc = r.showcase || [], meId = LB.me && LB.me.id, isMe = r.id === meId;
+  el.innerHTML = `<div class="wl-card lbp"><div class="row between"><span class="label">Profile</span><button class="btn small ghost" id="lbpClose">Close</button></div>
+    <div class="lbp-head">${isRichId(r.id) ? devFramed(lbAvatar(r.avatar_url, r.username, 96), 96, true) : isMe ? framed(lbAvatar(r.avatar_url, r.username, 96), 96, myFrame(), true) : lbAvatar(r.avatar_url, r.username, 96)}<b class="lbp-name" data-pstats role="button" tabindex="0">${esc(r.username)}${r.dev ? devBadge(26) : ''}${isPremRow(r) ? premStar(24) : ''}<svg class="lbp-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></b><span class="muted"><span style="color:${lbTierColor(r.tier)};font-weight:700">${esc(r.tier)}</span> · ${r.rp} RP this month</span>
+      <div class="soc-counts"><span data-flist="followers" data-pid="${esc(String(r.id))}" data-n="${esc(r.username)}" role="button" tabindex="0"><b data-cnt="followers">–</b> followers</span><span data-flist="following" data-pid="${esc(String(r.id))}" data-n="${esc(r.username)}" role="button" tabindex="0"><b data-cnt="following">–</b> following</span></div></div>
+    <div class="lbp-stats" id="lbpStats" hidden></div>
+    ${r.bio ? `<p class="soc-bio">${esc(r.bio)}</p>` : ''}
+    <div id="lbpGear">${gearHtml(isMe ? myGear() : r.gear, true)}</div>
+    ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, r)}">${showBadge(k, undefined, r)}<span>${esc(showName(k, r))}</span></div>`).join('')}</div>` : '<p class="muted" style="margin:0;text-align:center">No showcase badges yet.</p>'}
+    ${isMe ? '' : meId ? `<button class="btn soc-follow" data-follow="${r.id}" style="width:100%">Follow</button>`
+      : '<p class="muted" style="margin:0;text-align:center;font-size:13px">Make your profile in Social to follow people.</p>'}</div>`;
+  { const wc = el.querySelector('.wl-card'), rb = isRichId(r.id), ob = isMe && !!myBanner(), pb = !rb && !ob && premBannerOf(r); wc.classList.toggle('has-bnr', rb || ob || !!pb); if (rb) wc.insertAdjacentHTML('afterbegin', richBannerHtml()); else if (ob) wc.insertAdjacentHTML('afterbegin', bannerHtml(myBanner(), true)); else if (pb) wc.insertAdjacentHTML('afterbegin', premBannerHtml(pb)); }
+  edCard(el.querySelector('.wl-card'), isMe ? myGear() : r.gear); socPaintFollow(r.id); el.hidden = false; applyHaptics();
+  const fillCounts = () => socCounts(r.id).then(c => { if (el.hidden) return; el.querySelectorAll('[data-cnt]').forEach(b => { b.textContent = c[b.dataset.cnt]; }); });
+  fillCounts();
+  // grab their latest row so gear shows even if the list we opened from is old
+  if (!isMe && r.id) sbRows(`/rest/v1/players?select=${SOC_COLS}&id=eq.${r.id}`).then(rows => { const f = rows && rows[0]; if (!f || el.hidden) return;
+    if (f.stats) r.stats = f.stats; if (f.blinkers != null) r.blinkers = f.blinkers; const ps = el.querySelector('#lbpStats'); if (ps && !ps.hidden) ps.innerHTML = playerStatsHtml(r, isMe);
+    if (Array.isArray(f.gear)){ r.gear = f.gear; const g = el.querySelector('#lbpGear'); if (g) g.innerHTML = gearHtml(f.gear, true); edCard(el.querySelector('.wl-card'), f.gear); } }).catch(() => {});
+  el.onclick = async e => {
+    if (e.target === el || e.target.id === 'lbpClose'){ el.hidden = true; return; }
+    if (e.target.closest('[data-pstats]')){ const ps = el.querySelector('#lbpStats'), nm = el.querySelector('.lbp-name'); ps.hidden = !ps.hidden; nm.classList.toggle('open', !ps.hidden); if (!ps.hidden) ps.innerHTML = playerStatsHtml(r, isMe); return; }
+    const f = e.target.closest('[data-follow]'); if (f){ e.stopPropagation(); const was = SOC.following.has(r.id);
+      const n = el.querySelector('[data-cnt="followers"]'); if (n && !isNaN(+n.textContent)) n.textContent = Math.max(0, +n.textContent + (was ? -1 : 1));
+      await socToggleFollow(r); }
+  };
+}
+
+
+// stats panel on a profile (tap the name). Other players' numbers come from their app, so older versions show dashes
+function playerStatsHtml(r, isMe){
+  const st = isMe ? myStats() : (r.stats || null), dash = '–', v = x => x == null ? dash : x;
+  const place = (LB.rows || []).findIndex(x => x.id === r.id), joined = r.created_at ? new Date(r.created_at).toLocaleDateString([], { month:'short', year:'numeric' }) : dash;
+  const tile = (n, l) => `<div><b>${n}</b><span>${l}</span></div>`;
+  return `<span class="label">Stats · this month</span>
+    <div class="lbp-grid">${tile(r.rp ?? 0, 'RP')}${tile(place >= 0 ? '#' + (place + 1) : dash, 'place')}${tile(v(r.blinkers), 'blinkers')}${tile(v(st && st.sessions), 'sessions')}
+      ${tile(v(st && st.hits), 'hits')}${tile(st && st.best ? st.best.toFixed(1) + 's' : dash, 'best hit')}${tile(v(st && st.days), 'days dabbed')}${tile(v(st && st.blAll), 'blinkers ever')}</div>
+    ${(() => { const w = st && st.dw, l = st && st.dl, d = st && st.dd, n = (+w || 0) + (+l || 0) + (+d || 0); // 1v1 record, all time
+      return `<span class="label">1v1 · all time</span><div class="lbp-grid">${tile(v(w), 'wins')}${tile(v(l), 'losses')}${tile(v(d), 'draws')}${tile(n ? Math.round((+w || 0) / n * 100) + '%' : dash, 'win rate')}</div>`; })()}
+    <p class="muted" style="margin:0;font-size:12px;text-align:center">Joined ${joined}${!isMe && !st ? ' · more stats show once they update the app' : ''}</p>`;
+}
+/* ===== badge viewer: tap a badge to see it big ===== */
+function bvKeyNow(t){ const n = new Date(); return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + ':' + t; }
+function bvResolve(k, row){ return k === 'dev' || k.startsWith('sp:') ? k : k.replace(':now', ':' + rbTierIdx(row && row.tier)); }
+function openBadge(key){
+  if (key === 'sp:hothead' && !arguments[1]){ hotHeadSheet(); return; }
+  if (key === 'sp:squad' && !arguments[1]){ squadSheet(); return; }
+  let art, title, sub, extra = '', subHtml = null;
+  if (key === 'dev'){ art = devBadge(240); title = 'Developer'; sub = 'Made Emberline'; }
+  else if (key.startsWith('sp:')){
+    const b = spbById(key.slice(3)); if (!b) return;
+    const theirs = !!arguments[1], st = theirs ? { got: true } : (spbStatus()[b.id] || {}), ok = st.got;
+    art = `<div class="${ok ? '' : 'bv-locked'}">${SPB.badge(b)}</div>`; title = b.secret && !ok ? '???' : b.name;
+    sub = `${b.rar[0].toUpperCase() + b.rar.slice(1)} · ${b.cat}`;
+    subHtml = `<span class="bv-rar r-${b.rar}">${b.rar}</span><span class="bv-cat">${esc(b.cat)}</span>`;
+    const how = b.secret && ok ? b.hint : b.req;
+    extra = `<p class="bv-how">${esc(how)}</p>${theirs ? '' : `<span class="bv-state ${ok ? 'ok' : ''}">${ok ? 'Unlocked' : 'Locked'}${!ok && st.prog ? ' · ' + esc(st.prog) : ''}</span>`}`;
+  }
+  else {
+    const m = /^(\d{4})-(\d{2}):([0-5])$/.exec(key || ''); if (!m) return;
+    const y = +m[1], mo = +m[2] - 1, t = +m[3], now = new Date(), live = y === now.getFullYear() && mo === now.getMonth();
+    art = rankBadge(mo, t, undefined, y); title = RB_TIERS[t].n;
+    sub = `${RB_MONTHS[mo]} ${y}${live ? ' · this month' : ''}`;
+  }
+  const el = document.createElement('div'); el.className = 'bv';
+  el.innerHTML = `<div class="bv-in"><div class="bv-art"><div class="bv-tilt">${art}</div></div><h3 class="bv-title">${esc(title)}</h3><span class="bv-sub">${subHtml || esc(sub)}</span>${extra}<button class="btn small ghost bv-close">Close</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const tilt = el.querySelector('.bv-tilt'), artEl = el.querySelector('.bv-art');
+  let down = false;
+  const tiltTo = (x, y) => { const r = artEl.getBoundingClientRect(), dx = (x - (r.left + r.width / 2)) / (r.width / 2), dy = (y - (r.top + r.height / 2)) / (r.height / 2);
+    tilt.style.transform = `rotateY(${clamp(dx, -1, 1) * 22}deg) rotateX(${clamp(-dy, -1, 1) * 22}deg) scale(1.04)`; };
+  el.addEventListener('pointerdown', e => { if (e.target.closest('.bv-close')) return; down = true; tilt.classList.add('drag'); tiltTo(e.clientX, e.clientY); });
+  el.addEventListener('pointermove', e => { if (down) tiltTo(e.clientX, e.clientY); });
+  const release = () => { down = false; tilt.classList.remove('drag'); tilt.style.transform = ''; };
+  el.addEventListener('pointerup', release); el.addEventListener('pointercancel', release);
+  const close = () => { el.classList.remove('on'); el.classList.add('off'); setTimeout(() => el.remove(), 260); };
+  el.querySelector('.bv-close').addEventListener('click', close);
+  el.addEventListener('click', e => { if (e.target === el) close(); });
+}
+// a finger that moved (a scroll) shouldn't count as tapping a badge
+const tapTrack = { x:0, y:0, moved:0 };
+document.addEventListener('pointerdown', e => { tapTrack.x = e.clientX; tapTrack.y = e.clientY; tapTrack.moved = 0; }, true);
+document.addEventListener('pointermove', e => { tapTrack.moved = Math.max(tapTrack.moved, Math.hypot(e.clientX - tapTrack.x, e.clientY - tapTrack.y)); }, { capture: true, passive: true });
+addEventListener('scroll', () => { tapTrack.moved = 99; }, { capture: true, passive: true });
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('[data-bv]'); if (!b || e.target.closest('.sc-pick, .sc-slots')) return;
+  if (tapTrack.moved > 10){ e.preventDefault(); e.stopPropagation(); return; } // was a scroll
+  e.stopPropagation(); openBadge(b.dataset.bv, !!b.closest('#lbProfile'));
+}, true);
+
+/* ===== round photo cropper: drag with momentum, pinch around your fingers, rubber-band edges, double-tap to zoom ===== */
+async function loadPhoto(file){
+  // shrink huge camera photos first: decoding a 48MP picture is slow and sometimes fails on iPhone
+  const MAX = 1600;
+  if (window.createImageBitmap){
+    try {
+      const full = await createImageBitmap(file);
+      const k = Math.min(1, MAX / Math.max(full.width, full.height));
+      if (k >= 1) return full;
+      const c = document.createElement('canvas'); c.width = Math.round(full.width * k); c.height = Math.round(full.height * k);
+      c.getContext('2d').drawImage(full, 0, 0, c.width, c.height); full.close && full.close(); return c;
+    } catch(e){}
+  }
+  return new Promise((res, rej) => { const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => { const k = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight)); const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); res(c); };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('That picture couldn’t be opened. Try a different photo.')); };
+    img.src = url; });
+}
+async function cropAvatar(file){
+  const src = await loadPhoto(file), IW = src.width, IH = src.height;
+  if (!IW || !IH) throw new Error('That picture couldn’t be opened. Try a different photo.');
+  return new Promise(resolve => {
+    const el = document.createElement('div'); el.className = 'crop';
+    el.innerHTML = `<div class="crop-stage"><div class="crop-ring"></div></div><div class="crop-in"><div class="crop-top"><h3>Move and zoom</h3><small>Drag to move. Pinch or double-tap to zoom.</small></div>
+      <div class="crop-row"><button class="btn ghost" data-c="cancel">Cancel</button><button class="btn primary" data-c="ok">Use photo</button></div></div>`;
+    document.body.appendChild(el); applyHaptics();
+    const stage = el.querySelector('.crop-stage');
+    const cv = document.createElement('canvas'); cv.className = 'crop-img'; stage.prepend(cv);
+    const W = stage.clientWidth || innerWidth, H = stage.clientHeight || innerHeight, dpr = Math.min(3, window.devicePixelRatio || 1);
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    const ctx = cv.getContext('2d'); ctx.imageSmoothingQuality = 'high';
+    const ring = Math.min(W * .9, H - 260, 520), offX = (W - ring) / 2, offY = (H - ring) / 2, base = ring / Math.min(IW, IH), ZMAX = 5;
+    const ringEl = el.querySelector('.crop-ring'); Object.assign(ringEl.style, { left: offX + 'px', top: offY + 'px', width: ring + 'px', height: ring + 'px' });
+    let z = 1, x = (W - IW * base) / 2, y = (H - IH * base) / 2, vx = 0, vy = 0, anim = 0;
+    const bounds = () => { const w = IW * base * z, h = IH * base * z; return { minX: offX + ring - w, maxX: offX, minY: offY + ring - h, maxY: offY }; };
+    const clampIn = () => { const b = bounds(); x = Math.min(b.maxX, Math.max(b.minX, x)); y = Math.min(b.maxY, Math.max(b.minY, y)); };
+    const draw = () => { ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.drawImage(src, x, y, IW * base * z, IH * base * z); };
+    const rubber = (v, lo, hi) => v < lo ? lo - Math.pow(lo - v, .7) : v > hi ? hi + Math.pow(v - hi, .7) : v; // resist past the edge
+    const syncSlider = () => {};
+    const zoomAround = (nz, cx, cy, soft) => {
+      nz = soft ? (nz < 1 ? 1 - (1 - nz) * .35 : nz > ZMAX ? ZMAX + (nz - ZMAX) * .35 : nz) : Math.max(1, Math.min(ZMAX, nz));
+      const k = nz / z; x = cx - (cx - x) * k; y = cy - (cy - y) * k; z = nz; };
+    // settle after letting go: spring back inside the edges and glide with leftover speed
+    const settle = () => {
+      cancelAnimationFrame(anim);
+      const step = () => {
+        if (z < 1 || z > ZMAX){ const t = z < 1 ? 1 : ZMAX; const nz = z + (t - z) * .25; zoomAround(Math.abs(t - nz) < .002 ? t : nz, W / 2, H / 2, true); }
+        x += vx; y += vy; vx *= .92; vy *= .92;
+        const b = bounds();
+        if (x > b.maxX){ x += (b.maxX - x) * .22; vx *= .5; } else if (x < b.minX){ x += (b.minX - x) * .22; vx *= .5; }
+        if (y > b.maxY){ y += (b.maxY - y) * .22; vy *= .5; } else if (y < b.minY){ y += (b.minY - y) * .22; vy *= .5; }
+        draw(); syncSlider();
+        const out = x > b.maxX + .3 || x < b.minX - .3 || y > b.maxY + .3 || y < b.minY - .3 || z < 1 || z > ZMAX;
+        if (out || Math.abs(vx) > .1 || Math.abs(vy) > .1) anim = requestAnimationFrame(step); else { clampIn(); draw(); }
+      };
+      anim = requestAnimationFrame(step);
+    };
+    // smooth animated zoom for double-tap
+    const animateZoom = (target, cx, cy) => {
+      cancelAnimationFrame(anim); vx = vy = 0;
+      const tick = () => { const nz = z + (target - z) * .2; zoomAround(Math.abs(target - nz) < .003 ? target : nz, cx, cy); clampIn(); draw(); syncSlider();
+        if (z !== target) anim = requestAnimationFrame(tick); };
+      anim = requestAnimationFrame(tick);
+    };
+    draw();
+    const pts = new Map(); let last = null, pinch = null, lastTap = 0, hist = [];
+    const local = ev => { const r = stage.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
+    stage.addEventListener('pointerdown', ev => {
+      ev.preventDefault(); try { stage.setPointerCapture(ev.pointerId); } catch(_){} cancelAnimationFrame(anim); vx = vy = 0;
+      pts.set(ev.pointerId, local(ev));
+      if (pts.size === 1){
+        const now = Date.now(), p = pts.get(ev.pointerId);
+        if (now - lastTap < 280){ animateZoom(z < 2 ? Math.min(ZMAX, z * 2.2) : 1, p.x, p.y); lastTap = 0; pts.clear(); return; }
+        lastTap = now; last = p; hist = [{ x: p.x, y: p.y, t: performance.now() }];
+      }
+      if (pts.size === 2){ const [a, b] = [...pts.values()]; pinch = { d: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), z, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; last = null; }
+    });
+    stage.addEventListener('pointermove', ev => {
+      if (!pts.has(ev.pointerId)) return;
+      const p = local(ev); pts.set(ev.pointerId, p);
+      if (pts.size >= 2 && pinch){
+        const [a, b] = [...pts.values()], d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        x += mx - pinch.mx; y += my - pinch.my; pinch.mx = mx; pinch.my = my; // move with your fingers
+        zoomAround(pinch.z * d / pinch.d, mx, my, true);                     // and zoom around them
+      } else if (last){
+        const b = bounds();
+        x = rubber(x + (p.x - last.x), b.minX, b.maxX); y = rubber(y + (p.y - last.y), b.minY, b.maxY); last = p;
+        hist.push({ x: p.x, y: p.y, t: performance.now() }); if (hist.length > 5) hist.shift();
+      }
+      draw(); syncSlider();
+    });
+    const up = ev => {
+      if (!pts.has(ev.pointerId)) return;
+      pts.delete(ev.pointerId);
+      if (pts.size === 1){ const p = [...pts.values()][0]; last = p; pinch = null; hist = [{ x: p.x, y: p.y, t: performance.now() }]; return; }
+      if (pts.size === 0){
+        if (hist.length > 1){ const a = hist[0], b = hist[hist.length - 1], dt = Math.max(16, b.t - a.t); if (performance.now() - b.t < 80){ vx = (b.x - a.x) / dt * 16; vy = (b.y - a.y) / dt * 16; } }
+        last = null; pinch = null; settle();
+      }
+    };
+    stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
+    stage.addEventListener('wheel', ev => { ev.preventDefault(); const p = local(ev); cancelAnimationFrame(anim); zoomAround(z * Math.exp(-ev.deltaY * .002), p.x, p.y); clampIn(); draw(); syncSlider(); }, { passive: false });
+    const done = v => { cancelAnimationFrame(anim); el.remove(); try { src.close && src.close(); } catch(_){} resolve(v); };
+    el.addEventListener('click', ev => {
+      const c = ev.target.closest('[data-c]'); if (!c) return;
+      if (c.dataset.c === 'cancel') return done(null);
+      clampIn();
+      const sc = base * z, out = document.createElement('canvas'); out.width = out.height = AV_PX;
+      const o = out.getContext('2d'); o.imageSmoothingQuality = 'high';
+      o.drawImage(src, (offX - x) / sc, (offY - y) / sc, ring / sc, ring / sc, 0, 0, AV_PX, AV_PX);
+      done(out.toDataURL('image/jpeg', .8));
+    });
+  });
+}
+
+/* showcase: swipe a badge sideways to move it to another slot */
+let scDragged = 0;
+document.addEventListener('click', e => { if (Date.now() - scDragged < 400 && e.target.closest && e.target.closest('.sc-slots')){ e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+document.addEventListener('pointerdown', e => {
+  const slot = e.target.closest && e.target.closest('.sc-slots .sc-slot.filled'); if (!slot || !LB.pick || e.button > 0) return;
+  const wrap = slot.parentElement, slots = [...wrap.children], from = slots.indexOf(slot), n = LB.pick.length;
+  const rects = slots.map(el => el.getBoundingClientRect()), step = rects[1].left - rects[0].left;
+  const x0 = e.clientX, y0 = e.clientY, pid = e.pointerId;
+  let drag = false, to = from, gone = false;
+  const move = ev => {
+    if (ev.pointerId !== pid || gone) return;
+    const dx = ev.clientX - x0, dy = ev.clientY - y0;
+    if (!drag){
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) return end(null, true);
+      if (Math.abs(dx) < 8) return;
+      drag = true; slot.classList.add('sc-drag'); wrap.classList.add('sc-moving'); try { slot.setPointerCapture(pid); } catch(_){}
+    }
+    const lim = [rects[0].left - rects[from].left, rects[n - 1].left - rects[from].left]; // only between filled slots
+    const x = Math.max(lim[0] - 12, Math.min(lim[1] + 12, dx));
+    slot.style.transform = `translateX(${x}px) scale(1.04)`;
+    to = Math.max(0, Math.min(n - 1, Math.round(from + x / step)));
+    slots.forEach((el, i) => { if (el === slot || i >= n) return;
+      const shift = from < to && i > from && i <= to ? -step : from > to && i < from && i >= to ? step : 0;
+      el.style.transform = shift ? `translateX(${shift}px)` : ''; });
+  };
+  const end = (ev, cancel) => {
+    if (gone) return; gone = true;
+    document.removeEventListener('pointermove', move, true); document.removeEventListener('pointerup', up, true); document.removeEventListener('pointercancel', cc, true);
+    if (!drag) return;
+    scDragged = Date.now();
+    if (cancel || to === from){ slots.forEach(el => el.style.transform = ''); slot.classList.remove('sc-drag'); wrap.classList.remove('sc-moving'); return; }
+    // glide into the new slot, then save the new order
+    slot.style.transform = `translateX(${rects[to].left - rects[from].left}px)`; slot.classList.remove('sc-drag');
+    setTimeout(() => {
+      const k = LB.pick.splice(from, 1)[0]; LB.pick.splice(to, 0, k);
+      const v = $('#lbName') && $('#lbName').value; drawLeaderboard(); if (v != null && $('#lbName')) $('#lbName').value = v;
+    }, 230);
+  };
+  const up = ev => end(ev, false), cc = ev => end(ev, true);
+  document.addEventListener('pointermove', move, true); document.addEventListener('pointerup', up, true); document.addEventListener('pointercancel', cc, true);
+}, true);
+
+
+/* ===================== SPECIAL BADGES (hexagon) ===================== */
+const SPB = (() => {
+
+// ---------- icons (drawn in a 60x60 box, centered at 30,30) ----------
+const I = {
+  lungs: c => `<path d="M30 10v18" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/><path d="M30 26c-3 0-5 2-7 5" stroke="${c}" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M30 26c3 0 5 2 7 5" stroke="${c}" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <path d="M24 18c-7 1-12 10-12 22 0 6 4 8 9 6 4-2 5-6 5-12V20c0-1-1-2-2-2z" fill="${c}"/><path d="M36 18c7 1 12 10 12 22 0 6-4 8-9 6-4-2-5-6-5-12V20c0-1 1-2 2-2z" fill="${c}"/>`,
+  threeFlames: c => [[-13, .78], [13, .78], [0, 1]].map(([dx, s]) => `<path transform="translate(${30 + dx} ${s === 1 ? 31 : 36}) scale(${s * 1.55}) translate(-12 -11)" d="M12 3c2 3 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.2.3 1.8 1 2.7 2 3.2C11 8.5 11.3 5.6 12 3z" fill="${c}"/>`).join(''),
+  crosshair: c => `<circle cx="30" cy="30" r="16" stroke="${c}" stroke-width="3.5" fill="none"/><circle cx="30" cy="30" r="5" fill="${c}"/><path d="M30 6v10M30 44v10M6 30h10M44 30h10" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/>`,
+  droplet: c => `<path d="M30 8C30 8 15 25 15 35a15 15 0 0 0 30 0C45 25 30 8 30 8z" fill="${c}"/><path d="M23 35a7 7 0 0 0 7 7" fill="none" stroke="#120e19" stroke-width="2.5" stroke-linecap="round" opacity=".55"/><path d="M47 10l1.6 4.4 4.4 1.6-4.4 1.6L47 22l-1.6-4.4L41 16l4.4-1.6z" fill="${c}"/><path d="M12 44l1.2 3.3 3.3 1.2-3.3 1.2L12 53l-1.2-3.3L7.5 48.5l3.3-1.2z" fill="${c}" opacity=".8"/><circle cx="49" cy="44" r="2.2" fill="${c}" opacity=".7"/>`,
+  sparkle: c => `<path d="M30 8l4.5 13.5L48 26l-13.5 4.5L30 44l-4.5-13.5L12 26l13.5-4.5z" fill="${c}"/><path d="M46 38l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" fill="${c}" opacity=".8"/><circle cx="15" cy="44" r="3" fill="${c}" opacity=".7"/>`,
+  calendar: c => `<rect x="12" y="15" width="36" height="32" rx="6" fill="none" stroke="${c}" stroke-width="3.5"/><path d="M12 24h36M21 10v9M39 10v9" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/><text x="30" y="43" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="800" font-size="16" fill="${c}">7</text>`,
+  moon: c => `<path d="M38 12a19 19 0 1 0 10 30A16 16 0 0 1 38 12z" fill="${c}"/><path d="M46 14l1.4 3.6L51 19l-3.6 1.4L46 24l-1.4-3.6L41 19l3.6-1.4z" fill="${c}"/><circle cx="51" cy="31" r="1.8" fill="${c}"/>`,
+  sunrise: c => `<path d="M14 40a16 16 0 0 1 32 0z" fill="${c}"/><path d="M8 46h44" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/><path d="M30 12v6M15 18l4 4M45 18l-4 4M8 31h5M47 31h5" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/>`,
+  prism: c => `<path d="M30 10l16 30H14z" fill="none" stroke="${c}" stroke-width="3.5" stroke-linejoin="round"/><path d="M4 30l18 2" stroke="${c}" stroke-width="3" stroke-linecap="round"/><path d="M38 30l18-6M39 33l17 1M38 36l16 7" stroke-width="3" stroke-linecap="round" stroke="url(#spbRainbow)"/>`,
+  compass: c => `<circle cx="30" cy="30" r="20" fill="none" stroke="${c}" stroke-width="3.5"/><path d="M38 22l-5 11-11 5 5-11z" fill="${c}"/><circle cx="30" cy="30" r="2.5" fill="#120e19"/>`,
+  sliders: c => `<path d="M14 18h32M14 30h32M14 42h32" stroke="${c}" stroke-width="3.5" stroke-linecap="round" opacity=".45"/><circle cx="36" cy="18" r="5.5" fill="${c}"/><circle cx="22" cy="30" r="5.5" fill="${c}"/><circle cx="40" cy="42" r="5.5" fill="${c}"/>`,
+  podium2: c => `<rect x="23" y="20" width="14" height="28" rx="2" fill="${c}" opacity=".55"/><rect x="9" y="30" width="14" height="18" rx="2" fill="${c}"/><rect x="37" y="35" width="14" height="13" rx="2" fill="${c}" opacity=".55"/><text x="16" y="43" text-anchor="middle" font-family="ui-rounded,system-ui" font-weight="800" font-size="11" fill="#1b2230">2</text><path d="M16 16l2 4 4.5.6-3.3 3.1.8 4.5L16 26l-4 2.2.8-4.5-3.3-3.1L14 20z" fill="${c}"/>`,
+  podium3: c => `<rect x="23" y="20" width="14" height="28" rx="2" fill="${c}" opacity=".55"/><rect x="9" y="30" width="14" height="18" rx="2" fill="${c}" opacity=".55"/><rect x="37" y="35" width="14" height="13" rx="2" fill="${c}"/><text x="44" y="45.5" text-anchor="middle" font-family="ui-rounded,system-ui" font-weight="800" font-size="10" fill="#2e1606">3</text><path d="M44 21l2 4 4.5.6-3.3 3.1.8 4.5L44 31l-4 2.2.8-4.5-3.3-3.1L42 25z" fill="${c}"/>`,
+  podium: c => `<rect x="23" y="20" width="14" height="28" rx="2" fill="${c}"/><rect x="9" y="30" width="14" height="18" rx="2" fill="${c}" opacity=".7"/><rect x="37" y="35" width="14" height="13" rx="2" fill="${c}" opacity=".55"/><text x="30" y="34" text-anchor="middle" font-family="ui-rounded,system-ui" font-weight="800" font-size="11" fill="#2a1c05">1</text><path d="M30 6l2 4 4.5.6-3.3 3.1.8 4.5L30 16l-4 2.2.8-4.5-3.3-3.1L28 10z" fill="${c}"/>`,
+  arrowUp: c => `<path d="M30 9l17 18H37v22H23V27H13z" fill="${c}"/><path d="M14 52h32" stroke="${c}" stroke-width="3" stroke-linecap="round" opacity=".5"/>`,
+  crowns: c => [[-9, 0], [9, 7]].map(([dx, dy]) => `<path transform="translate(${dx} ${dy})" d="M14 38l-3-18 9 7 10-12 10 12 9-7-3 18z" fill="${c}" stroke="#120e19" stroke-width="2" stroke-linejoin="round"/>`).join(''),
+  founder: c => `<path transform="translate(30 31) scale(1.9) translate(-12 -11)" d="M12 3c2 3 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.2.3 1.8 1 2.7 2 3.2C11 8.5 11.3 5.6 12 3z" fill="${c}"/><path d="M30 31l1.6 3.4 3.7.4-2.8 2.5.8 3.6L30 39l-3.3 1.9.8-3.6-2.8-2.5 3.7-.4z" fill="#120e19"/>`,
+  leaf: c => { const L = (a, len, w) => `<path transform="rotate(${a} 30 44)" d="M30 44 C${30 - w} ${44 - len * .45} ${30 - w * .6} ${44 - len * .85} 30 ${44 - len} C${30 + w * .6} ${44 - len * .85} ${30 + w} ${44 - len * .45} 30 44z" fill="${c}"/>`;
+    return L(0, 34, 6) + L(-32, 29, 5.5) + L(32, 29, 5.5) + L(-64, 22, 4.5) + L(64, 22, 4.5) + L(-100, 13, 3.5) + L(100, 13, 3.5) + `<path d="M30 44v10" stroke="${c}" stroke-width="3" stroke-linecap="round"/>`; },
+  discord: c => `<path d="M14 18c4-3 8-4 12-4l1 2c-3 0-6 1-9 3 8-4 16-4 24 0-3-2-6-3-9-3l1-2c4 0 8 1 12 4 4 6 6 13 5 21-4 3-8 5-12 5l-2-4c2-1 4-2 5-3-7 3-15 3-22 0 1 1 3 2 5 3l-2 4c-4 0-8-2-12-5-1-8 1-15 5-21z" fill="${c}"/><ellipse cx="23" cy="31" rx="3.4" ry="3.8" fill="#120e19"/><ellipse cx="37" cy="31" rx="3.4" ry="3.8" fill="#120e19"/>`,
+  bug: c => `<ellipse cx="30" cy="34" rx="11" ry="14" fill="${c}"/><circle cx="30" cy="17" r="6" fill="${c}"/><path d="M30 21v26" stroke="#120e19" stroke-width="2"/><path d="M19 28l-8-4M19 36H9M20 43l-8 5M41 28l8-4M41 36h10M40 43l8 5M27 12l-4-5M33 12l4-5" stroke="${c}" stroke-width="3" stroke-linecap="round"/>`,
+  squad: c => [[-14, 5, .78], [14, 5, .78], [0, 0, 1]].map(([dx, dy, k]) => `<g transform="translate(${30 + dx} ${32 + dy}) scale(${k})"><circle cy="-9" r="7.5" fill="${c}" stroke="#120e19" stroke-width="${k === 1 ? 3 : 0}"/><path d="M-13 16c0-9 5.5-13.5 13-13.5S13 7 13 16z" fill="${c}" stroke="#120e19" stroke-width="${k === 1 ? 3 : 0}"/></g>`).join(''),
+  star: c => `<path d="M30 8l6.4 13.2 14.6 2-10.6 10.2 2.6 14.4L30 40.9 17 47.8l2.6-14.4L9 23.2l14.6-2z" fill="${c}"/>`,
+  secret: c => `<text x="30" y="41" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="900" font-size="32" fill="${c}">???</text>`
+};
+
+// ---------- the badges ----------
+const CATS = [
+  { n:'Skill', c:'#ff6a3d', badges:[
+    { id:'ironlungs', name:'Iron Lungs', req:'Take a single hit of 12 seconds or longer.', icon:'lungs', col:['#ffc2a8','#ff6a3d','#8a2410'], rar:'epic' },
+    { id:'triple', name:'Triple Threat', req:'Hit 3 blinkers in one session.', icon:'threeFlames', col:['#ffd3a0','#ff8a1f','#9a3b00'], rar:'rare' },
+    { id:'hothead', name:'Hot Head', req:'On the Hot Head profile (644°F, 120s, Extreme on a Peak or Intense on a Proxy), hit 5 blinkers in one session. The last one has to land in the final 30 seconds.', icon:'threeFlames', col:['#ffd2c2','#ff3b1f','#7a0f00'], rar:'mythic' },
+    { id:'sniper', name:'Sniper', req:'5 sessions in a row with your best hit within 5 seconds of each other.', icon:'crosshair', col:['#ffb3b3','#ff3b4e','#7a0b18'], rar:'epic' } ]},
+  { n:'Habits', c:'#30d1a0', badges:[
+    { id:'clean', name:'Squeaky Clean', req:'Clean your Peak on time 10 times, before the clean meter turns red.', icon:'sparkle', col:['#c8fff0','#2fd3a7','#0b6b55'], rar:'rare' },
+    { id:'regular', name:'Regular', req:'Have a session 7 days in a row.', icon:'calendar', col:['#c9f7ff','#34c6e0','#0b5b6e'], rar:'common' },
+    { id:'owl', name:'Night Owl', req:'A session between 2am and 5am.', icon:'moon', col:['#d9d2ff','#7d6bff','#2a1f80'], rar:'common' },
+    { id:'bird', name:'Early Bird', req:'A session between 5am and 7am.', icon:'sunrise', col:['#fff3c4','#ffc93c','#9a6b00'], rar:'common' } ]},
+  { n:'Explorer', c:'#4aa8ff', badges:[
+    { id:'lightsmith', name:'Lightsmith', req:'Make and save 5 custom zone designs.', icon:'prism', col:['#d6ecff','#4aa8ff','#123f80'], rar:'rare' },
+    { id:'explorer', name:'Explorer', req:'Use all 4 vapor levels.', icon:'compass', col:['#cdf5ff','#29b6f6','#0b4a6b'], rar:'common' },
+    { id:'master', name:'Profile Master', req:'Customize all 4 heat profiles.', icon:'sliders', col:['#dcd6ff','#6b7bff','#1d2580'], rar:'common' } ]},
+  { n:'Ranked', c:'#e9bb4f', badges:[
+    { id:'podium', name:'Podium', req:'Finish a month in the top 3 on the leaderboard. Handed out automatically when the month ends.', icon:'podium', col:['#fff4c9','#e9bb4f','#8a6115'], rar:'epic' },
+    { id:'podium1', name:'1st Place', req:'Finish a month #1 on the leaderboard.', icon:'podium', col:['#fff6cc','#ffd23f','#8a6115'], rar:'legendary' },
+    { id:'podium2', name:'2nd Place', req:'Finish a month #2 on the leaderboard.', icon:'podium2', col:['#ffffff','#c9d3e0','#4f5a69'], rar:'legendary' },
+    { id:'podium3', name:'3rd Place', req:'Finish a month #3 on the leaderboard.', icon:'podium3', col:['#ffe2c6','#d08a4a','#5c3310'], rar:'legendary' },
+    { id:'comeback', name:'Comeback', req:'Finish a month at Ember, then reach Blaze or higher the next month.', icon:'arrowUp', col:['#d6ffd9','#3ddc84','#0e6b34'], rar:'rare' },
+    { id:'b2b', name:'Back to Back', req:'Reach Champion (or Legend) two months in a row.', icon:'crowns', col:['#fff4c9','#f3cf6b','#7a5414'], rar:'legendary' } ]},
+  { n:'Social', c:'#3ddc84', badges:[
+    { id:'squad', name:'Squad Up', req:'Get 3 friends to join Emberline with your invite link or invite code (your username). A friend counts once they make a ranked profile and do 3 sessions.', icon:'squad', col:['#d6ffe6','#3ddc84','#0e5a2e'], rar:'epic' } ]},
+  { n:'Weekly', c:'#26c0e0', badges:[
+    { id:'wk-spotless', name:'Spotless', week:'2026-11-02', req:'Clean your device twice this week (Nov 2–8), both before the clean meter turns red. Only during this week.', icon:'droplet', col:['#e6fbff','#3fd4f5','#065a73'], rar:'epic' },
+    { id:'wk-midas', name:'Midas Touch', week:'2026-11-02', prem:true, req:'Premium members only: land 10 blinkers this week (Nov 2–8). Only during this week.', icon:'crowns', col:['#fff4c9','#ffd23f','#8a6115'], rar:'legendary' } ]},
+  { n:'Limited', c:'#c06bff', badges:[
+    { id:'founder', name:'Founder', req:'Joined Emberline in its first month. Can never be earned again.', icon:'founder', col:['#f0d9ff','#a24bff','#3a0070'], rar:'legendary' },
+    { id:'420', name:'4/20', req:'Have a session on April 20th.', icon:'leaf', col:['#d8ffc9','#4cd964','#145c1c'], rar:'rare' },
+    { id:'discord', name:'Discord Member', req:'Join the Emberline Discord and ask a mod for it.', icon:'discord', col:['#dfe3ff','#5865f2','#232a8a'], rar:'common' },
+    { id:'bughunter', name:'Bug Hunter', req:'Handed out by the dev for reporting real bugs.', icon:'bug', col:['#ffe9b8','#ffb020','#7a4a00'], rar:'epic' },
+    { id:'premium', name:'Premium', req:'Emberline Premium supporter. Not required, but it helps keep the servers running. Get it from the Premium popup (tap any gold star).', icon:'star', col:['#fff4c9','#ffd23f','#8a6115'], rar:'legendary' } ]},
+  { n:'Secret', c:'#ff6f91', badges:[
+    { id:'secret', name:'???', req:'Nobody knows how to get this one. Yet.', hint:'Started a session at exactly 4:20.', icon:'secret', col:['#5a4a6e','#2a2236','#120e19'], rar:'mystery', secret:true } ]}
+];
+
+// ---------- badge drawing: hexagon shield, gradient rim, icon, name ribbon ----------
+let uid = 0;
+function badge(b, size){
+  const id = 'sb' + (uid++), [c0, c1, c2] = b.col, myth = b.rar === 'mythic', leg = b.rar === 'legendary' || myth, sec = b.secret;
+  const hex = (r, cx = 70, cy = 66) => Array.from({ length: 6 }, (_, i) => { const a = Math.PI / 180 * (60 * i - 90); return `${(cx + r * Math.cos(a)).toFixed(2)},${(cy + r * Math.sin(a)).toFixed(2)}`; }).join(' ');
+  const ink = sec ? '#ff6f91' : c0;
+  return `<svg viewBox="-6 -6 152 172" ${size ? `width="${size}"` : ''} role="img" aria-label="${b.name} badge">
+    <defs>
+      <linearGradient id="${id}r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c0}"/><stop offset=".5" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient>
+      <radialGradient id="${id}bg" cx=".5" cy=".3" r=".75"><stop offset="0" stop-color="${c1}" stop-opacity=".35"/><stop offset="1" stop-color="#120e19"/></radialGradient>
+      <linearGradient id="${id}sh" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".7"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+      <linearGradient id="spbRainbow" x1="0" x2="1"><stop offset="0" stop-color="#ff5a5a"/><stop offset=".33" stop-color="#ffd60a"/><stop offset=".66" stop-color="#30d158"/><stop offset="1" stop-color="#4aa8ff"/></linearGradient>
+      <clipPath id="${id}c"><polygon points="${hex(52)}"/></clipPath>
+      ${leg ? `<linearGradient id="${id}holo" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7ad9" stop-opacity=".0"/><stop offset=".3" stop-color="#ff7ad9" stop-opacity=".25"/><stop offset=".5" stop-color="#7afcff" stop-opacity=".3"/><stop offset=".7" stop-color="#fff07a" stop-opacity=".25"/><stop offset="1" stop-color="#fff07a" stop-opacity="0"/></linearGradient>` : ''}
+    </defs>
+    ${leg ? `<polygon ${myth ? 'class="spb-glow"' : ''} points="${hex(66)}" fill="${c1}" opacity=".22"/>` : ''}
+    ${myth ? `<polygon class="spb-myth" points="${hex(69)}" fill="none" stroke="url(#${id}r)" stroke-width="2.5" stroke-dasharray="10 8" stroke-linejoin="round"/>` : ''}
+    <polygon points="${hex(62)}" fill="url(#${id}r)" ${sec ? 'stroke="#ff6f91" stroke-width="1.5" stroke-dasharray="4 4"' : ''}/>
+    <polygon points="${hex(56)}" fill="#120e19"/>
+    <polygon points="${hex(52)}" fill="url(#${id}bg)" stroke="${c1}" stroke-opacity=".55" stroke-width="1.5"/>
+    <g clip-path="url(#${id}c)">
+      ${leg ? `<g class="spb-holo" style="transform-origin:70px 66px"><rect x="0" y="0" width="140" height="140" fill="url(#${id}holo)"/></g>` : ''}
+      <g transform="translate(32 28) scale(1.27)"><g ${sec ? 'class="spb-glitch"' : myth ? 'class="spb-flick"' : ''}>${I[b.icon](ink)}</g></g>
+      ${myth ? [[52, 0], [70, .9], [88, 1.7], [61, 2.2], [80, .4]].map(([x, d]) => `<circle class="spb-ember" style="animation-delay:${d}s" cx="${x}" cy="104" r="${x % 2 ? 1.6 : 2.2}" fill="${c0}"/>`).join('') : ''}
+      ${leg || b.rar === 'epic' ? `<rect class="spb-shine" x="40" y="0" width="30" height="140" fill="url(#${id}sh)" opacity="${leg ? .9 : .5}"/>` : ''}
+    </g>
+    ${leg ? `<path class="spb-spark" style="animation-delay:.3s" d="M118 18l2 6 6 2-6 2-2 6-2-6-6-2 6-2z" fill="#fff8dc"/><path class="spb-spark" style="animation-delay:1.3s" d="M22 104l1.6 4.4 4.4 1.6-4.4 1.6-1.6 4.4-1.6-4.4-4.4-1.6 4.4-1.6z" fill="#fff8dc"/>` : ''}
+    <path d="M18 122 H122 L114 137 L122 152 H18 L26 137Z" fill="url(#${id}r)"/>
+    <text x="70" y="142" text-anchor="middle" font-family="ui-rounded,'SF Pro Rounded',system-ui,sans-serif" font-weight="800" font-size="${b.name.length <= 8 ? 13 : b.name.length <= 11 ? 10.5 : 9}" letter-spacing="${b.name.length <= 8 ? 1.2 : .5}" textLength="${b.name.length > 11 ? 84 : ""}" lengthAdjust="spacingAndGlyphs" fill="${lum(c1) > .62 ? '#1d1404' : '#fff'}">${b.name.toUpperCase()}</text>
+  </svg>`;
+}
+function lum(hex){ const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 16 & 255) + 0.587 * (n >> 8 & 255) + 0.114 * (n & 255)) / 255; }
+
+
+  return { CATS, badge };
+})();
+const SPB_ALL = SPB.CATS.flatMap(c => c.badges.map(b => Object.assign({ cat: c.n, catColor: c.c }, b)));
+const spbById = id => SPB_ALL.find(b => b.id === id);
+// which special badges you've earned, worked out from your own history (plus server awards for the hand-given ones)
+function spbStatus(){
+  const ss = rankSessions().slice().sort((a, b) => a.t - b.t), out = {};
+  const hitsOf = s => s.hits || [], best = s => Math.max(0, ...hitsOf(s));
+  const bestHit = ss.reduce((m, s) => Math.max(m, best(s)), 0);
+  out.ironlungs = { got: bestHit >= 12, prog: bestHit ? 'Best ' + bestHit.toFixed(1) + 's / 12s' : '' };
+  const mostBl = ss.reduce((m, s) => Math.max(m, hitsOf(s).filter(h => h >= 8).length), 0);
+  out.triple = { got: mostBl >= 3, prog: 'Most in one session: ' + mostBl + ' / 3' };
+  const withHits = ss.filter(s => hitsOf(s).length); let sn = false;
+  for (let i = 0; i + 5 <= withHits.length && !sn; i++){ const b = withHits.slice(i, i + 5).map(best); if (Math.max(...b) - Math.min(...b) <= 5) sn = true; }
+  out.sniper = { got: sn };
+  { const tries = ss.map(hotHeadTry).filter(Boolean), best = tries.reduce((m, t) => Math.max(m, Math.min(t.bl, 5)), 0);
+    out.hothead = { got: tries.some(t => t.ok), prog: tries.length ? 'Best try: ' + best + ' / 5 blinkers' : 'Load the Hot Head profile to start' }; }
+  const log = store.cleanLog || []; let onTime = 0;
+  log.forEach(c => { if (c.onTime != null){ if (c.onTime) onTime++; return; } const prev = ss.filter(x => x.t < c.t).pop(); if (prev && prev.sc != null && prev.sc <= (store.cleanEvery || 150)) onTime++; });
+  out.clean = { got: onTime >= 10, prog: Math.min(onTime, 10) + ' / 10 on-time cleans' };
+  const days = [...new Set(ss.map(x => startOfDay(x.t)))].sort((a, b) => a - b); let run = 0, bestRun = 0, last = null;
+  days.forEach(d => { run = last != null && Math.round((d - last) / DAY) === 1 ? run + 1 : 1; bestRun = Math.max(bestRun, run); last = d; });
+  out.regular = { got: bestRun >= 7, prog: 'Best streak: ' + Math.min(bestRun, 7) + ' / 7 days' };
+  const hr = x => new Date(x.t).getHours();
+  out.owl = { got: ss.some(x => hr(x) >= 2 && hr(x) < 5) };
+  out.bird = { got: ss.some(x => hr(x) >= 5 && hr(x) < 7) };
+  const zones = (store.myMoods || []).filter(m => m.tag === ZONE_TAG).length;
+  out.lightsmith = { got: zones >= 5, prog: Math.min(zones, 5) + ' / 5 zone designs' };
+  const vap = new Set(ss.map(x => x.vapor).filter(v => typeof v === 'number').map(v => vaporName(v)));
+  out.explorer = { got: vap.size >= 4, prog: vap.size + ' / 4 vapor levels' };
+  const ps = (store.profSaved || []).filter(Boolean).length;
+  out.master = { got: ps >= 4, prog: ps + ' / 4 profiles saved' };
+  // ranked: from your finished months plus this one
+  const now = new Date(), seq = badgeHistory().slice().reverse().map(b => ({ k: b.y * 12 + b.m, t: b.t }));
+  let curT = 0; try { curT = rbTierIdx(myRank().tier.n); } catch(e){ curT = rbTierIdx(rankFor(ss).tier.n); }
+  seq.push({ k: now.getFullYear() * 12 + now.getMonth(), t: curT });
+  let cb = false, b2b = false;
+  for (let i = 1; i < seq.length; i++){
+    if (seq[i].k !== seq[i - 1].k + 1) continue; // only months right after each other count
+    if (seq[i - 1].t === 0 && seq[i].t >= 2) cb = true;
+    if (seq[i - 1].t >= 4 && seq[i].t >= 4) b2b = true; // Champion or Legend
+  }
+  const me = LB.me || lbStore().meCache, aw = (me && me.awards) || []; // meCache: awards and Founder show before the leaderboard loads
+  out.podium = { got: aw.includes('podium') };
+  for (const k of ['podium1', 'podium2', 'podium3']) out[k] = { got: aw.includes(k) }; // handed out by the server when the month ends
+  out.comeback = { got: cb };
+  out.b2b = { got: b2b };
+  const made = me && me.created_at ? new Date(me.created_at) : null;
+  out.founder = { got: !!(made && made < new Date('2026-11-01T00:00:00')), prog: made ? '' : 'Make your profile in October 2026 to claim it' };
+  out['420'] = { got: ss.some(x => { const d = new Date(x.t); return d.getMonth() === 3 && d.getDate() === 20; }) };
+  out.discord = { got: aw.includes('discord') };
+  out.bughunter = { got: aw.includes('bughunter') };
+  out.squad = { got: aw.includes('squad'), prog: me && me.username ? `${Math.min(me.invites || 0, 3)} / 3 friends joined` : 'Make a ranked profile to get your invite link' };
+  out.secret = { got: ss.some(x => { const d = new Date(x.t); return (d.getHours() % 12) === 4 && d.getMinutes() === 20; }) };
+  // weekly badges: only earnable Monday to Sunday of their week (phone time), then gone (kept once earned, below)
+  SPB_ALL.filter(b => b.week).forEach(b => {
+    const [y, m, d] = b.week.split('-').map(Number), w0 = new Date(y, m - 1, d).getTime(), w1 = w0 + 7 * 864e5, now = Date.now();
+    const inWk = t => t >= w0 && t < w1, left = Math.max(0, Math.ceil((w1 - now) / 864e5)), when = now < w0 ? 'Starts ' + new Date(w0).toLocaleDateString([], { month:'short', day:'numeric' }) : now >= w1 ? 'This week is over' : left + ' day' + (left === 1 ? '' : 's') + ' left';
+    let n = 0, goal = 1;
+    if (b.id === 'wk-spotless'){ goal = 2; n = (store.cleanLog || []).filter(c => inWk(c.t) && c.onTime).length; }
+    if (b.id === 'wk-midas'){ goal = 10; n = ss.filter(x => inWk(x.t)).reduce((a, x) => a + hitsOf(x).filter(h => h >= blinkOf(x)).length, 0); }
+    const ok = n >= goal && (!b.prem || isPremium());
+    out[b.id] = { got: ok, prog: b.prem && !isPremium() ? 'Premium only · ' + when : `${Math.min(n, goal)} / ${goal} · ${when}` };
+  });
+  aw.forEach(id => { if (!id.startsWith('premium')) out[id] = Object.assign({}, out[id], { got: true }); }); // badges given by hand in Supabase (players.awards) always count
+  out.premium = { got: premAward(aw) }; // Premium can end, so it isn't kept forever below
+  // once earned, a badge stays earned (deleting a zone, trimming old sessions or a slow leaderboard load can't take it back)
+  if (!demo){
+    const key = acctId() || 'local', all = store.spbKeep = store.spbKeep || {}, keep = all[key] = all[key] || {};
+    let changed = false;
+    SPB_ALL.forEach(b => { if (b.id !== 'premium' && out[b.id] && out[b.id].got && !keep[b.id]){ keep[b.id] = Date.now(); changed = true; } });
+    Object.keys(keep).forEach(id => { if (id !== 'premium') out[id] = Object.assign({}, out[id], { got: true }); });
+    if (changed) save();
+  }
+  return out;
+}
+/* ===== Hot Head challenge: 644°F, 120s, Extreme, Boost +1°F / +60s, Hologram light =====
+   5 blinkers in one session, the last one ending in the final 30 seconds. Loading it into Profile 1 saves your
+   real Profile 1 first (settings and light), and one tap puts it back. */
+const hhVapor = () => isProxy() ? 1 : 1.5; // Extreme on a Peak, Intense on a Proxy
+const HOTHEAD = { name:'Hot Head', tempF:644, time:120, vapor:1.5, boostF:1, boostT:60, mood:{ kind:'excl', id:'00018E59EDX1WJ09GN39DDAHN7', name:'Hologram' }, color:'#b6c7fc' };
+// the saved Profile 1 belongs to the device it came from (switching devices must not show or restore it)
+const hhKey = () => (ble.dev && ble.dev.id) || store.lastDeviceId || 'none';
+// which kind of device a saved copy came from: Peak light data starts with a "lamp" map, Proxy light data doesn't
+const hhSeries = b => b.series || (b.colr ? (/^a[12]646c616d70/.test(b.colr) || b.colr.length === 16 ? 'peach' : 'toad') : null);
+function hhBack(){
+  store.hhBackups = store.hhBackups || {};
+  const here = S.series || 'peach';
+  if (store.hhBackup){ // saved before backups were kept per device: give it to a device of the same kind whose Profile 1 is still Hot Head
+    const ser = hhSeries(store.hhBackup);
+    if (S.mode === 'live' && S.profiles[0] && S.profiles[0].name === HOTHEAD.name && (!ser || ser === here)){ store.hhBackups[hhKey()] = store.hhBackup; store.hhBackup = null; save(); }
+  }
+  const b = store.hhBackups[hhKey()] || null, ser = b && hhSeries(b);
+  return b && (!ser || ser === here) ? b : null; // never put a Peak's profile onto a Proxy or the other way round
+}
+function hotHeadTry(s){
+  if (!s || Math.abs((s.target || 0) - HOTHEAD.tempF) > 2 || vaporName(s.vapor) !== (s.series === 'toad' ? 'Intense' : 'Extreme')) return null; // Proxy plays it on Intense
+  const bl = (s.hits || []).map((h, i) => ({ h, at: (s.hitAt || [])[i] })).filter(x => x.h >= blinkOf(s)), last = bl[bl.length - 1];
+  return { bl: bl.length, ok: bl.length >= 5 && !!last && last.at != null && typeof s.run === 'number' && last.at >= s.run - 30 };
+}
+async function hotHeadLoad(){
+  if (!needLive('load the challenge')) return;
+  const p = S.profiles[0], back = { series: S.series || 'peach', name:p.name, tempC:p.tempC, time:p.time, boostF:p.boostF, boostT:p.boostT, vapor:p.vapor, color:p.color, mood:p.mood || null, pal:p.pal };
+  try { const r = await ble.readAll('/u/app/hc/0/colr'); if (r && r.length) back.colr = toHex(r); } catch(e){}
+  store.hhBackups = store.hhBackups || {}; store.hhBackups[hhKey()] = back; save(); // saved before anything changes, for this device
+  Object.assign(p, { name:HOTHEAD.name, tempC:f2c(HOTHEAD.tempF), time:HOTHEAD.time, vapor:hhVapor(), boostF:HOTHEAD.boostF, boostT:HOTHEAD.boostT, mood:HOTHEAD.mood, color:HOTHEAD.color, lightDirty:true });
+  await saveProfile(0); render(); if (view === 'prof') drawProfiles();
+}
+async function hotHeadRestore(){
+  if (!needLive('put your Profile 1 back')) return;
+  const b = hhBack(); if (!b) return;
+  const p = S.profiles[0]; Object.assign(p, { name:b.name, tempC:b.tempC, time:b.time, boostF:b.boostF, boostT:b.boostT, vapor:b.vapor, color:b.color, mood:b.mood, pal:b.pal, lightDirty:false });
+  await saveProfile(0);
+  if (b.colr){ const blob = new Uint8Array(b.colr.match(/../g).map(x => parseInt(x, 16)));
+    try { if (isProxy()) await proxyColr('/u/app/hc/0/colr', blob); else if (S.api === 2) await ble.write('/u/app/hc/0/colr', blob); else await ble.writeBlob('/u/app/hc/0/colr', blob);
+      if (S.active === 0 && S.api !== 2){ try { isProxy() ? await proxyColr('/p/app/thc/colr', blob) : await ble.writeBlob('/p/app/thc/colr', blob); } catch(e){} } } catch(e){ toast('Settings are back, but the light couldn’t be restored: ' + e.message); } }
+  else { p.lightDirty = true; await saveProfile(0); }
+  delete store.hhBackups[hhKey()]; save(); render(); if (view === 'prof') drawProfiles(); toast('Your Profile 1 is back');
+}
+function hotHeadSheet(){
+  document.querySelectorAll('.egg.hh').forEach(e => e.remove());
+  const b = spbById('hothead'), st = spbStatus().hothead || {}, loaded = !!hhBack(), unit = v => store.unit === 'C' ? Math.round((v - 32) * 5 / 9) + '°C' : v + '°F';
+  const el = document.createElement('div'); el.className = 'egg hh';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Hot Head challenge" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
+    <div style="display:grid;justify-items:center;gap:6px"><div style="width:120px">${SPB.badge(b)}</div><span class="bv-rar r-mythic">Mythic</span><span class="label">Challenge · ${st.got ? 'Unlocked' : 'Locked'}</span><h2 style="margin:0">Hot Head</h2></div>
+    <p style="margin:0">Hit <b>5 blinkers</b> in one session on the Hot Head profile. The last one has to land in the <b>final 30 seconds</b>.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">${[unit(HOTHEAD.tempF), HOTHEAD.time + 's', isProxy() ? 'Intense' : 'Extreme', 'Boost +' + (store.unit === 'C' ? '1°C' : '1°F') + ' · +60s', 'Hologram light'].map(t => `<span class="chip" style="padding:4px 10px;border-radius:99px;background:var(--fill-2);font-size:13px">${t}</span>`).join('')}</div>
+    ${st.prog ? `<p class="muted" style="margin:0;font-size:14px">${esc(st.prog)}</p>` : ''}
+    ${loaded ? `<p class="muted" style="margin:0;font-size:13px">Profile 1 is set to Hot Head. Your own Profile 1 is saved and comes back with one tap.</p>
+      <button class="btn primary" id="hhRestore" style="width:100%">Put my Profile 1 back</button>`
+    : `<p class="muted" style="margin:0;font-size:13px">This saves your Profile 1 first (settings and light), then sets it to Hot Head. You can put it back any time.</p>
+      <button class="btn primary" id="hhLoad" style="width:100%">Load Hot Head into Profile 1</button>`}
+    <button class="btn" id="hhClose" style="width:100%">Close</button></div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const close = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.addEventListener('click', async e => {
+    if (e.target === el || e.target.id === 'hhClose') return close();
+    if (e.target.id === 'hhLoad' || e.target.id === 'hhRestore'){ e.target.disabled = true; e.target.textContent = 'Saving…';
+      try { await (e.target.id === 'hhLoad' ? hotHeadLoad() : hotHeadRestore()); } finally { close(); setTimeout(hotHeadSheet, 300); } }
+  });
+}
+/* ===== Squad Up challenge: 3 friends join with your invite link =====
+   The link carries your player id. The server ties the friend's new profile to you and counts them once they've done
+   3 sessions (not banned, not on your own Peak or phone). At 3 it adds "squad" to your awards for good. */
+const SQUAD_GOAL = 3;
+function inviteUrl(){ const me = LB.me || lbStore().meCache; return 'https://emberlineapp.github.io/emberline/' + (me && me.id && me.username ? '?ref=' + me.id : ''); }
+async function shareLink(url, text){
+  try { if (navigator.share){ await navigator.share({ title:'Emberline', text, url }); return; } } catch(e){ if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); toast('Link copied. Paste it to share'); }
+  catch(e){ const t = document.createElement('textarea'); t.value = url; t.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); toast('Link copied. Paste it to share'); } catch(_){ prompt('Copy this link', url); } t.remove(); }
+}
+// invite code box on the join form. A link already filled it in, unless the link carried an id instead of a name
+function inviteField(){
+  const r = store.inviteRef, fromLink = r && /^[0-9a-f]{32}$/.test(r);
+  return fromLink ? '<p class="muted" style="margin:0;font-size:13px">✓ Invited by a friend’s link</p>'
+    : `<input type="text" id="lbRef" maxlength="32" placeholder="Invite code (optional): your friend’s username" autocomplete="off" autocapitalize="off" value="${esc(r || '')}">`;
+}
+// your profile is under 7 days old and nobody invited you yet: you can still enter a code
+const canEnterCode = me => !!(me && me.username && !me.referred_by && Date.now() - Date.parse(me.created_at) < 7 * 864e5);
+async function enterInviteCode(code){
+  code = String(code || '').trim().replace(/^@/, '');
+  if (!/^[A-Za-z0-9_.]{3,32}$/.test(code)){ toast('Type your friend’s Emberline username'); return false; }
+  store.inviteRef = code; save();
+  try { const r = await lbCall(lbPayload()); if (r && r.player){ LB.me = r.player; lbStore().meCache = r.player; save(); }
+    if (r && r.player && r.player.referred_by){ toast('Done! Your friend gets credit once you’ve done 3 sessions'); return true; }
+    delete store.inviteRef; save(); toast('Couldn’t find a player called ' + code); return false;
+  } catch(e){ toast('Couldn’t save the code. Try again.'); return false; }
+}
+const shareInvite = () => shareLink(inviteUrl(), 'Join me on Emberline: a free, faster app for the Puffco Peak Pro and Proxy. Open the link in the Path browser and make a ranked profile.');
+function squadSheet(){
+  document.querySelectorAll('.egg.sq').forEach(e => e.remove());
+  const b = spbById('squad'), st = spbStatus().squad || {}, me = LB.me || lbStore().meCache, has = !!(me && me.username);
+  const done = Math.min((me && me.invites) || 0, SQUAD_GOAL), joined = (me && me.invites_joined) || 0, waiting = Math.max(0, joined - ((me && me.invites) || 0));
+  const el = document.createElement('div'); el.className = 'egg sq';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Squad Up challenge" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
+    <div style="display:grid;justify-items:center;gap:6px"><div style="width:120px">${SPB.badge(b)}</div><span class="bv-rar r-epic">Epic</span><span class="label">Challenge · ${st.got ? 'Unlocked' : 'Locked'}</span><h2 style="margin:0">Squad Up</h2></div>
+    <p style="margin:0">Get <b>3 friends</b> to join Emberline with your invite link or code. A friend counts once they make a ranked profile and do <b>3 sessions</b>.</p>
+    ${has ? `<div style="display:grid;gap:6px"><div style="display:flex;justify-content:space-between;font-size:14px"><b>${done} / ${SQUAD_GOAL} friends</b>${waiting ? `<span class="muted">${waiting} joined, waiting on sessions</span>` : ''}</div>
+      <div style="height:8px;border-radius:99px;background:var(--fill-2);overflow:hidden"><div style="height:100%;width:${done / SQUAD_GOAL * 100}%;background:#3ddc84;border-radius:99px"></div></div></div>
+      <p class="muted" style="margin:0;font-size:13px;word-break:break-all">${esc(inviteUrl())}</p>
+      <p style="margin:0;font-size:14px">Or have them type your invite code when they make their profile: <b style="user-select:all">${esc(me.username)}</b></p>
+      <button class="btn primary" id="sqShare" style="width:100%">Share my invite link</button>
+      ${canEnterCode(me) ? `<div style="display:grid;gap:6px;padding-top:4px"><span class="label">Got invited?</span><div class="row" style="gap:8px"><input type="text" id="sqCode" maxlength="32" placeholder="Friend’s username" autocomplete="off" autocapitalize="off" style="flex:1;min-width:0"><button class="btn small" id="sqCodeGo">Add</button></div></div>` : ''}`
+    : `<p class="muted" style="margin:0;font-size:13px">Sign in to Puffco and make a ranked profile in Social to get your invite link.</p>`}
+    <p class="muted" style="margin:0;font-size:12px">Friends use your link or code when they make their profile (or within 7 days). Accounts on your own Peak or phone don't count.</p>
+    <button class="btn" id="sqClose" style="width:100%">Close</button></div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const close = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.addEventListener('click', e => {
+    if (e.target === el || e.target.id === 'sqClose') return close();
+    if (e.target.id === 'sqShare') shareInvite();
+    if (e.target.id === 'sqCodeGo'){ const b = e.target; b.disabled = true; enterInviteCode(($('#sqCode') || {}).value).then(ok => { if (ok){ close(); setTimeout(squadSheet, 300); } else b.disabled = false; }); }
+  });
+}
+// Social: invite card under your profile
+function squadCard(){
+  const el = $('#socInvite'), me = LB.me; if (!el) return;
+  if (!me || !me.username){ el.hidden = true; return; }
+  const done = Math.min(me.invites || 0, SQUAD_GOAL), got = (me.awards || []).includes('squad');
+  el.hidden = false;
+  setHTML(el, `<div class="row" style="gap:12px;align-items:center"><button class="sq-art" data-bv="sp:squad" aria-label="Squad Up badge" style="width:52px;flex:none;padding:0;border:0;background:none">${SPB.badge(spbById('squad'))}</button>
+    <div style="flex:1;min-width:0"><span class="label">Invite friends</span><div style="font-size:14px;margin-top:2px">${got ? 'Squad Up unlocked. Keep inviting!' : `Get 3 friends on Emberline for the Squad Up badge · <b style="white-space:nowrap">${done} / ${SQUAD_GOAL}</b>`}</div></div>
+    <button class="btn small primary" id="sqInvite">Invite</button></div>`);
+}
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('#sqInvite')) shareInvite(); });
+/* ===== Avatar frames + Item Shop (test build) =====
+   Every frame is drawn in a 150x150 box around a 100px avatar (25..125). Animations only run inside .af-live
+   (the shop, your profile), never in lists, so phones don't heat up. Buying isn't wired yet (needs Stripe). */
+let afUid = 0;
+const AF_RAR = { uncommon:{ n:'Uncommon', c:['#87e339','#319236'] }, rare:{ n:'Rare', c:['#49c6ff','#1b5fd6'] }, epic:{ n:'Epic', c:['#d870ff','#6a1bb5'] }, legendary:{ n:'Legendary', c:['#ffb64a','#c94d16'] } };
+const FRAMES = [
+  { id:'ember', name:'Ember Crown', rar:'legendary', price:8, over: u => `<defs><linearGradient id="${u}f" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#ff3b1f"/><stop offset=".6" stop-color="#ff9d2e"/><stop offset="1" stop-color="#ffe7a3"/></linearGradient></defs>
+    <circle cx="75" cy="75" r="53" fill="none" stroke="url(#${u}f)" stroke-width="5"/><g fill="url(#${u}f)">
+    <path class="af-flick" d="M75 4c6 10 10 14 10 22a10 10 0 0 1-20 0c0-8 4-12 10-22z"/>
+    <path class="af-flick" style="animation-delay:-.7s" d="M48 12c4 7 7 10 7 15a7 7 0 0 1-14 0c0-5 3-8 7-15z" transform="rotate(-22 48 28)"/>
+    <path class="af-flick" style="animation-delay:-.4s" d="M102 12c4 7 7 10 7 15a7 7 0 0 1-14 0c0-5 3-8 7-15z" transform="rotate(22 102 28)"/>
+    <path class="af-flick" style="animation-delay:-1s" d="M29 32c3 5 5 8 5 11a5 5 0 0 1-10 0c0-3 2-6 5-11z" transform="rotate(-45 29 43)"/>
+    <path class="af-flick" style="animation-delay:-.5s" d="M121 32c3 5 5 8 5 11a5 5 0 0 1-10 0c0-3 2-6 5-11z" transform="rotate(45 121 43)"/></g>
+    <circle class="af-rise" cx="60" cy="40" r="1.8" fill="#ffd27a"/><circle class="af-rise" style="animation-delay:.8s" cx="92" cy="38" r="1.5" fill="#ffd27a"/><circle class="af-rise" style="animation-delay:1.6s" cx="78" cy="30" r="2" fill="#ffd27a"/>` },
+  { id:'hex', name:'Hex Rune', rar:'epic', price:6, hex:true, over: u => `<defs><linearGradient id="${u}h" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d6c2ff"/><stop offset=".5" stop-color="#9b4dff"/><stop offset="1" stop-color="#3a0b80"/></linearGradient></defs>
+    <polygon points="75,19 125,47.5 125,102.5 75,131 25,102.5 25,47.5" fill="none" stroke="url(#${u}h)" stroke-width="6" stroke-linejoin="round"/>
+    <g class="af-spin"><polygon points="75,8 134,42 134,108 75,142 16,108 16,42" fill="none" stroke="#b46bff" stroke-width="1.5" stroke-dasharray="6 10" opacity=".8"/></g>
+    <g class="af-spinr"><circle cx="75" cy="8" r="3.5" fill="#fff"/><circle cx="75" cy="142" r="2.5" fill="#e3ccff"/></g>` },
+  { id:'glass', name:'Liquid Glass', rar:'rare', price:5, under: u => `<circle cx="75" cy="75" r="60" fill="#b46bff22"/>`, over: u => `<defs><linearGradient id="${u}g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff"/></linearGradient></defs>
+    <circle cx="75" cy="75" r="56" fill="none" stroke="#ffffff40" stroke-width="5"/><g class="af-spin" style="animation-duration:3.5s"><path d="M75 19 A56 56 0 0 1 131 75" fill="none" stroke="url(#${u}g)" stroke-width="5" stroke-linecap="round"/><path d="M75 131 A56 56 0 0 1 19 75" fill="none" stroke="#b46bff" stroke-width="5" stroke-linecap="round" opacity=".8"/></g>` },
+  { id:'blinker', name:'Blinker', rar:'epic', price:6, over: u => { const a = i => { const r = 60, s = (i * 45 - 90 + 4) * Math.PI / 180, e = (i * 45 - 90 + 41) * Math.PI / 180; return `M${(75 + r * Math.cos(s)).toFixed(1)} ${(75 + r * Math.sin(s)).toFixed(1)} A${r} ${r} 0 0 1 ${(75 + r * Math.cos(e)).toFixed(1)} ${(75 + r * Math.sin(e)).toFixed(1)}`; };
+    return `<g fill="none" stroke="#ff3b1f" stroke-width="7" stroke-linecap="round">${[0,1,2,3,4,5,6,7].map(i => `<path class="af-seg" style="animation-delay:${i * .3}s" d="${a(i)}"/>`).join('')}</g>
+    <rect x="45" y="128" width="60" height="16" rx="8" fill="#ff3b1f"/><text x="75" y="140" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="800" font-size="10" letter-spacing="1.2" fill="#fff">BLINKER</text>`; } },
+  { id:'laurel', name:'Champion Laurel', rar:'legendary', price:8, over: u => `<defs><linearGradient id="${u}l" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff4c9"/><stop offset=".5" stop-color="#e9bb4f"/><stop offset="1" stop-color="#8a6115"/></linearGradient></defs>
+    <circle cx="75" cy="75" r="53" fill="none" stroke="url(#${u}l)" stroke-width="5"/><g fill="url(#${u}l)">
+    ${[[24,100,-30],[18,84,-10],[17,67,8],[22,51,25]].map(([x,y,r]) => `<ellipse cx="${x}" cy="${y}" rx="4" ry="9" transform="rotate(${r} ${x} ${y})"/><ellipse cx="${150 - x}" cy="${y}" rx="4" ry="9" transform="rotate(${-r} ${150 - x} ${y})"/>`).join('')}
+    <path class="af-bob" d="M55 24 L60 8 L68 18 L75 4 L82 18 L90 8 L95 24 Z"/></g>` },
+  { id:'vapor', name:'Vapor Cloud', rar:'rare', price:5, under: u => `<defs><filter id="${u}b"><feGaussianBlur stdDeviation="5"/></filter></defs>
+    <g class="af-spin" style="animation-duration:7s" filter="url(#${u}b)" opacity=".8"><path d="M75 10 C110 12 140 40 138 70" stroke="#cfd8ff" stroke-width="12" fill="none" stroke-linecap="round"/><path d="M75 140 C40 138 10 110 12 80" stroke="#b9a7ff" stroke-width="10" fill="none" stroke-linecap="round"/></g>`,
+    over: u => `<circle class="af-puff" cx="122" cy="30" r="6" fill="#fff" opacity=".7"/><circle class="af-puff" style="animation-delay:1s" cx="28" cy="122" r="5" fill="#fff" opacity=".6"/>` },
+  { id:'glitch', name:'Neon Glitch', rar:'epic', price:6, over: u => `<g class="af-g1"><circle cx="75" cy="75" r="54" fill="none" stroke="#00f0ff" stroke-width="3"/></g><g class="af-g2" style="mix-blend-mode:screen"><circle cx="75" cy="75" r="54" fill="none" stroke="#ff2bd6" stroke-width="3"/></g>` },
+  { id:'orbit', name:'Orbit', rar:'rare', price:5, over: u => `<circle cx="75" cy="75" r="58" fill="none" stroke="#2fd3a755" stroke-width="1.5"/><circle cx="75" cy="75" r="68" fill="none" stroke="#2fd3a733" stroke-width="1" stroke-dasharray="2 5"/>
+    <g class="af-spin" style="animation-duration:4s"><circle cx="75" cy="17" r="5" fill="#c8fff0"/><circle cx="75" cy="17" r="10" fill="#2fd3a7" opacity=".25"/></g><g class="af-spinr" style="animation-duration:6.5s"><circle cx="143" cy="75" r="3.5" fill="#ffd27a"/><circle cx="7" cy="75" r="2.5" fill="#ff9ae6"/></g>` },
+  { id:'googly', name:'Googly Eyes', rar:'uncommon', price:5, over: u => `<circle cx="75" cy="75" r="52" fill="none" stroke="#fff" stroke-width="4"/>
+    <circle cx="52" cy="24" r="16" fill="#fff" stroke="#111" stroke-width="2.5"/><circle class="af-pupil" cx="52" cy="24" r="7.5" fill="#111"/><circle cx="98" cy="24" r="16" fill="#fff" stroke="#111" stroke-width="2.5"/><circle class="af-pupil" style="animation-delay:-.4s;animation-duration:1.9s" cx="98" cy="24" r="7.5" fill="#111"/>` },
+  { id:'pizza', name:'Pizza Party', rar:'rare', price:5, under: u => `<g class="af-spin" style="animation-duration:14s"><circle cx="75" cy="75" r="66" fill="#e0a64a"/><circle cx="75" cy="75" r="60" fill="#ffd45c"/>
+    <g fill="#d6402b"><circle cx="75" cy="17" r="7"/><circle cx="127" cy="55" r="6.5"/><circle cx="118" cy="114" r="7"/><circle cx="40" cy="126" r="6.5"/><circle cx="21" cy="68" r="7"/><circle cx="106" cy="23" r="5"/><circle cx="30" cy="35" r="5"/></g></g>`,
+    over: u => `<g fill="#ffd45c"><path class="af-drip" d="M58 121 q3 0 3 6 v6 a3 3 0 0 1 -6 0 v-6 q0 -6 3 -6z"/><path class="af-drip" style="animation-delay:.9s" d="M92 122 q3 0 3 5 v8 a3 3 0 0 1 -6 0 v-8 q0 -5 3 -5z"/></g>` },
+  { id:'cat', name:'Cat Mode', rar:'uncommon', price:5, under: u => `<path class="af-wag" d="M118 120 C140 125 148 100 136 88" stroke="#3a3a3a" stroke-width="9" fill="none" stroke-linecap="round"/>`,
+    over: u => `<g class="af-ear"><path d="M32 46 L36 8 L64 30 Z" fill="#3a3a3a"/><path d="M38 38 L40 18 L55 31 Z" fill="#ff9ab8"/></g><g class="af-ear" style="animation-delay:1.3s"><path d="M118 46 L114 8 L86 30 Z" fill="#3a3a3a"/><path d="M112 38 L110 18 L95 31 Z" fill="#ff9ab8"/></g>
+    <g stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".9"><path d="M20 88 h-14"/><path d="M21 95 l-13 4"/><path d="M130 88 h14"/><path d="M129 95 l13 4"/></g>` },
+  { id:'hotdog', name:'Hot Dog', rar:'rare', price:5, under: u => `<rect x="4" y="42" width="142" height="66" rx="33" fill="#c9773a"/><rect x="10" y="48" width="130" height="54" rx="27" fill="#e89a55"/>`,
+    over: u => `<path class="af-squirt" d="M14 58 C24 48 34 68 46 58 S68 48 80 58 S102 68 114 58 S132 48 138 58" fill="none" stroke="#ffd21f" stroke-width="5" stroke-linecap="round"/>` },
+  { id:'duck', name:'Rubber Ducky', rar:'rare', price:5, under: u => `<circle cx="75" cy="75" r="62" fill="#3aa0ff55"/><circle class="af-wave" cx="75" cy="75" r="62" fill="none" stroke="#9fd6ff" stroke-width="3" stroke-dasharray="8 4"/>`,
+    over: u => `<g class="af-spin" style="animation-duration:7s"><g transform="translate(75 8)"><g class="af-duck"><ellipse cx="0" cy="8" rx="12" ry="8" fill="#ffd21f"/><circle cx="7" cy="-2" r="7" fill="#ffd21f"/><path d="M13 -2 l7 2 -7 2z" fill="#ff8a1f"/><circle cx="9" cy="-4" r="1.5" fill="#111"/><path d="M-12 6 l-5 -4 2 7z" fill="#ffd21f"/></g></g></g>` },
+  { id:'party', name:'Party Hat', rar:'uncommon', price:5, over: u => `<g class="af-tilt"><path d="M58 32 L80 -12 L100 28 Z" fill="#ff3ea5"/><path d="M66 16 L84 8 M62 24 L92 12" stroke="#ffe14d" stroke-width="4"/><circle cx="80" cy="-13" r="6" fill="#ffe14d"/><path d="M56 32 Q79 40 102 28" stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round"/></g>
+    ${[[20,'#3ddc84',0],[120,'#4aa8ff',.6],[40,'#ffe14d',1.2],[104,'#ff3ea5',1.8],[134,'#ffe14d',.3]].map(([x,c,d]) => `<rect class="af-fall" style="animation-delay:${d}s" x="${x}" y="0" width="6" height="3" fill="${c}"/>`).join('')}` },
+  { id:'clown', name:'Honk Honk', rar:'uncommon', price:5, under: u => `<circle cx="75" cy="75" r="64" fill="#fff"/><g class="af-spinr" style="animation-duration:10s">${[['75','15','#ff3b30'],['127','45','#4aa8ff'],['127','105','#ffd21f'],['75','135','#3ddc84'],['23','105','#b46bff'],['23','45','#ff8a1f']].map(([x,y,c]) => `<circle cx="${x}" cy="${y}" r="7" fill="${c}"/>`).join('')}</g>
+    <circle cx="16" cy="40" r="16" fill="#ff5c2b"/><circle cx="8" cy="58" r="13" fill="#ff5c2b"/><circle cx="134" cy="40" r="16" fill="#ff5c2b"/><circle cx="142" cy="58" r="13" fill="#ff5c2b"/>`,
+    over: u => `<circle class="af-honk" cx="75" cy="128" r="13" fill="#ff1f3d"/><circle cx="71" cy="124" r="4" fill="#fff" opacity=".7"/>` },
+  { id:'buddies', name:'Flame Buddies', rar:'epic', price:5, over: u => { const b = (x, y, s, d) => `<g class="af-hop" style="animation-delay:${d}s"><g transform="translate(${x} ${y}) scale(${s})"><path d="M0 20 C-14 12 -12 -6 0 -20 C2 -8 14 -6 14 8 C14 16 8 22 0 20Z" fill="url(#${u}b)"/><g class="af-eyes" style="animation-delay:${d * 2}s"><circle cx="-3" cy="8" r="2.2" fill="#111"/><circle cx="5" cy="8" r="2.2" fill="#111"/></g><path d="M-3 14 q4 3 8 0" stroke="#111" stroke-width="1.6" fill="none" stroke-linecap="round"/></g></g>`;
+    return `<defs><linearGradient id="${u}b" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#ff3b1f"/><stop offset="1" stop-color="#ffcf5c"/></linearGradient></defs>${b(38, 30, 1, 0)}${b(112, 30, 1, .35)}${b(75, 126, .75, .7)}`; } },
+  { id:'gent', name:'Fancy Gentleman', rar:'uncommon', price:5, over: u => `<path d="M32 26 h86 v6 h-86z M46 26 v-22 h58 v22z" fill="#111"/><rect x="46" y="16" width="58" height="5" fill="#b4232b"/>
+    <path class="af-wig" d="M75 104 C66 96 50 98 44 108 C52 106 58 112 66 110 C71 109 74 106 75 104 C76 106 79 109 84 110 C92 112 98 106 106 108 C100 98 84 96 75 104Z" fill="#2b1a10"/>
+    <circle cx="98" cy="70" r="12" fill="none" stroke="#e9bb4f" stroke-width="3"/><path d="M108 78 C114 90 112 104 118 120" stroke="#e9bb4f" stroke-width="1.5" fill="none"/><circle class="af-glint" cx="94" cy="66" r="3" fill="#fff"/>` }
+];
+const frameById = id => FRAMES.find(f => f.id === id);
+/* ===== Profile banners: the strip behind the top of your profile card. 400x110 box, scaled to fill ===== */
+const BANNERS = [
+  { id:'lava', name:'Lava Flow', rar:'legendary', price:8, svg: u => `<defs><filter id="${u}b"><feGaussianBlur stdDeviation="14"/></filter></defs><rect width="400" height="110" fill="#3a0700"/>
+    <g filter="url(#${u}b)"><circle class="bn-drift" cx="80" cy="70" r="55" fill="#ff3b1f"/><circle class="bn-drift" style="animation-delay:-3s;animation-duration:9s" cx="230" cy="40" r="60" fill="#ff8a1f"/><circle class="bn-drift" style="animation-delay:-6s" cx="350" cy="80" r="50" fill="#ffcf3f"/></g>
+    <path d="M0 90 C60 70 120 110 200 88 S330 70 400 92 V110 H0Z" fill="#1a0300" opacity=".7"/>` },
+  { id:'gold', name:'Gold Rush', rar:'legendary', price:8, svg: u => `<defs><linearGradient id="${u}g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5a3a08"/><stop offset=".45" stop-color="#e9bb4f"/><stop offset=".55" stop-color="#fff4c9"/><stop offset="1" stop-color="#8a6115"/></linearGradient></defs>
+    <rect width="400" height="110" fill="url(#${u}g)"/><rect class="bn-sweep" x="-80" y="-20" width="60" height="150" fill="#fff" opacity=".35" transform="skewX(-20)"/>
+    ${[[40,30],[120,80],[200,25],[290,70],[360,35],[80,90],[250,95]].map(([x,y],i) => `<path class="bn-twinkle" style="animation-delay:${i * .4}s" d="M${x} ${y - 6}l1.6 4.4 4.4 1.6-4.4 1.6-1.6 4.4-1.6-4.4-4.4-1.6 4.4-1.6z" fill="#fff"/>`).join('')}` },
+  { id:'galaxy', name:'Galaxy', rar:'epic', price:6, svg: u => `<defs><radialGradient id="${u}n" cx=".6" cy=".5" r=".6"><stop offset="0" stop-color="#b46bff" stop-opacity=".7"/><stop offset="1" stop-color="#b46bff" stop-opacity="0"/></radialGradient></defs>
+    <rect width="400" height="110" fill="#0a0620"/><ellipse cx="250" cy="55" rx="200" ry="60" fill="url(#${u}n)"/><ellipse cx="90" cy="40" rx="120" ry="40" fill="#2d7cf0" opacity=".25"/>
+    ${Array.from({ length:28 }, (_, i) => `<circle class="bn-twinkle" style="animation-delay:${(i * .37) % 3}s" cx="${(i * 97) % 400}" cy="${(i * 53) % 110}" r="${i % 4 ? 1 : 1.8}" fill="#fff"/>`).join('')}` },
+  { id:'synth', name:'Synthwave', rar:'epic', price:6, svg: u => `<defs><linearGradient id="${u}s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a0845"/><stop offset="1" stop-color="#ff3ea5"/></linearGradient><linearGradient id="${u}u" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe14d"/><stop offset="1" stop-color="#ff3ea5"/></linearGradient><clipPath id="${u}c"><rect y="0" width="400" height="62"/></clipPath></defs>
+    <rect width="400" height="62" fill="url(#${u}s)"/><g clip-path="url(#${u}c)"><circle cx="200" cy="62" r="40" fill="url(#${u}u)"/>${[44,50,55,59].map(y => `<rect x="150" y="${y}" width="100" height="2.5" fill="#2a0845"/>`).join('')}</g>
+    <rect y="62" width="400" height="48" fill="#12002a"/><g stroke="#ff3ea5" stroke-width="1.2" opacity=".9">${[-200,-120,-60,-20,20,60,120,200].map(x => `<line x1="200" y1="62" x2="${200 + x * 3}" y2="110"/>`).join('')}</g>
+    <g class="bn-grid" stroke="#ff3ea5" stroke-width="1.2">${[66,72,80,90,104].map(y => `<line x1="0" y1="${y}" x2="400" y2="${y}"/>`).join('')}</g>` },
+  { id:'aurora', name:'Aurora', rar:'rare', price:5, svg: u => `<defs><filter id="${u}a"><feGaussianBlur stdDeviation="8"/></filter></defs><rect width="400" height="110" fill="#06141f"/>
+    <g filter="url(#${u}a)" opacity=".9"><path class="bn-wave" d="M-40 60 C40 20 100 90 180 50 S320 20 440 60" stroke="#3ddc84" stroke-width="18" fill="none"/><path class="bn-wave" style="animation-delay:-2s" d="M-40 75 C60 40 140 100 220 65 S340 40 440 80" stroke="#b46bff" stroke-width="14" fill="none"/></g>
+    ${Array.from({ length:12 }, (_, i) => `<circle cx="${(i * 71) % 400}" cy="${(i * 29) % 40 + 6}" r="1" fill="#fff" opacity=".7"/>`).join('')}` },
+  { id:'ocean', name:'Deep Ocean', rar:'rare', price:5, svg: u => `<rect width="400" height="110" fill="#0b3d7a"/>
+    <g class="bn-slide"><path d="M0 50 q25 -12 50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 V110 H0Z" fill="#1d6dff" opacity=".7"/></g>
+    <g class="bn-slide r"><path d="M0 72 q25 -10 50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 t50 0 V110 H0Z" fill="#49c6ff" opacity=".6"/></g>
+    <circle class="bn-rise" cx="60" cy="100" r="3" fill="none" stroke="#fff" opacity=".6"/><circle class="bn-rise" style="animation-delay:1.5s" cx="300" cy="104" r="2.5" fill="none" stroke="#fff" opacity=".6"/>` },
+  { id:'skyline', name:'Ember City', rar:'rare', price:5, svg: u => `<defs><linearGradient id="${u}k" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a0b2e"/><stop offset="1" stop-color="#c94d16"/></linearGradient></defs><rect width="400" height="110" fill="url(#${u}k)"/>
+    <g fill="#0d0716">${[[0,60,40],[40,40,30],[70,70,35],[105,30,28],[133,55,40],[173,45,30],[203,20,34],[237,65,30],[267,38,36],[303,58,30],[333,28,34],[367,50,33]].map(([x,y,w]) => `<rect x="${x}" y="${y}" width="${w}" height="${110 - y}"/>`).join('')}</g>
+    ${[[50,52],[112,40],[140,66],[210,32],[215,48],[275,50],[340,40],[345,60],[180,58],[80,80]].map(([x,y],i) => `<rect class="bn-win" style="animation-delay:${i * .7}s" x="${x}" y="${y}" width="4" height="5" fill="#ffd27a"/>`).join('')}` },
+  { id:'checker', name:'Finish Line', rar:'rare', price:5, svg: u => `<rect width="400" height="110" fill="#fff"/><g class="bn-flag">${Array.from({ length:44 }, (_, i) => { const c = i % 22, r = (i / 22) | 0; return ''; }).join('')}
+    ${Array.from({ length:5 }, (_, r) => Array.from({ length:20 }, (_, c) => (r + c) % 2 ? `<rect x="${c * 20}" y="${r * 22}" width="20" height="22" fill="#111"/>` : '').join('')).join('')}</g>` },
+  { id:'cheetah', name:'Cheetah', rar:'uncommon', price:5, svg: u => `<rect width="400" height="110" fill="#e8b25a"/>
+    ${Array.from({ length:30 }, (_, i) => { const x = (i * 83) % 400 + 8, y = (i * 37) % 110 + 4; return `<g transform="translate(${x} ${y}) rotate(${i * 47})"><path d="M-7 -2 C-6 -8 4 -8 7 -3 C9 2 2 7 -3 6 C-7 5 -8 2 -7 -2Z" fill="none" stroke="#3a2210" stroke-width="2.6"/><circle r="2.6" fill="#a0602a"/></g>`; }).join('')}` },
+  { id:'pizzapat', name:'Pizza Time', rar:'uncommon', price:5, svg: u => `<rect width="400" height="110" fill="#ff4d4d"/><g class="bn-slide">${Array.from({ length:24 }, (_, i) => { const x = (i % 12) * 40 + ((i / 12 | 0) ? 20 : 0), y = (i / 12 | 0) * 55 + 10; return `<g transform="translate(${x} ${y})"><path d="M0 0 L30 0 L15 40Z" fill="#ffd45c" stroke="#e0a64a" stroke-width="4" stroke-linejoin="round"/><circle cx="12" cy="9" r="3.5" fill="#d6402b"/><circle cx="19" cy="18" r="3" fill="#d6402b"/></g>`; }).join('')}</g>` },
+  { id:'bubbles', name:'Bubble Wrap', rar:'uncommon', price:5, svg: u => `<rect width="400" height="110" fill="#b9e6ff"/>${Array.from({ length:40 }, (_, i) => { const c = i % 10, r = (i / 10) | 0; return `<circle class="${i % 7 === 3 ? 'bn-pop' : ''}" style="animation-delay:${(i % 5) * .9}s" cx="${c * 40 + (r % 2 ? 40 : 20)}" cy="${r * 28 + 14}" r="12" fill="#ffffff88" stroke="#ffffffcc" stroke-width="1.5"/><circle cx="${c * 40 + (r % 2 ? 40 : 20) - 4}" cy="${r * 28 + 10}" r="3" fill="#fff" opacity=".8"/>`; }).join('')}` },
+  { id:'clouds', name:'Cloud Nine', rar:'uncommon', price:5, svg: u => `<rect width="400" height="110" fill="#6ec6ff"/>
+    ${[[30,30,1],[180,60,1.3],[320,25,.9],[90,85,.8]].map(([x,y,s],i) => `<g class="bn-cloud" style="animation-delay:${-i * 5}s"><g transform="translate(${x} ${y}) scale(${s})"><circle cx="0" cy="0" r="14" fill="#fff"/><circle cx="16" cy="-6" r="18" fill="#fff"/><circle cx="34" cy="0" r="14" fill="#fff"/><rect x="0" y="0" width="34" height="14" fill="#fff"/><circle cx="12" cy="-2" r="1.6" fill="#333"/><circle cx="22" cy="-2" r="1.6" fill="#333"/><path d="M14 4 q3 3 6 0" stroke="#333" stroke-width="1.4" fill="none" stroke-linecap="round"/></g></g>`).join('')}` }
+];
+// pass-only items (never in the shop rotation)
+FRAMES.push(
+  { id:'sparkring', name:'Spark Ring', rar:'uncommon', price:5, pass:true, over: u => `<defs><linearGradient id="${u}r" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd27a"/><stop offset="1" stop-color="#ff6a3d"/></linearGradient></defs><circle cx="75" cy="75" r="53" fill="none" stroke="url(#${u}r)" stroke-width="4"/><g class="af-spin" style="animation-duration:3s"><path d="M75 14l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#fff8d6"/></g>` },
+  { id:'block', name:'Block Party', rar:'rare', price:5, pass:true, over: u => { const sq = []; for (let i = 0; i < 10; i++){ sq.push([i * 14 + 5, 8, 1], [i * 14 + 5, 134, 0]); } for (let y = 22; y < 134; y += 14){ sq.push([5, y, 0], [131, y, 0]); }
+    return sq.map(([x, y, g]) => `<rect x="${x}" y="${y}" width="14" height="14" fill="${g ? '#6abf3a' : '#8a5a2b'}" stroke="#00000040"/>`).join('') + `<g class="af-bob"><rect x="62" y="-14" width="26" height="26" fill="#3c8dff" stroke="#123" stroke-width="2"/><rect x="66" y="-10" width="18" height="18" fill="#7fd4ff"/></g>`; } },
+  { id:'portal', name:'Portal Hop', rar:'legendary', price:8, pass:true, under: u => `<defs><radialGradient id="${u}g"><stop offset=".55" stop-color="#b6ff3b"/><stop offset=".8" stop-color="#3ddc84"/><stop offset="1" stop-color="#0b5a2a" stop-opacity="0"/></radialGradient><filter id="${u}d"><feTurbulence type="fractalNoise" baseFrequency=".05" numOctaves="2" seed="3"/><feDisplacementMap in="SourceGraphic" scale="10"/></filter></defs><g class="af-spin" filter="url(#${u}d)"><circle cx="75" cy="75" r="68" fill="url(#${u}g)"/></g>`,
+    over: u => `<g class="af-spinr" style="animation-duration:4s" opacity=".85"><path d="M75 12 C110 14 136 40 138 75" stroke="#eaffb0" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M75 138 C40 136 14 110 12 75" stroke="#eaffb0" stroke-width="3" fill="none" stroke-linecap="round"/></g>` },
+  { id:'storm', name:'Storm Circle', rar:'epic', price:6, pass:true, under: u => `<circle cx="75" cy="75" r="68" fill="#6a1bb544"/>`,
+    over: u => `<g class="af-spin"><circle cx="75" cy="75" r="62" fill="none" stroke="#c77dff" stroke-width="6" stroke-dasharray="40 10 8 10"/></g><circle class="af-pulse" cx="75" cy="75" r="55" fill="none" stroke="#e7c6ff" stroke-width="2"/><path class="af-zap" d="M120 20 l-8 14 h8 l-10 16" stroke="#fff" stroke-width="2.5" fill="none"/><path class="af-zap" style="animation-delay:1.1s" d="M24 112 l8 -12 h-8 l10 -14" stroke="#fff" stroke-width="2.5" fill="none"/>` },
+  { id:'upside', name:'Upside Down', rar:'epic', price:6, pass:true, under: u => `<circle cx="75" cy="75" r="66" fill="#2a0508"/>`,
+    over: u => `<circle class="af-flk" cx="75" cy="75" r="54" fill="none" stroke="#ff2a2a" stroke-width="3"/><g stroke="#3b0a0a" stroke-width="4" fill="none" stroke-linecap="round"><path d="M20 40 C30 50 25 60 34 66"/><path d="M130 110 C118 104 124 94 114 88"/><path d="M110 22 C104 34 112 40 104 50"/></g>${[[30,0],[60,1],[95,.5],[120,1.6],[75,2.2]].map(([x,d]) => `<circle class="af-spore" style="animation-delay:${d}s" cx="${x}" cy="130" r="1.6" fill="#ffd0d0"/>`).join('')}` },
+  { id:'nightcity', name:'Night City', rar:'epic', price:6, pass:true, over: u => `<g class="af-g1"><circle cx="75" cy="75" r="54" fill="none" stroke="#fcee0a" stroke-width="4" stroke-dasharray="70 8 20 8"/></g><g class="af-g2"><circle cx="75" cy="75" r="54" fill="none" stroke="#00f0ff" stroke-width="2" stroke-dasharray="30 30"/></g><rect x="40" y="128" width="70" height="15" fill="#fcee0a"/><text x="75" y="139.5" text-anchor="middle" font-family="ui-monospace,monospace" font-weight="800" font-size="10" fill="#111">NETRUNNER</text>` },
+  { id:'coinrush', name:'Coin Rush', rar:'rare', price:5, pass:true, over: u => `<circle cx="75" cy="75" r="53" fill="none" stroke="#ffd21f" stroke-width="4"/><g class="af-spin">${[0,45,90,135,180,225,270,315].map(a => `<g transform="rotate(${a} 75 75)"><ellipse class="af-coin" cx="75" cy="12" rx="6" ry="8" fill="#ffd21f" stroke="#b07800" stroke-width="2"/></g>`).join('')}</g><g class="af-bob"><rect x="62" y="-16" width="26" height="26" rx="3" fill="#f4a522" stroke="#7a4a00" stroke-width="2"/><text x="75" y="4" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="900" font-size="18" fill="#fff">?</text></g>` },
+  { id:'vault', name:'Vault Glow', rar:'rare', price:5, pass:true, under: u => `<circle cx="75" cy="75" r="62" fill="#0b2a12"/>`,
+    over: u => `<circle cx="75" cy="75" r="56" fill="none" stroke="#3dff6e" stroke-width="5"/>${[0,30,60,90,120,150,180,210,240,270,300,330].map(a => `<rect x="72" y="8" width="6" height="12" fill="#3dff6e" transform="rotate(${a} 75 75)"/>`).join('')}<circle class="af-pulse" cx="75" cy="75" r="56" fill="none" stroke="#3dff6e" stroke-width="16" opacity=".12"/>` },
+  { id:'inferno', name:'Inferno Lord', rar:'legendary', price:8, pass:true, under: u => `<defs><radialGradient id="${u}i"><stop offset=".6" stop-color="#ff3b1f"/><stop offset="1" stop-color="#ff3b1f" stop-opacity="0"/></radialGradient></defs><circle cx="75" cy="75" r="70" fill="url(#${u}i)" opacity=".7"/>
+    <g class="af-aura">${Array.from({ length:16 }, (_, i) => { const a = i * Math.PI / 8 - Math.PI / 2, b = a + .2; return `<path d="M75 75 L${(75 + 70 * Math.cos(a)).toFixed(1)} ${(75 + 70 * Math.sin(a)).toFixed(1)} L${(75 + 54 * Math.cos(b)).toFixed(1)} ${(75 + 54 * Math.sin(b)).toFixed(1)}Z" fill="${i % 2 ? '#ff8a1f' : '#ffd21f'}"/>`; }).join('')}</g>`,
+    over: u => `<defs><linearGradient id="${u}c" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff4c9"/><stop offset=".5" stop-color="#ff8a1f"/><stop offset="1" stop-color="#9a1b00"/></linearGradient></defs><circle cx="75" cy="75" r="53" fill="none" stroke="url(#${u}c)" stroke-width="5"/>
+    <g fill="#ffd21f"><path class="af-bob" d="M52 22 L58 2 L67 14 L75 -4 L83 14 L92 2 L98 22 Z" stroke="#9a1b00" stroke-width="2"/></g>
+    <circle class="af-rise" cx="40" cy="40" r="2" fill="#ffd27a"/><circle class="af-rise" style="animation-delay:.8s" cx="110" cy="44" r="1.8" fill="#ffd27a"/><circle class="af-rise" style="animation-delay:1.6s" cx="75" cy="30" r="2.2" fill="#ffd27a"/>` }
+);
+BANNERS.push(
+  { id:'overworld', name:'Pixel Overworld', rar:'rare', price:5, pass:true, svg: u => `<rect width="400" height="110" fill="#7ec8ff"/>${Array.from({ length:20 }, (_, i) => { const x = i * 20, y = 70 - (i % 3) * 10; return `<rect x="${x}" y="${y}" width="20" height="${110 - y}" fill="#8a5a2b"/><rect x="${x}" y="${y}" width="20" height="8" fill="#5fb336"/>`; }).join('')}<g class="bn-slide"><rect x="40" y="20" width="60" height="14" fill="#fff"/><rect x="200" y="30" width="80" height="14" fill="#fff"/><rect x="440" y="18" width="60" height="14" fill="#fff"/></g>` },
+  { id:'vice', name:'Vice Nights', rar:'epic', price:6, pass:true, svg: u => `<defs><linearGradient id="${u}v" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b0b3a"/><stop offset=".6" stop-color="#ff3ea5"/><stop offset="1" stop-color="#ffb04a"/></linearGradient></defs><rect width="400" height="110" fill="url(#${u}v)"/><circle cx="300" cy="78" r="34" fill="#ffe14d" opacity=".9"/><rect y="88" width="400" height="22" fill="#0dd3c5" opacity=".55"/>
+    ${[40, 90, 350].map(x => `<g transform="translate(${x} 110)"><path d="M0 0 C2 -30 4 -50 10 -70" stroke="#14061f" stroke-width="5" fill="none"/><path d="M10 -70 c-20 -6 -30 4 -36 10 M10 -70 c18 -10 30 -2 36 6 M10 -70 c-6 -18 4 -26 10 -30 M10 -70 c-24 4 -26 18 -26 24 M10 -70 c22 2 26 16 26 22" stroke="#14061f" stroke-width="4" fill="none" stroke-linecap="round"/></g>`).join('')}` },
+  { id:'upsidebn', name:'The Upside Down', rar:'epic', price:6, pass:true, svg: u => `<rect width="400" height="110" fill="#14030a"/><path class="af-flk" d="M0 60 L60 50 L90 70 L150 40 L200 62 L260 30 L320 58 L400 44" stroke="#ff2a2a" stroke-width="2" fill="none"/>${Array.from({ length:20 }, (_, i) => `<circle class="af-spore" style="animation-delay:${((i * .37) % 3).toFixed(2)}s" cx="${(i * 53) % 400}" cy="110" r="1.5" fill="#ffd0d0"/>`).join('')}` },
+  { id:'village', name:'Hidden Village', rar:'rare', price:5, pass:true, svg: u => `<rect width="400" height="110" fill="#ff8a3d"/><circle cx="80" cy="40" r="26" fill="#fff3d6"/>${[[150,70],[190,60],[240,74],[290,58],[340,70]].map(([x, y]) => `<path d="M${x} 110 V${y} l14 -10 14 10 V110Z" fill="#7a2a12"/>`).join('')}<path d="M0 110 C80 90 160 100 400 86 V110Z" fill="#3a1408"/>` }
+);
+
+const bannerById = id => BANNERS.find(b => b.id === id);
+function bannerHtml(id, live){
+  const b = id && bannerById(id); if (!b) return '';
+  return `<span class="bnr${live ? ' af-live' : ''}" aria-hidden="true"><svg viewBox="0 0 400 110" preserveAspectRatio="xMidYMid slice">${b.svg('bn' + (afUid++))}</svg></span>`;
+}
+const bnOwned = id => (store.banners || []).includes(id) || (IS_TEST && store.testAll !== false && !(bannerById(id) || {}).pass);
+const myBanner = () => { const b = store.banner; return b && bnOwned(b) ? b : null; };
+
+const AF_BUNDLES = [{ id:'snack', name:'Snack Pack', items:['pizza', 'hotdog', 'duck'], price:10 }, { id:'cosmic', name:'Cosmic Set', items:['orbit'], banners:['galaxy'], price:9 }];
+// an avatar wrapped in a frame. px = avatar size; the frame spills 25% past it on each side without taking layout space
+function framed(avatar, px, fid, live){
+  const f = fid && frameById(fid); if (!f) return avatar;
+  const u = 'af' + (afUid++), box = Math.round(px * 1.5), m = -Math.round(px * .25);
+  return `<span class="afr${live ? ' af-live' : ''}${f.hex ? ' af-hex' : ''}" style="width:${box}px;height:${box}px;margin:${m}px"><svg class="af-under" viewBox="0 0 150 150" aria-hidden="true">${f.under ? f.under(u) : ''}</svg><span class="afr-av" style="width:${px}px;height:${px}px">${avatar}</span><svg class="af-over" viewBox="0 0 150 150" aria-hidden="true">${f.over(u)}</svg></span>`;
+}
+// what you own. Test build: everything in the shop is unlocked unless "Own everything" is off (pass items only come from the pass)
+const testAll = () => IS_TEST && store.testAll !== false;
+const afOwned = id => (store.frames || []).includes(id) || (testAll() && !(frameById(id) || {}).pass);
+const myFrame = () => { const f = store.frame; return f && afOwned(f) ? f : null; };
+const sparks = () => Math.max(0, Math.round(store.sparks || 0));
+const SPARK_SVG = '<svg class="spk" viewBox="0 0 60 60" aria-hidden="true"><circle cx="30" cy="30" r="22" fill="#ffd21f" stroke="#b07800" stroke-width="4"/><path d="M30 16l4 10 10 4-10 4-4 10-4-10-10-4 10-4z" fill="#fff8d6"/></svg>';
+const spk = n => `${SPARK_SVG}${Number(n).toLocaleString()}`;
+// shop rotation: changes at local midnight. Featured = 3 (one legendary), Daily = 8, Banners = 2, picked from the date
+function seeded(seed){ return () => (seed = (seed * 9301 + 49297) % 233280) / 233280; }
+const dayNo = d => d.getFullYear() * 400 + d.getMonth() * 32 + d.getDate();
+function afRotation(d){
+  const rnd = seeded(dayNo(d || new Date())), pool = FRAMES.filter(f => !f.pass).sort(() => rnd() - .5);
+  const leg = pool.find(f => f.rar === 'legendary'), feat = [leg].concat(pool.filter(f => f !== leg && f.rar !== 'uncommon').slice(0, 1), pool.filter(f => f.rar === 'uncommon').slice(0, 1));
+  return { feat, daily: pool.filter(f => !feat.includes(f)).slice(0, 8) };
+}
+function bnRotation(d){ const rnd = seeded(dayNo(d || new Date()) * 3 + 7); return BANNERS.filter(b => !b.pass).sort(() => rnd() - .5).slice(0, 2); }
+const ownTag = (own, eq, locker, price) => locker ? (eq ? 'EQUIPPED' : 'WEAR') : own ? '✓ OWNED' : spk(price * 100);
+function afTile(f, big, locker){
+  const r = AF_RAR[f.rar], own = afOwned(f.id), eq = store.frame === f.id;
+  return `<button class="ish-tile${big ? ' big' : ''}" data-afitem="${f.id}" style="--r1:${r.c[0]};--r2:${r.c[1]}"><i class="ish-streaks"></i>
+    <span class="ish-art">${framed(`<span class="af-demo">${esc(((LB.me && LB.me.username) || 'R').slice(0, 1).toUpperCase())}</span>`, big ? 96 : 70, f.id, true)}</span>
+    <span class="ish-info"><b>${esc(f.name)}</b><small>${r.n}${f.pass ? ' · Pass' : ''}</small><em class="ish-price${eq ? ' eq' : ''}">${ownTag(own, eq, locker, f.price)}</em></span></button>`;
+}
+function bnTile(b, locker){
+  const r = AF_RAR[b.rar], own = bnOwned(b.id), eq = store.banner === b.id;
+  return `<button class="ish-tile wide" data-bnitem="${b.id}" style="--r1:${r.c[0]};--r2:${r.c[1]}"><span class="ish-bn">${bannerHtml(b.id, true)}</span><span></span>
+    <span class="ish-info"><b>${esc(b.name)}</b><small>${r.n} · Banner${b.pass ? ' · Pass' : ''}</small><em class="ish-price${eq ? ' eq' : ''}">${ownTag(own, eq, locker, b.price)}</em></span></button>`;
+}
+
+/* ===== Ember Pass: a season each calendar month, 30 tiers of 1,000 XP. XP comes from daily and weekly challenges worked
+   out from your own sessions. Rewards pay out by themselves when you reach a tier (premium ones too, even after buying late) */
+const PASS_TIERS = 30, PASS_XP = 1000;
+const PASS_FREE = { 1:['sparks',50], 4:['frame','sparkring'], 8:['sparks',50], 12:['banner','overworld'], 16:['sparks',50], 20:['frame','block'], 25:['sparks',50], 30:['sparks',100] };
+const PASS_PREM = { 1:['frame','portal'], 2:['sparks',100], 3:['sparks',50], 4:['banner','vice'], 5:['sparks',50], 6:['frame','coinrush'], 7:['sparks',100], 8:['sparks',50], 9:['frame','vault'], 10:['banner','village'],
+  11:['sparks',100], 12:['sparks',50], 13:['frame','storm'], 14:['sparks',100], 15:['sparks',150], 16:['sparks',50], 17:['banner','upsidebn'], 18:['sparks',100], 19:['frame','nightcity'], 20:['sparks',50],
+  21:['sparks',100], 22:['sparks',50], 23:['frame','upside'], 24:['sparks',150], 25:['sparks',50], 26:['sparks',100], 27:['sparks',50], 28:['sparks',100], 29:['sparks',150], 30:['frame','inferno'] };
+const passSessions = (a, b) => (demo ? [] : rankSessions()).filter(s => !s.away && s.t >= a && s.t < b); // your account's real sessions, never demo ones
+const blinks = ss => ss.reduce((n, s) => n + (s.hits || []).filter(h => h >= blinkOf(s)).length, 0);
+const isExtreme = s => typeof s.vapor === 'number' && vaporName(s.vapor) === 'Extreme';
+const PASS_DAILY = [
+  { id:'s1', t:'Have a session', n:1, xp:500, f:ss => ss.length },
+  { id:'s2', t:'Have 2 sessions', n:2, xp:500, f:ss => ss.length },
+  { id:'b1', t:'Hit a blinker', n:1, xp:500, f:blinks },
+  { id:'h5', t:'Take a 5 second hit', n:1, xp:500, f:ss => ss.filter(s => (s.hits || []).some(h => h >= 5)).length },
+  { id:'ex', t:'A session on Extreme', n:1, xp:500, f:ss => ss.filter(isExtreme).length },
+  { id:'am', t:'A session before noon', n:1, xp:500, f:ss => ss.filter(s => new Date(s.t).getHours() < 12).length }
+];
+const PASS_WEEKLY = [
+  { id:'d5', t:'Sessions on 5 different days', n:5, xp:2000, f:ss => new Set(ss.map(s => new Date(s.t).toDateString())).size },
+  { id:'b10', t:'Hit 10 blinkers', n:10, xp:2000, f:blinks },
+  { id:'p3', t:'Use 3 different profiles', n:3, xp:2000, f:ss => new Set(ss.map(s => s.p)).size },
+  { id:'s15', t:'Have 15 sessions', n:15, xp:2000, f:ss => ss.length },
+  { id:'h12', t:'Take a 12 second hit', n:1, xp:1500, f:ss => ss.filter(s => (s.hits || []).some(h => h >= 12)).length },
+  { id:'cl', t:'Clean your Peak', n:1, xp:1500, f:(ss, a, b) => (store.cleanLog || []).filter(c => c.t >= a && c.t < b).length },
+  { id:'x3', t:'3 sessions on Extreme', n:3, xp:1500, f:ss => ss.filter(isExtreme).length },
+  { id:'t3', t:'3 blinkers in one session', n:1, xp:1500, f:ss => ss.filter(s => blinks([s]) >= 3).length }
+];
+const passSeason = (d = new Date()) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+function passState(){
+  const season = passSeason(), p = store.pass;
+  if (!p || p.season !== season) store.pass = { season, done:{}, claimed:{}, premium: !!(p && p.sub), sub: !!(p && p.sub) }; // a new month starts a new pass; a subscription carries over
+  return store.pass;
+}
+function passWindows(now = new Date()){
+  const d0 = new Date(now); d0.setHours(0, 0, 0, 0); const d1 = new Date(d0); d1.setDate(d1.getDate() + 1);
+  const w0 = new Date(d0); w0.setDate(w0.getDate() - ((w0.getDay() + 6) % 7)); const w1 = new Date(w0); w1.setDate(w1.getDate() + 7); // weeks start Monday
+  const iso = x => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+  return { d0:+d0, d1:+d1, w0:+w0, w1:+w1, dk: iso(d0), wk: iso(w0) };
+}
+function passChallenges(){
+  const w = passWindows(), dr = seeded(dayNo(new Date(w.d0)) + 11), wr = seeded(dayNo(new Date(w.w0)) + 29);
+  const daily = PASS_DAILY.slice().sort(() => dr() - .5).slice(0, 3), weekly = PASS_WEEKLY.slice().sort(() => wr() - .5).slice(0, 6);
+  const p = passState(), mk = (c, key, a, b) => { const cur = Math.min(c.n, c.f(passSessions(a, b), a, b)); return { c, key, cur, done: !!p.done[key] || cur >= c.n }; };
+  return { w, daily: daily.map(c => mk(c, 'd:' + w.dk + ':' + c.id, w.d0, w.d1)), weekly: weekly.map(c => mk(c, 'w:' + w.wk + ':' + c.id, w.w0, w.w1)) };
+}
+const passXp = () => Object.values(passState().done).reduce((a, b) => a + (+b || 0), 0);
+const passTier = () => Math.min(PASS_TIERS, Math.floor(passXp() / PASS_XP));
+function passGive(kind, val){
+  if (kind === 'sparks'){ store.sparks = sparks() + val; return `+${val} Sparks`; }
+  if (kind === 'frame'){ store.frames = [...new Set((store.frames || []).concat(val))]; return (frameById(val) || {}).name + ' frame'; }
+  if (kind === 'banner'){ store.banners = [...new Set((store.banners || []).concat(val))]; return (bannerById(val) || {}).name + ' banner'; }
+  return '';
+}
+// check challenges, add XP, pay out every tier reached. Safe to call any time
+function passRefresh(announce){
+  if (demo) return { xp:0, got:[] };
+  const p = passState(), ch = passChallenges(); let xp = 0;
+  ch.daily.concat(ch.weekly).forEach(x => { if (x.cur >= x.c.n && !p.done[x.key]){ p.done[x.key] = x.c.xp; xp += x.c.xp; } });
+  const tier = passTier(), got = [];
+  for (let t = 1; t <= tier; t++){
+    if (PASS_FREE[t] && !p.claimed['f' + t]){ p.claimed['f' + t] = 1; got.push(passGive(...PASS_FREE[t])); }
+    if (p.premium && PASS_PREM[t] && !p.claimed['p' + t]){ p.claimed['p' + t] = 1; got.push(passGive(...PASS_PREM[t])); }
+  }
+  save();
+  if (announce && (xp || got.length)) toast([xp ? `Ember Pass +${xp.toLocaleString()} XP` : '', got.length ? 'Unlocked: ' + got.slice(0, 3).join(', ') + (got.length > 3 ? ` +${got.length - 3} more` : '') : ''].filter(Boolean).join(' · '));
+  return { xp, got };
+}
+setTimeout(() => { try { passRefresh(true); } catch(e){} }, 4000);
+function passRewardHtml(r, t, track){
+  if (!r) return '<div class="ps-cell empty"></div>';
+  const [kind, val] = r, p = passState(), have = p.claimed[(track === 'prem' ? 'p' : 'f') + t], lock = track === 'prem' && !p.premium;
+  let art, name, sub;
+  if (kind === 'sparks'){ art = SPARK_SVG; name = val; sub = 'Sparks'; }
+  else if (kind === 'frame'){ const f = frameById(val); art = framed('<span class="af-demo">R</span>', 34, val, false); name = f.name; sub = AF_RAR[f.rar].n + ' frame'; }
+  else { const b = bannerById(val); art = `<span class="ps-bn">${bannerHtml(val, false)}</span>`; name = b.name; sub = 'Banner'; }
+  return `<div class="ps-cell ${kind}${have ? ' got' : ''}${lock ? ' lock' : ''}"><span class="ps-art">${art}</span><b>${esc(String(name))}</b><small>${sub}</small>${have ? '<i>✓</i>' : lock ? '<i>🔒</i>' : ''}</div>`;
+}
+function passHtml(){
+  const p = passState(), xp = passXp(), tier = passTier(), ch = passChallenges();
+  const into = tier >= PASS_TIERS ? PASS_XP : xp - tier * PASS_XP;
+  const end = new Date(); end.setMonth(end.getMonth() + 1, 1); end.setHours(0, 0, 0, 0); const daysLeft = Math.ceil((end - Date.now()) / 864e5);
+  const tot = (tr, k) => Object.values(tr).filter(r => r[0] === k).reduce((a, r) => a + (k === 'sparks' ? r[1] : 1), 0);
+  const left = (ms) => { const h = Math.floor(ms / 36e5); return h >= 24 ? Math.ceil(h / 24) + 'd' : h + 'h ' + Math.floor(ms % 36e5 / 6e4) + 'm'; };
+  const chHtml = x => `<div class="ps-ch${x.done ? ' done' : ''}"><div><b>${esc(x.c.t)}</b><span>${x.cur}/${x.c.n}</span></div><i class="ps-bar"><i style="width:${Math.round(x.cur / x.c.n * 100)}%"></i></i><em>${x.done ? '✓ ' : '+'}${x.c.xp.toLocaleString()} XP</em></div>`;
+  const cols = Array.from({ length: PASS_TIERS }, (_, i) => i + 1).map(t => `<div class="ps-col${t === tier + 1 ? ' next' : ''}${t <= tier ? ' reached' : ''}"><span class="ps-tn">${t}</span>${passRewardHtml(PASS_PREM[t], t, 'prem')}${passRewardHtml(PASS_FREE[t], t, 'free')}</div>`).join('');
+  return `<div class="ps-head"><span class="ps-season">SEASON · ${new Date().toLocaleDateString('en-US', { month:'long', year:'numeric' }).toUpperCase()} · ENDS IN ${daysLeft} DAY${daysLeft === 1 ? '' : 'S'}</span>
+      <p>Do challenges, earn XP, unlock 30 tiers. Premium unlocks the top row, including ${tot(PASS_PREM, 'sparks').toLocaleString()} Sparks to spend in the shop.</p></div>
+    ${p.premium ? `<div class="ps-owned">✓ You have the Ember Pass this month${IS_TEST ? ' <button class="ps-mini" data-pass="drop">Remove (test)</button>' : ''}</div>`
+      : `<button class="ps-buy" data-pass="buy">GET THE PASS · $9.99<small>per month · ${IS_TEST ? 'free in the test build' : 'cancel any time'}</small></button>`}
+    <div class="ps-lvl"><div class="ps-n">${tier}<small>TIER</small></div><div><i class="ps-bar big"><i style="width:${Math.round(into / PASS_XP * 100)}%"></i></i><span>${tier >= PASS_TIERS ? 'Pass complete!' : `${into.toLocaleString()} / ${PASS_XP.toLocaleString()} XP to tier ${tier + 1}`}</span></div><div class="ps-wallet">${spk(sparks())}</div></div>
+    <div class="ps-track"><div class="ps-rows"><div class="ps-labels"><span class="p">PREMIUM</span><span>FREE</span></div>${cols}</div></div>
+    <h2>DAILY <small>New in ${left(ch.w.d1 - Date.now())}</small></h2><div class="ps-chs">${ch.daily.map(chHtml).join('')}</div>
+    <h2>WEEKLY <small>New in ${left(ch.w.w1 - Date.now())}</small></h2><div class="ps-chs">${ch.weekly.map(chHtml).join('')}</div>
+    <div class="ps-vs"><div><b>Free</b><span>${tot(PASS_FREE, 'sparks')} Sparks · ${tot(PASS_FREE, 'frame')} frames · ${tot(PASS_FREE, 'banner')} banner</span></div>
+      <div class="p"><b>Premium · $9.99/mo</b><span>${tot(PASS_PREM, 'sparks').toLocaleString()} Sparks · ${tot(PASS_PREM, 'frame')} exclusive frames (Inferno Lord at tier 30) · ${tot(PASS_PREM, 'banner')} exclusive banners · plus everything in Free</span></div></div>
+    <p class="ish-note">100 Sparks = $1 in the shop. Challenges count sessions from this phone. Pass items never come back to the shop.</p>`;
+}
+// buy with Sparks
+function shopBuy(kind, item){
+  if (item.pass){ toast(`${item.name} only comes from the Ember Pass`); return false; }
+  const cost = item.price * 100;
+  if (sparks() < cost){ toast(`${item.name} costs ${cost.toLocaleString()} Sparks. You have ${sparks().toLocaleString()}. Buying with money is coming soon`); return false; }
+  if (!confirm(`Buy ${item.name} for ${cost.toLocaleString()} Sparks?`)) return false;
+  store.sparks = sparks() - cost;
+  if (kind === 'frame') store.frames = [...new Set((store.frames || []).concat(item.id))]; else store.banners = [...new Set((store.banners || []).concat(item.id))];
+  save(); toast(`${item.name} is yours. Wear it from the Locker`); return true;
+}
+function bundleBuy(b){
+  const own = b.items.every(afOwned) && (b.banners || []).every(bnOwned); if (own){ toast('You already own everything in this bundle'); return false; }
+  const cost = b.price * 100;
+  if (sparks() < cost){ toast(`${b.name} costs ${cost.toLocaleString()} Sparks. You have ${sparks().toLocaleString()}`); return false; }
+  if (!confirm(`Buy the ${b.name} bundle for ${cost.toLocaleString()} Sparks?`)) return false;
+  store.sparks = sparks() - cost; store.frames = [...new Set((store.frames || []).concat(b.items))]; store.banners = [...new Set((store.banners || []).concat(b.banners || []))];
+  save(); toast(`${b.name} unlocked`); return true;
+}
+function itemShop(tab){
+  document.querySelectorAll('.ishop').forEach(e => e.remove());
+  tab = tab || 'shop'; if (tab === 'pass') passRefresh(true);
+  const rot = afRotation(), el = document.createElement('div'); el.className = 'ishop'; el.dataset.tab = tab;
+  const left = () => { const e = new Date(); e.setHours(24, 0, 0, 0); const s = Math.max(0, Math.floor((e - Date.now()) / 1000)); return [s / 3600 | 0, (s % 3600) / 60 | 0, s % 60].map(x => String(x).padStart(2, '0')).join(':'); };
+  const bundleHtml = c => { const full = c.items.reduce((a, id) => a + frameById(id).price, 0) + (c.banners || []).reduce((a, id) => a + bannerById(id).price, 0), own = c.items.every(afOwned) && (c.banners || []).every(bnOwned), bn = (c.banners || [])[0];
+    return `<button class="ish-bundle${bn ? ' has-bnr' : ''}" data-afbundle="${c.id}" style="${bn ? 'background:#0a0620;padding-top:60px' : ''}">${bn ? bannerHtml(bn, true) : ''}${c.items.map(id => framed('<span class="af-demo">R</span>', 54, id, true)).join('')}
+      <span class="ish-binfo"><b>${c.name.toUpperCase()}</b><small>${c.items.map(id => frameById(id).name).join(', ')}${bn ? ' + ' + bannerById(bn).name + ' banner' : ''}</small></span><em class="ish-price">${own ? '✓ OWNED' : `<s>${spk(full * 100)}</s> ${spk(c.price * 100)}`}</em></button>`; };
+  const avatar = framed(lbAvatar(LB.me && LB.me.avatar_url, (LB.me && LB.me.username) || 'You', 80), 80, myFrame(), true);
+  const title = { shop:'ITEM SHOP', pass:'EMBER PASS', locker:'LOCKER' }[tab];
+  el.innerHTML = `<div class="ish-in">
+    <div class="ish-top"><h1>${title}</h1><span class="ish-wallet">${spk(sparks())}</span><button class="ish-x" data-ishclose aria-label="Close">✕</button></div>
+    <div class="ish-tabs">${['shop', 'pass', 'locker'].map(k => `<button data-ishtab="${k}" aria-pressed="${tab === k}">${{ shop:'Shop', pass:'Pass', locker:'Locker' }[k]}</button>`).join('')}</div>
+    ${tab === 'shop' ? `<div class="ish-timer">NEW ITEMS IN <b id="ishT">${left()}</b></div>
+      <h2>FEATURED</h2><div class="ish-row feat">${rot.feat.map(f => afTile(f, true)).join('')}</div>
+      <h2>BUNDLES</h2>${AF_BUNDLES.map(bundleHtml).join('')}
+      <h2>BANNERS</h2><div class="ish-row">${bnRotation().map(b => bnTile(b)).join('')}</div>
+      <h2>DAILY</h2><div class="ish-row">${rot.daily.map(f => afTile(f)).join('')}</div>
+      <p class="ish-note">100 Sparks = $1. Get Sparks from the Ember Pass. Buying Sparks with money is coming soon.</p>`
+    : tab === 'pass' ? passHtml()
+    : `<div class="ish-me${myBanner() ? ' has-bnr' : ''}">${bannerHtml(myBanner(), true)}${avatar}<div><b>${myFrame() ? esc(frameById(store.frame).name) : 'No frame'}${myBanner() ? ' · ' + esc(bannerById(store.banner).name) : ''}</b><small>Tap something to wear it. Tap it again to take it off.</small></div></div>
+      <h2>FRAMES</h2><div class="ish-row">${FRAMES.filter(f => afOwned(f.id)).map(f => afTile(f, false, true)).join('') || '<p class="ish-note">No frames yet. Grab one in the Shop or the Pass.</p>'}</div>
+      <h2>BANNERS</h2><div class="ish-row">${BANNERS.filter(b => bnOwned(b.id)).map(b => bnTile(b, true)).join('') || '<p class="ish-note">No banners yet.</p>'}</div>`}
+    ${IS_TEST && tab !== 'pass' ? `<p class="ish-note">Test build: ${testAll() ? 'every shop item is unlocked. Turn off "Own everything" in the test tools to try buying with Sparks.' : 'you only own what you bought or earned.'}</p>` : ''}</div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => el.classList.add('on'));
+  const t = setInterval(() => { const x = el.querySelector('#ishT'); if (!el.isConnected){ clearInterval(t); return; } if (x) x.textContent = left(); }, 1000);
+  if (tab === 'pass'){ const nx = el.querySelector('.ps-col.next') || el.querySelector('.ps-col:last-child'), tr = el.querySelector('.ps-track'); if (nx && tr) tr.scrollLeft = Math.max(0, nx.offsetLeft - 120); }
+}
+document.addEventListener('click', e => { if (e.target.closest('#ishOpen')) itemShop(); });
+document.addEventListener('click', e => {
+  const sh = e.target.closest('.ishop'); if (!sh) return;
+  const tab = sh.dataset.tab, again = () => { itemShop(tab); try { drawSocial(); } catch(_){} };
+  if (e.target.closest('[data-ishclose]')){ sh.classList.remove('on'); setTimeout(() => sh.remove(), 250); return; }
+  const tb = e.target.closest('[data-ishtab]'); if (tb){ itemShop(tb.dataset.ishtab); return; }
+  const ps = e.target.closest('[data-pass]');
+  if (ps){ const p = passState();
+    if (ps.dataset.pass === 'buy'){ if (!IS_TEST){ toast('The Ember Pass is coming soon'); return; } p.premium = true; p.sub = true; save(); passRefresh(true); again(); return; }
+    if (ps.dataset.pass === 'drop'){ p.premium = false; p.sub = false; save(); again(); return; } }
+  const it = e.target.closest('[data-afitem]');
+  if (it){ const f = frameById(it.dataset.afitem); buzz(12);
+    if (!afOwned(f.id)){ if (shopBuy('frame', f)) again(); return; }
+    store.frame = store.frame === f.id ? null : f.id; save(); toast(store.frame ? `Wearing ${f.name}` : 'Frame off'); again(); return; }
+  const bi = e.target.closest('[data-bnitem]');
+  if (bi){ const b = bannerById(bi.dataset.bnitem); buzz(12);
+    if (!bnOwned(b.id)){ if (shopBuy('banner', b)) again(); return; }
+    store.banner = store.banner === b.id ? null : b.id; save(); toast(store.banner ? `${b.name} banner on` : 'Banner off'); again(); return; }
+  const bd = e.target.closest('[data-afbundle]'); if (bd){ const b = AF_BUNDLES.find(x => x.id === bd.dataset.afbundle); if (b && bundleBuy(b)) again(); }
+});
+
+/* ===== Rich's dev frame + banner =====
+   Tied to his account id, so everyone sees them on his profile with no server change. Animates only on profiles */
+const isRichId = id => !!id && (id === RICH_ID || (IS_TEST && store.testRich && LB.me && id === LB.me.id));
+const RICH_BANNER = 'bg/rich-banner.gif';
+let dvUid = 0;
+function devFramed(avatar, px, live){
+  const u = 'dv' + (dvUid++), box = Math.round(px * 1.5), m = -Math.round(px * .25);
+  const brk = (x, y, sx, sy) => `<path d="M${x} ${y + 12 * sy} V${y} H${x + 12 * sx}" fill="none" stroke="#3ddc84" stroke-width="3" stroke-linecap="round"/>`;
+  return `<span class="afr${live ? ' dv-live' : ''}" style="width:${box}px;height:${box}px;margin:${m}px"><svg class="af-under" viewBox="0 0 150 150" aria-hidden="true"><circle cx="75" cy="75" r="60" fill="#00f0ff14"/></svg>
+    <span class="afr-av" style="width:${px}px;height:${px}px">${avatar}</span>
+    <svg class="af-over" viewBox="0 0 150 150" aria-hidden="true"><defs>
+      <linearGradient id="${u}g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#00f0ff"/><stop offset=".5" stop-color="#b46bff"/><stop offset="1" stop-color="#3ddc84"/></linearGradient>
+      <path id="${u}p" d="M75 75 m-66 0 a66 66 0 1 1 132 0 a66 66 0 1 1 -132 0"/>
+      <linearGradient id="${u}s" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#00f0ff" stop-opacity="0"/><stop offset="1" stop-color="#00f0ff"/></linearGradient></defs>
+    <circle cx="75" cy="75" r="53" fill="none" stroke="url(#${u}g)" stroke-width="4"/>
+    <g class="dv-spin"><path d="M75 22 A53 53 0 0 1 128 75" fill="none" stroke="url(#${u}s)" stroke-width="4" stroke-linecap="round"/></g>
+    <g class="dv-spinr"><circle cx="75" cy="75" r="59" fill="none" stroke="#00f0ff66" stroke-width="1.2" stroke-dasharray="2 6"/></g>
+    <g class="dv-text"><text font-family="ui-monospace,Menlo,monospace" font-size="8.4" font-weight="700" letter-spacing="1.4" fill="#9fefff"><textPath href="#${u}p">&lt;/&gt; DEV · EMBERLINE · BUILT BY RICH · 0x45 4D 42 · &lt;/&gt; DEV · EMBERLINE ·</textPath></text></g>
+    ${brk(8, 8, 1, 1)}${brk(142, 8, -1, 1)}${brk(8, 142, 1, -1)}${brk(142, 142, -1, -1)}
+    <rect x="47" y="127" width="56" height="17" rx="4" fill="#07140f" stroke="#3ddc84" stroke-width="1.6"/>
+    <text x="70" y="139.5" text-anchor="middle" font-family="ui-monospace,Menlo,monospace" font-size="10.5" font-weight="800" fill="#3ddc84">&gt;DEV</text>
+    <rect class="dv-cur" x="88" y="131" width="6" height="10" fill="#3ddc84"/></svg></span>`;
+}
+const richBannerHtml = () => `<span class="bnr bnr-img" aria-hidden="true"><img src="${RICH_BANNER}" alt="" loading="lazy"></span>`;
+
+function drawBadgeBook(){
+  const el = $('#badgeBook'); if (!el) return;
+  const st = spbStatus(), first = !store.spbUnlocked; store.spbUnlocked = store.spbUnlocked || {};
+  // remember when each badge was first earned, so we can show your newest ones
+  let fresh = [];
+  SPB_ALL.forEach(b => { if (st[b.id] && st[b.id].got && !store.spbUnlocked[b.id]){ store.spbUnlocked[b.id] = Date.now(); if (!first) fresh.push(b); } });
+  if (fresh.length || first) save();
+  if (fresh.length) setTimeout(() => toast(fresh.length === 1 ? `Badge unlocked: ${fresh[0].name}` : `${fresh.length} new badges unlocked`), 400);
+  const got = SPB_ALL.filter(b => st[b.id] && st[b.id].got);
+  const RAR = { mythic:6, mystery:5, legendary:4, epic:3, rare:2, common:1 }, sec = id => Math.floor((store.spbUnlocked[id] || 0) / 1000);
+  const recent = got.slice().sort((a, b) => (sec(b.id) - sec(a.id)) || (RAR[b.rar] - RAR[a.rar])).slice(0, 3); // newest first; same moment: rarest first
+  const item = (b, big) => { const ok = st[b.id] && st[b.id].got;
+    return `<button class="bb-item ${ok ? 'got' : 'locked'}${big ? ' big' : ''}" data-bv="sp:${b.id}"><span class="bb-art">${SPB.badge(b)}${ok ? '' : '<span class="bb-lock"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span>'}</span><span class="bb-name">${b.secret && !ok ? '???' : b.name}</span></button>`; };
+  const open = el.querySelector('details') && el.querySelector('details').open;
+  setHTML(el, `<span class="label">Badges</span>
+    ${recent.length ? `<div class="bb-recent">${recent.map(b => item(b, true)).join('')}</div>` : '<p class="muted" style="margin:0;font-size:14px">No badges yet. Open the list to see what you can earn.</p>'}
+    <details class="bb-all"${open ? ' open' : ''}><summary><span>All badges</span><span class="muted"><b style="color:var(--fg)">${got.length}</b> / ${SPB_ALL.length}</span><svg class="mt-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+      <div class="bb-body"><div class="bb-bar"><i style="width:${Math.round(got.length / SPB_ALL.length * 100)}%"></i></div>
+      <p class="muted" style="margin:0;font-size:13px">Tap any badge to see how to earn it. Unlocked ones can go in your showcase.</p>
+      ${SPB.CATS.map(c => `<div class="bb-cat"><span class="bb-cat-n" style="color:${c.c}">${c.n}</span><div class="bb-grid">${c.badges.map(b => item(b)).join('')}</div></div>`).join('')}</div>
+    </details>`);
+  applyHaptics();
+}
+/* ===================== SOCIAL: profiles, bios, follows, search ===================== */
+const SOC = { following: new Set(), followers: [], followingRows: [], results: null, q: '', loaded: false };
+const SOC_CNT = new Map(); // follower counts from under a minute ago
+async function socCounts(pid){
+  const c = SOC_CNT.get(pid); if (c && Date.now() - c.at < 60000) return c.v;
+  try {
+    const [a, b] = await Promise.all([
+      sbJSON(`/rest/v1/follows?select=follower&followee=eq.${pid}&limit=2000`, { method:'GET' }),
+      sbJSON(`/rest/v1/follows?select=followee&follower=eq.${pid}&limit=2000`, { method:'GET' })
+    ]);
+    const v = { followers: a.length, following: b.length, followerIds: a.map(x => x.follower), followingIds: b.map(x => x.followee) }; SOC_CNT.set(pid, { at: Date.now(), v }); return v;
+  } catch(e){ return { followers: 0, following: 0, followerIds: [], followingIds: [] }; }
+}
+const SOC_COLS = '*'; // everything public about a player (includes gear once the column exists)
+async function socPlayers(ids){
+  if (!ids.length) return [];
+  try { return await sbRows(`/rest/v1/players?select=${SOC_COLS}&id=in.(${ids.slice(0, 200).join(',')})`); } catch(e){ return []; }
+}
+async function socLoad(){
+  drawSocial();
+  const me = LB.me;
+  if (!me || !me.id){ if (lbUsesPuffco() && !LB.me) { const p = await lbRestore(); if (p) return socLoad(); } return; }
+  const c = await socCounts(me.id);
+  SOC.myCounts = c; SOC.following = new Set(c.followingIds); SOC.followerSet = new Set(c.followerIds); SOC.loaded = true;
+  socSetMyCounts(); drawBadgeBook();
+  SOC.followingRows = await socPlayers(c.followingIds);
+  socDrawFollowing(); socPaintAllFollow();
+}
+// flip every Follow button for this person in place (no redraw, so nothing jumps)
+// you follow them and they follow you = Friends
+function followLabel(id){ const on = SOC.following.has(id), back = SOC.followerSet && SOC.followerSet.has(id); return on && back ? 'Friends' : on ? 'Following' : back ? 'Follow back' : 'Follow'; }
+function socPaintFollow(id){
+  const on = SOC.following.has(id);
+  document.querySelectorAll(`[data-follow="${id}"]`).forEach(btn => {
+    const sw = btn.querySelector(':scope > .hz');
+    btn.classList.toggle('primary', !on); btn.classList.toggle('on', on);
+    [...btn.childNodes].forEach(n => { if (n.nodeType === 3) n.remove(); });
+    btn.insertBefore(document.createTextNode(followLabel(id)), sw || null);
+  });
+}
+function socPaintAllFollow(){ new Set([...document.querySelectorAll('[data-follow]')].map(b => b.dataset.follow)).forEach(socPaintFollow); }
+// anyone's followers or following (tap the numbers on a profile): tap a person to open them, Follow right from the list
+async function socListOpen(pid, kind, name){
+  if (!pid) return;
+  document.querySelectorAll('.egg.flist').forEach(e => e.remove());
+  const el = document.createElement('div'); el.className = 'egg flist'; el.style.zIndex = 260;
+  const title = kind === 'followers' ? 'Followers' : 'Following';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="${title}" style="text-align:left;justify-items:stretch;gap:10px;max-height:80vh;display:grid;grid-template-rows:auto minmax(0,1fr)"><div class="row between"><h2 style="margin:0;font-size:20px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name ? esc(name) + ' · ' : ''}${title}</h2><button class="btn small ghost" data-fx>Close</button></div>
+    <div class="soc-list" style="overflow:auto;-webkit-overflow-scrolling:touch;display:grid;gap:6px;align-content:start"><p class="muted" style="margin:0">Loading…</p></div></div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  let rows = [];
+  el.addEventListener('click', async e => {
+    e.stopPropagation(); // the page's own row and Follow taps don't know these rows
+    if (e.target === el || e.target.closest('[data-fx]')) return shut();
+    const f = e.target.closest('[data-follow]'); if (f){ const r = rows.find(x => x.id === f.dataset.follow); if (r) await socToggleFollow(r); return; }
+    const row = e.target.closest('[data-soc]'); if (row){ const r = rows.find(x => x.id === row.dataset.soc); if (r){ shut(); openPlayer(r); } }
+  });
+  SOC_CNT.delete(pid); // fresh list
+  const c = await socCounts(pid), ids = kind === 'followers' ? c.followerIds : c.followingIds;
+  rows = (await socPlayers(ids)).filter(r => !r.banned).sort((a, b) => (b.rp || 0) - (a.rp || 0) || String(a.username).localeCompare(String(b.username)));
+  const list = el.querySelector('.soc-list'); if (!list) return;
+  list.innerHTML = rows.length ? rows.map(socRow).join('') + (ids.length > 200 ? `<p class="muted" style="margin:0;font-size:12px">Showing the top 200 of ${ids.length}</p>` : '')
+    : `<p class="muted" style="margin:0">${kind === 'followers' ? 'No followers yet.' : 'Not following anyone yet.'}</p>`;
+  socPaintAllFollow(); applyHaptics();
+}
+document.addEventListener('click', e => { const t = e.target.closest && e.target.closest('[data-flist]'); if (t) socListOpen(t.dataset.pid, t.dataset.flist, t.dataset.n || ''); });
+function socSetMyCounts(){
+  const c = SOC.myCounts; if (!c) return;
+  document.querySelectorAll('#socMe [data-cnt]').forEach(b => { const v = c[b.dataset.cnt]; if (v != null && b.textContent !== String(v)) b.textContent = v; });
+}
+async function socToggleFollow(r){
+  if (!LB.me || !LB.me.id || r.id === LB.me.id) return;
+  SOC_CNT.delete(r.id); SOC_CNT.delete(LB.me.id); // counts change
+  const was = SOC.following.has(r.id);
+  if (was) SOC.following.delete(r.id); else SOC.following.add(r.id); // flip right away, undo if the server says no
+  socPaintFollow(r.id);
+  if (SOC.myCounts){ SOC.myCounts.following = SOC.following.size; socSetMyCounts(); }
+  try {
+    await lbCall({ action: was ? 'unfollow' : 'follow', target: r.id });
+    if (!was) SOC.followingRows = SOC.followingRows.filter(x => x.id !== r.id).concat([r]);
+    else SOC.followingRows = SOC.followingRows.filter(x => x.id !== r.id);
+    socDrawFollowing();
+  } catch(e){
+    if (was) SOC.following.add(r.id); else SOC.following.delete(r.id);
+    socPaintFollow(r.id); if (SOC.myCounts){ SOC.myCounts.following = SOC.following.size; socSetMyCounts(); }
+    toast(e.code === 'username_required' ? 'Make your profile first' : 'Couldn’t update. Try again.');
+  }
+}
+// friends leaderboard: you plus everyone you follow who follows you back, by this month's RP (a dropdown above the main board)
+function socDrawFriends(){
+  const el = $('#socFriends'); if (!el) return;
+  const me = LB.me; if (!me || !me.username || !SOC.loaded){ el.hidden = true; return; }
+  const m = lbMonth(), fr = (SOC.followingRows || []).filter(r => SOC.followerSet && SOC.followerSet.has(r.id) && !r.banned);
+  let mine = { rp: me.rp || 0, tier: me.tier }; try { const r = myRank(); mine = { rp: r.rp, tier: r.tier.n }; } catch(e){}
+  const rows = fr.map(r => Object.assign({}, r, r.month === m ? {} : { rp: 0, tier: 'Ember' })).concat([Object.assign({}, me, mine)]).sort((a, b) => (b.rp || 0) - (a.rp || 0));
+  const place = rows.findIndex(r => r.id === me.id) + 1;
+  const row = (r, i) => `<div class="lb-row${r.id === me.id ? ' me' : ''}" data-soc="${r.id}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}${isPremRow(r) ? premStar(18) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier || 'Ember')}</small></span>${r.id !== me.id ? `<button class="btn small sx-fi" data-sxi="${esc(String(r.id))}" data-n="${esc(r.username)}">${SESH.on && SESH.invited && SESH.invited.has(String(r.id)) ? 'Invited' : '🔥 Sesh'}</button>` : ''}<b>${r.rp || 0}<small> RP</small></b></div>`;
+  el.hidden = false;
+  el.innerHTML = `<details class="bb-all fr-lb"${store.frOpen ? ' open' : ''}><summary><span>Friends leaderboard</span><span class="muted">${fr.length ? `#${place} of ${rows.length}` : 'No friends yet'}</span><svg class="mt-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary>
+    <div class="lb-list" style="margin-top:8px">${fr.length ? rows.map(row).join('') : '<p class="muted" style="margin:0;font-size:14px">Friends are people you follow who follow you back. Follow some players to fill this in.</p>'}</div></details>`;
+  el.querySelector('details').addEventListener('toggle', e => { store.frOpen = e.target.open; save(); });
+}
+function socRow(r){
+  const meId = LB.me && LB.me.id, on = SOC.following.has(r.id);
+  return `<div class="soc-row" data-soc="${r.id}" role="button" tabindex="0">${lbAvatar(r.avatar_url, r.username, 42)}
+    <span class="soc-name"><b>${esc(r.username)}${r.dev ? devBadge(18) : ''}${isPremRow(r) ? premStar(16) : ''}</b><small style="color:${lbTierColor(r.tier)}">${esc(r.tier || 'Ember')}${r.bio ? ` <span class="muted">· ${esc(r.bio.slice(0, 40))}${r.bio.length > 40 ? '…' : ''}</span>` : ''}</small></span>
+    ${meId && r.id !== meId ? `<button class="btn small ${on ? 'on' : 'primary'} soc-follow" data-follow="${r.id}">${followLabel(r.id)}</button>` : ''}</div>`;
+}
+function drawSocial(){
+  const meEl = $('#socMe'); if (!meEl) return;
+  const puff = lbUsesPuffco(), me = LB.me || (lbStore().joined ? lbStore().meCache : null); // last known profile shows instantly while it reloads
+  if (!puff){
+    setHTML(meEl, `<span class="label">Your profile</span><div class="banner" style="padding:12px 14px"><div class="grow"><b>Sign in to join Social</b>Your Emberline profile uses your Puffco login. Sign in to make a profile, follow people and show your badges.</div><button class="btn small primary" id="lbGoSign">Sign in</button></div>`);
+  } else if ((!me || !me.username) && lbStore().joined){
+    setHTML(meEl, `<span class="label">Your profile</span><p class="muted" style="margin:0">${LB.meErr ? 'Couldn’t load your profile: ' + esc(LB.meErr) : 'Loading your profile…'}</p><button class="btn" id="socRetry">Try again</button>`);
+    const rb = $('#socRetry'); if (rb) rb.onclick = () => { LB.meErr = ''; drawSocial(); lbRestore(); };
+  } else if (!me || !me.username){
+    setHTML(meEl, `<span class="label">Your profile</span><p class="muted" style="margin:0">Make a profile with a username, photo and bio. People can find you, follow you and see your badges.</p><button class="btn primary" id="socCreate">Create your profile</button>`);
+  } else {
+    const c = SOC.myCounts, sc = me.showcase || [];
+    const rich = isRichId(me.id), pb = !rich && !myBanner() && premBannerOf(me), hasB = rich || !!myBanner() || !!pb; meEl.classList.toggle('has-bnr', hasB);
+    setHTML(meEl, `${rich ? richBannerHtml() : pb ? premBannerHtml(pb) : bannerHtml(myBanner(), true)}<div class="soc-head" style="${hasB ? 'margin-top:44px' : ''}">${rich ? devFramed(lbAvatar(me.avatar_url, me.username, 72), 72, true) : framed(lbAvatar(me.avatar_url, me.username, 72), 72, myFrame(), true)}<div class="soc-id"><b>${esc(me.username)}${me.dev ? devBadge(22) : ''}${isPremRow(me) ? premStar(20) : ''}</b>
+        <span class="muted"><span style="color:${lbTierColor(myRank().tier.n)};font-weight:700">${myRank().tier.n}</span> · ${myRank().rp} RP</span>
+        <div class="soc-counts"><span data-flist="followers" data-pid="${esc(String(me.id))}" role="button" tabindex="0"><b data-cnt="followers">${c ? c.followers : '–'}</b> followers</span><span data-flist="following" data-pid="${esc(String(me.id))}" role="button" tabindex="0"><b data-cnt="following">${c ? c.following : '–'}</b> following</span></div></div></div>
+      ${me.bio ? `<p class="soc-bio">${esc(me.bio)}</p>` : '<p class="muted" style="margin:0;font-size:14px">No bio yet.</p>'}
+      ${gearHtml(myGear())}
+      ${sc.length ? `<div class="lbp-shelf">${sc.map(k => `<div data-bv="${bvResolve(k, { tier: myRank().tier.n })}">${showBadge(k, undefined, { tier: myRank().tier.n })}<span>${esc(showName(k, { tier: myRank().tier.n }))}</span></div>`).join('')}</div>` : ''}
+      <button class="btn" id="socEdit">Edit profile</button>`);
+  }
+  edCard(meEl, me && me.username ? myGear() : []);
+  // search results
+  const res = $('#socResults');
+  if (res){
+    setHTML(res, !SOC.q ? '' : SOC.results == null ? (res._h && res._h.includes('soc-row') ? res._h : '<p class="muted" style="margin:0">Searching…</p>') : SOC.results.length ? SOC.results.map(socRow).join('') : '<p class="muted" style="margin:0">Nobody by that name yet.</p>');
+  }
+  socDrawFollowing();
+  applyHaptics();
+}
+function socDrawFollowing(){
+  const fl = $('#socFollowing'), me = LB.me; if (!fl) return;
+  fl.hidden = !(me && me.username);
+  setHTML(fl, `<span class="label">Following</span>${SOC.followingRows.length ? `<div class="soc-list">${SOC.followingRows.slice().sort((a, b) => (b.rp || 0) - (a.rp || 0)).map(socRow).join('')}</div>` : '<p class="muted" style="margin:0">You aren’t following anyone yet. Search for friends above or tap someone on the leaderboard.</p>'}`);
+  socDrawFriends(); squadCard();
+  applyHaptics();
+}
+// search as you type
+{ let t = 0, seq = 0;
+  document.addEventListener('input', e => {
+    if (e.target.id === 'lbBio'){ LB.bioDraft = e.target.value; return; }
+    if (e.target.id !== 'socQ') return;
+    const q = e.target.value.trim().replace(/[^A-Za-z0-9_.]/g, '').slice(0, 20);
+    SOC.q = q; SOC.results = null; clearTimeout(t);
+    if (!q){ drawSocial(); return; }
+    drawSocial();
+    const my = ++seq;
+    t = setTimeout(async () => {
+      try { const rows = await sbRows(`/rest/v1/players?select=${SOC_COLS}&username=ilike.*${encodeURIComponent(q)}*&order=rp.desc&limit=20`); if (my === seq){ SOC.results = rows; drawSocial(); } }
+      catch(err){ if (my === seq){ SOC.results = []; drawSocial(); } }
+    }, 280);
+  });
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest) return;
+  if (e.target.closest('#lbProfile')) return; // the profile sheet handles its own taps
+  const f = e.target.closest('[data-follow]');
+  if (f && e.target.closest('#v-social')){ e.stopPropagation(); const id = f.dataset.follow;
+    const r = (SOC.results || []).concat(SOC.followingRows, LB.rows || []).find(x => x.id === id); if (r) socToggleFollow(r); return; }
+  const sxi = e.target.closest('[data-sxi]');
+  if (sxi){ e.stopPropagation(); seshInviteFrom(sxi.dataset.sxi, sxi.dataset.n); return; } // friends list: invite to a group sesh
+  const row = e.target.closest('[data-soc]');
+  if (row){ const id = row.dataset.soc; const r = (SOC.results || []).concat(SOC.followingRows, LB.rows || [], LB.me ? [LB.me] : []).find(x => x.id === id); if (r) openPlayer(r); return; }
+  if (e.target.closest('#socEdit') || e.target.closest('#socCreate')){ LB.edit = true; LB.err = ''; drawLeaderboard(); setTimeout(() => { const c = $('#lbCard'); if (c) c.scrollIntoView({ behavior:'smooth', block:'start' }); }, 60); }
+});
+function lbRowHtml(r, i, meId){ return `<div class="lb-row${r.id === meId ? ' me' : ''}" data-lbi="${i}" role="button" tabindex="0"><span class="lb-pos">${i + 1}</span>${lbAvatar(r.avatar_url, r.username, 36)}<span class="lb-name">${esc(r.username)}${r.dev ? devBadge(22) : ''}${isPremRow(r) ? premStar(18) : ''}<small style="color:${lbTierColor(r.tier)}">${esc(r.tier)}</small>${(r.showcase || []).length ? `<span class="lb-show">${r.showcase.map(k => showBadge(k, undefined, r)).join('')}</span>` : ''}</span><span class="lb-medal">${rankBadge(new Date().getMonth(), rbTierIdx(r.tier), 34)}</span><b>${r.rp}<small> RP</small></b>${lbMoveHtml(r, i)}</div>`; }
+// up / down arrows: your place now vs what you saw on your last visit (a visit ends after 10 min away)
+function lbMarkSeen(rows){
+  const m = lbMonth(), now = Date.now(), cur = {}; rows.forEach((r, i) => { cur[r.id] = i + 1; });
+  let st = store.lbPos; if (!st || st.month !== m) st = store.lbPos = { month: m, seen: null, base: null };
+  if (!st.seen || now - st.seen.at > 6e5) st.base = st.seen ? st.seen.pos : null; // new visit: compare against last time
+  st.seen = { pos: cur, at: now }; save();
+}
+function lbMoveHtml(r, i){
+  const b = store.lbPos && store.lbPos.month === lbMonth() && store.lbPos.base, was = b && b[r.id], d = was ? was - (i + 1) : 0;
+  if (!d) return '<span class="lb-mv"></span>';
+  return `<span class="lb-mv ${d > 0 ? 'up' : 'down'}" aria-label="${d > 0 ? 'up' : 'down'} ${Math.abs(d)}"><svg viewBox="0 0 10 8" aria-hidden="true"><path d="${d > 0 ? 'M5 0l5 8H0z' : 'M5 8L0 0h10z'}"/></svg>${Math.abs(d)}</span>`;
+}
+// leaderboard shows the top 5 (plus you) until you open the rest
+const LB_SHOW = 5, LB_MAX = 500; // Show all lists up to 500 (your own row is always added if you're further down)
+function lbMoreBtn(n){ if (n <= LB_SHOW) return ''; return `<button class="btn lb-more" data-lbmore aria-expanded="${!!LB.expand}">${LB.expand ? 'Show less' : `Show all ${n > LB_MAX ? 'top ' + LB_MAX : n}`}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg></button>`; }
+document.addEventListener('click', e => { if (!e.target.closest('[data-lbmore]')) return; LB.expand = !LB.expand; drawLeaderboard(); if (!LB.expand){ const c = $('#lbCard'); if (c) c.scrollIntoView({ behavior:'smooth', block:'start' }); } });
+function drawLeaderboard(){
+  const el = $('#lbCard'); if (!el) return;
+  const L = lbStore(), puff = lbUsesPuffco(), joined = L.joined && puff && !LB.edit;
+  if (!puff){ // ranked needs a Puffco login: show the board, ask them to sign in
+    const rows = LB.rows || [];
+    el.innerHTML = `<div class="row between"><span class="label">Leaderboard · ${new Date().toLocaleDateString([], { month:'long' })}</span></div>
+      <div class="banner" style="padding:12px 14px"><div class="grow"><b>Ranked uses your Puffco login</b>Sign in with your Puffco account to join, pick a username and add a photo.</div><button class="btn small primary" id="lbGoSign">Sign in</button></div>
+      ${rows.length ? `<div class="lb-list">${rows.slice(0, LB.expand ? LB_MAX : LB_SHOW).map((r, i) => lbRowHtml(r, i, null)).join('')}</div>${lbMoreBtn(rows.length)}` : (LB.rows == null ? '<p class="muted" style="margin:0">Loading…</p>' : '<p class="muted" style="margin:0">Nobody is ranked yet this month.</p>')}`;
+    return;
+  }
+  if (!joined){
+    const me = LB.me || {};
+    el.innerHTML = `<div class="row between"><span class="label">Leaderboard</span>${L.joined ? '<button class="btn small ghost" id="lbCancel">Cancel</button>' : ''}</div>
+      <p class="muted" style="margin:0;font-size:14px">${L.joined ? 'Edit your profile.' : 'Show your rank to everyone using Emberline. Pick a username and a picture.'}</p>
+      <div class="lb-form">
+        <label class="lb-pic" for="lbPicFile"><span class="lb-pic-av">${LB.avatar ? `<img class="lb-av" src="${LB.avatar}" alt="" style="width:64px;height:64px">` : lbAvatar(me.avatar_url, me.username || L.username, 64)}<span class="pdot-pen lb-pic-pen" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></span></span><span>Photo</span></label>
+        <input type="text" id="lbName" maxlength="20" placeholder="Username" autocomplete="nickname" value="${esc(me.username || L.username || '')}" ${nameLockedUntil() ? 'readonly' : ''}>
+      </div>
+      ${nameLockedUntil() ? `<p class="muted" style="margin:-4px 0 0;font-size:13px">You can change your username again ${nameWait()}.</p>` : (L.joined && me.username ? `<p class="muted" style="margin:-4px 0 0;font-size:13px">${(me.name_changes || 0) >= 1 ? 'After a change, you’ll have to wait 3 days to change it again.' : 'Your first name change is free. After that, once every 3 days.'}</p>` : '')}
+      ${L.joined ? '' : inviteField()}
+      <textarea id="lbBio" class="lb-bio" maxlength="160" rows="3" placeholder="Bio (optional): your setup, favorite temp, anything">${esc(LB.bioDraft != null ? LB.bioDraft : (me.bio || ''))}</textarea>
+      <p class="muted" style="margin:0;font-size:13px">Tied to your Puffco login${acct() && acct().email ? ` (${esc(acct().email)})` : ''}. Sign in with it on any phone and your profile comes back. Usernames are one per person.</p>
+      ${L.joined ? '' : '<p class="muted" style="margin:0;font-size:13px"><b style="color:var(--fg)">Heads up:</b> keep Emberline open during sessions or they won’t count. Path pauses the app in the background.</p>'}
+      ${premBannerPicker()}
+      ${showcaseEditor()}
+      <p class="acct-err" id="lbErr" ${LB.err ? '' : 'hidden'}>${esc(LB.err)}</p>
+      <button class="btn primary" id="lbJoin" ${LB.busy ? 'disabled' : ''}>${LB.busy ? 'Saving…' : (L.joined ? 'Save profile' : 'Join the leaderboard')}</button>`;
+    return;
+  }
+  const rows = LB.rows || [], meId = LB.me && LB.me.id, mine = rows.findIndex(r => r.id === meId);
+  const row = (r, i) => lbRowHtml(r, i, meId);
+  el.innerHTML = `<div class="row between"><span class="label">Leaderboard · ${new Date().toLocaleDateString([], { month:'long' })}</span><button class="btn small ghost" id="lbEdit">Edit profile</button></div>
+    ${LB.err ? `<p class="acct-err">${esc(LB.err)}</p>` : ''}
+    ${LB.rows == null ? '<p class="muted" style="margin:0">Loading…</p>' : rows.length ? `<div class="lb-list">${rows.slice(0, LB.expand ? LB_MAX : LB_SHOW).map(row).join('')}</div>` : '<p class="muted" style="margin:0">Nobody has points yet this month. Take a dab to get on the board.</p>'}
+    ${mine >= (LB.expand ? LB_MAX : LB_SHOW) ? `<div class="lb-list lb-you">${row(rows[mine], mine)}</div>` : ''}
+    ${lbMoreBtn(rows.length)}
+    <p class="muted" style="margin:0;font-size:12px">Updates live. Resets on the 1st.</p>
+    <p class="muted lb-legal" style="margin:0;font-size:11px;line-height:1.4;opacity:.75">Please consume responsibly. 21+ only (or the legal age where you live), and follow your local laws. Rankings are just for fun, not a reason to use more. Take breaks and don’t drive after a session. Emberline isn’t made by or affiliated with Puffco.</p>
+    ${acct() && acct().email ? `<p class="muted lb-linked">@${esc((LB.me && LB.me.username) || L.username || '')} is linked to ${esc(acct().email)}</p>` : ''}`;
+}
+// usernames: first change is free, then once every 3 days (the server checks this too)
+function nameLockedUntil(){
+  const me = LB.me; if (!me || !me.username || (me.name_changes || 0) < 1 || !me.name_changed_at) return 0;
+  const until = new Date(me.name_changed_at).getTime() + 3 * 86400000;
+  return until > Date.now() ? until : 0;
+}
+function nameWait(){
+  const ms = nameLockedUntil() - Date.now(); if (ms <= 0) return 'now';
+  const h = Math.ceil(ms / 3600000);
+  return h > 36 ? 'in ' + Math.ceil(h / 24) + ' days' : h > 1 ? 'in ' + h + ' hours' : 'in under an hour';
+}
+// ranked only counts what the app sees live, and Path pauses the app when it isn't on screen
+function keepOpenNotice(){
+  if (document.querySelector('.egg')) return;
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Keep Emberline open">
+    <svg viewBox="0 0 24 24" style="width:54px;height:54px;fill:none;stroke:var(--accent);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10.5 18.5h3M12 7v5l3 2"/></svg>
+    <h2>Keep Emberline open</h2>
+    <p>Sessions only count for ranked if Emberline is open on your screen while you use your Peak. Path, Puffco’s browser, pauses the app as soon as you leave it, so hits and blinkers can’t be tracked in the background.</p>
+    <p style="font-size:14px">Tip: the screen stays awake on its own while you heat up, so just leave it open.</p>
+    <button class="btn primary" id="koOk" style="width:100%">Got it</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  el.querySelector('#koOk').onclick = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+}
+setTimeout(() => { const nb = $('#tbNotif'); if (nb) nb.onclick = () => { if (!lbUsesPuffco()) return toast('Sign in to Social first'); toast('Turning on…'); pathPushOn().then(r => alertBox('Notifications', r && r.sent ? 'On! Check your lock screen for “Emberline notifications are on 🔥”.' : 'Saved, but the test didn’t send: ' + esc((r && r.err) || 'unknown'), JSON.stringify(r))).catch(e => alertBox('Notifications', esc(e.message || String(e)) + '<br><br>Load errors: ' + esc((window.LOAD_ERR || []).join(' || ') || 'none'), String(e && e.message || e) + '\nLoad errors: ' + (window.LOAD_ERR || []).join(' || '))); };
+  const nd = $('#tbNotifDiag'); if (nd) nd.onclick = () => pathNotifTry();
+  if (window.pushManager && lbStore().joined) setTimeout(() => pushKeyLoad().catch(() => {}), 3000); /* so the tap can ask right away */ const b = $('#tbKeepOpen'); if (b) b.onclick = keepOpenNotice; const i = $('#tbInspect'); if (i) i.onclick = devInspector; const pl = $('#tbProxyLab'); if (pl) pl.onclick = proxyLab; const ct = $('#tbColorTest'); if (ct) ct.onclick = colorTest; const mt = $('#tbMoodTest'); if (mt) mt.onclick = moodTest; const ih = $('#tbInhale'); if (ih) ih.onclick = inhaleTest; const wn = $('#tbWhatsNew'); if (wn) wn.onclick = () => whatsNew(true); const ll = $('#tbLightLab'); if (ll) ll.onclick = lightLab; const es = $('#tbEdShare'); if (es) es.onclick = () => { if (S.mode !== 'live') return toast('Connect first'); if (!edIsLimited()) return toast(`${S.edition || 'This device'} is not a limited edition`); edShareAsk(true); }; }, 0);
+// test build: one place to check everything on a Proxy, with live raw readings
+function proxyLab(){
+  if (document.querySelector('.plab')) return;
+  const el = document.createElement('div'); el.className = 'egg plab';
+  el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:88vh;overflow:auto;text-align:left;justify-items:stretch;gap:12px">
+    <div class="row between"><h2 style="margin:0">Proxy test</h2><button class="btn small ghost" id="plClose">Close</button></div>
+    <p id="plDev" style="margin:0"></p>
+    <span class="label">Live readings</span>
+    <pre id="plLive" style="margin:0;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;color:var(--fg)">Waiting…</pre>
+    <span class="label">Inhale meter (pull on it during a session)</span>
+    <div style="height:14px;border-radius:99px;background:var(--track);overflow:hidden"><i id="plBar" style="display:block;height:100%;width:0;background:var(--good);transition:width .15s"></i></div>
+    <span class="muted" id="plDif" style="font-size:13px">raw: –  peak: –</span>
+    <span class="label">Lights (watch the ring)</span>
+    <div class="row" style="gap:6px"><button class="btn small" data-lt="a">A: new format red</button><button class="btn small" data-lt="b">B: old format red</button><button class="btn small" data-lt="c">C: clear</button><button class="btn small" data-lt="d">D: own light red</button><button class="btn small" data-lt="e">E: other clear</button></div>
+    <span class="label">Checklist</span>
+    <div style="display:grid;gap:6px;font-size:15px">${['Battery % matches the Puffco app','Profile temps match the Puffco app','Temp climbs while heating','Countdown works when Ready','Inhale meter moves when you pull','Light test A turns the ring red','Clean meter counts up after a session'].map((t, k) => `<label class="row" style="gap:10px;flex-wrap:nowrap"><input type="checkbox" data-plc="${k}" style="width:20px;height:20px;flex:none">${t}</label>`).join('')}</div>
+    <button class="btn" id="plInspect">Run device inspector</button>
+    <button class="btn primary" id="plCopy">Copy test report</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
+  let peak = 0, log = [];
+  const tick = async () => {
+    if (!document.body.contains(el)) return;
+    const live = S.mode === 'live';
+    el.querySelector('#plDev').textContent = live ? `${S.devName || S.name} · ${S.series === 'toad' ? 'Proxy' : 'Peak'} · light format ${S.api}` : 'Not connected. Connect your Proxy first.';
+    if (live){
+      let dif = null, raw = null;
+      try { const r = await ble.read('/p/app/led/dif', 4); raw = new DataView(r.buffer, r.byteOffset, r.length).getInt32(0, true); dif = await ble.f32('/p/app/led/dif'); } catch(e){}
+      if (raw != null){ peak = Math.max(peak, raw); el.querySelector('#plDif').textContent = `raw: ${raw}  peak: ${peak}  read as: ${dif == null ? '–' : (+dif).toFixed(3)}`; el.querySelector('#plBar').style.width = Math.min(100, (dif || 0) * 100) + '%'; }
+      const txt = [`state: ${S.state} (${STATE_NAMES[S.state] || '?'})`, `temp: ${S.tempC == null ? '–' : S.tempC.toFixed(1) + '°C / ' + Math.round(c2f(S.tempC)) + '°F'}`, `battery: ${S.battery ?? '–'}%  charging: ${S.charging ? 'yes' : 'no'}`, `timer: ${(+S.elapsed || 0).toFixed(1)}s of ${(+S.total || 0).toFixed(1)}s`, `profile: ${(S.profiles[S.active] || {}).name} · ${Math.round(c2f((S.profiles[S.active] || {}).tempC || 0))}°F · ${(S.profiles[S.active] || {}).time}s`, `dab counter: ${S.odo ?? '–'}`].join('\n');
+      el.querySelector('#plLive').textContent = txt;
+      log.push(new Date().toLocaleTimeString() + ' ' + txt.replace(/\n/g, ' | ') + ` | dif raw ${raw}`); if (log.length > 60) log.shift();
+    }
+    setTimeout(tick, 600);
+  };
+  tick();
+  el.querySelector('#plClose').onclick = () => el.remove();
+  el.querySelector('#plInspect').onclick = () => { el.remove(); devInspector(); };
+  el.querySelector('#plCopy').onclick = async () => {
+    const checks = [...el.querySelectorAll('[data-plc]')].map(c => (c.checked ? '[x] ' : '[ ] ') + c.parentElement.textContent.trim());
+    const rep = ['PROXY TEST', el.querySelector('#plDev').textContent, '', ...checks, '', 'Inhale peak raw: ' + peak, '', ...log.slice(-20)].join('\n');
+    try { await navigator.clipboard.writeText(rep); toast('Report copied, paste it to Claude'); } catch(e){ toast('Couldn’t copy'); }
+  };
+}
+document.addEventListener('click', async e => { const b = e.target.closest('[data-lt]'); if (!b) return;
+  if (S.mode !== 'live'){ toast('Connect first'); return; }
+  try {
+    if (b.dataset.lt === 'a') await ble.writeBlob('/p/app/led/pclr', solidPayload('#ff0000'));
+    else if (b.dataset.lt === 'b') await ble.write('/p/app/led/pclr', rgbt('#ff0000'));
+    else if (b.dataset.lt === 'd'){
+      // take the light saved on the device, turn every color in it red, and preview that
+      const t = cborDecode(await ble.readAll(`/u/app/hc/${S.active || 0}/colr`)), red = [255, 0, 0];
+      const fix = v => Array.isArray(v) ? v.map(fix) : v && typeof v === 'object' ? (typeof v.$b === 'string' ? (() => { const by = (v.$b.match(/../g) || []).map(h => parseInt(h, 16)); return new Uint8Array(by.length && by.length % 3 === 0 ? by.map((_, i) => red[i % 3]) : by); })() : v instanceof Uint8Array ? new Uint8Array(v.length % 3 === 0 ? [...v].map((_, i) => red[i % 3]) : v) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fix(x)]))) : v;
+      await ble.writeBlob('/p/app/led/pclr', cbor(fix(t)));
+    }
+    else if (b.dataset.lt === 'e'){ await ble.write('/p/app/led/pclr', new Uint8Array([0]), 0, 4); }
+    else { try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(_){ await ble.write('/p/app/led/pclr', new Uint8Array(0)); } }
+    toast('Sent ' + b.dataset.lt.toUpperCase());
+  } catch(err){ toast(b.dataset.lt.toUpperCase() + ' failed: ' + (err.message || err)); }
+});
+// test build: read a bunch of device values raw so we can see how this device stores them
+// test build: try every way of saving a color on the Proxy and read it back, so we see which one sticks
+// test build: send real Puffco Proxy moods as previews in a few different ways, to find the one the Proxy plays
+document.addEventListener('click', async e => { const b = e.target.closest('[data-pbr]'); if (!b) return; if (S.mode !== 'live'){ toast('Connect first'); return; } const v = new Uint8Array(4); new DataView(v.buffer).setInt32(0, +b.dataset.pbr, true); try { await ble.write('/u/app/ui/lbrt', v); toast('Brightness ' + b.dataset.pbr + ' sent'); } catch(err){ toast('Failed: ' + (err.message || err)); } });
+// test build: watch the inhale sensor live, see what the hit counter thinks, and record it for Claude
+function inhaleTest(){
+  if (S.mode !== 'live'){ toast('Connect your device first'); return; }
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:90vh;overflow:auto;text-align:left;justify-items:stretch;gap:10px">
+    <h2>Inhale sensor</h2>
+    <p style="margin:0;font-size:13px">Start a heat cycle. When it says Ready, take a few pulls: short, long, soft, hard. Tap Record first to save it for Claude.</p>
+    <div class="seg" id="ihMode"><button data-ihm="new">New reading</button><button data-ihm="old">Old reading</button></div>
+    <canvas id="ihCv" width="520" height="160" style="width:100%;height:160px;border-radius:12px;background:rgba(255,255,255,.05)"></canvas>
+    <pre id="ihNow" style="margin:0;font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;color:var(--fg)"></pre>
+    <button class="btn primary" id="ihRec">Record</button>
+    <button class="btn" id="ihCopy">Copy recording</button>
+    <button class="btn" id="ihClose">Close</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
+  const cv = el.querySelector('#ihCv'), g = cv.getContext('2d'), pts = [], rec = []; let recOn = false, t0 = performance.now(), busy = false;
+  const paintMode = () => el.querySelectorAll('[data-ihm]').forEach(b => b.setAttribute('aria-pressed', (b.dataset.ihm === 'old') === !!store.inhOld));
+  paintMode();
+  el.querySelector('#ihMode').onclick = e => { const b = e.target.closest('[data-ihm]'); if (!b) return; store.inhOld = b.dataset.ihm === 'old'; save(); ble.ints = {}; HIT.pbase = null; paintMode(); toast(store.inhOld ? 'Using the old reading' : 'Using the new reading'); };
+  const STATES = {5:'Idle',6:'Temp select',7:'Preheating',8:'Ready / hitting',9:'Done'};
+  const tick = async () => {
+    if (!el.isConnected || busy) return; busy = true;
+    try {
+      const rd = async path => { try { const r = await ble.read(path, 4); return r.length >= 4 ? new DataView(r.buffer, r.byteOffset, 4).getInt32(0, true) : null; } catch(e){ return null; } };
+      const dif = await rd('/p/app/led/dif'), dia = await rd('/p/app/led/dia');
+      const sc = store.inhOld ? 1000 : 4096, v = dif == null ? 0 : dif / sc, now = performance.now();
+      const up = Math.max(.12, (HIT.base || .03) + .1), down = Math.max(.06, (HIT.base || .03) + .04);
+      pts.push({ t: now, v, on: HIT.on }); while (pts.length && now - pts[0].t > 12000) pts.shift();
+      if (recOn && rec.length < 2000) rec.push([Math.round(now - t0), dif, dia, S.state, HIT.on ? 1 : 0]);
+      el.querySelector('#ihNow').textContent = [
+        `state: ${STATES[S.state] || S.state}   reading: ${store.inhOld ? 'old' : 'new'}`,
+        `raw dif: ${dif}   raw dia: ${dia}`,
+        `inhale: ${v.toFixed(3)}   resting: ${(HIT.base || 0).toFixed(3)}   starts at ${up.toFixed(3)}, ends at ${down.toFixed(3)}`,
+        `hit on: ${HIT.on ? 'YES' : 'no'}   timer: ${HIT.on ? Math.max(0, HIT.live).toFixed(1) + 's' : '-'}   last hit: ${HIT.last != null ? HIT.last + 's' : '-'}   hits: ${HIT.hits.length}`,
+        recOn ? `recording… ${rec.length} samples` : rec.length ? `recorded ${rec.length} samples` : ''
+      ].join('\n');
+      // graph
+      const W = cv.width, H = cv.height, top = Math.max(.5, ...pts.map(p => p.v)) * 1.1, y = val => H - 8 - (val / top) * (H - 16);
+      g.clearRect(0, 0, W, H);
+      g.setLineDash([6, 6]); g.lineWidth = 1;
+      g.strokeStyle = 'rgba(120,255,160,.7)'; g.beginPath(); g.moveTo(0, y(up)); g.lineTo(W, y(up)); g.stroke();
+      g.strokeStyle = 'rgba(255,170,90,.7)'; g.beginPath(); g.moveTo(0, y(down)); g.lineTo(W, y(down)); g.stroke();
+      g.setLineDash([]);
+      pts.forEach((p, i) => { if (!p.on) return; const x = W - (now - p.t) / 12000 * W; g.fillStyle = 'rgba(160,80,255,.18)'; g.fillRect(x, 0, 6, H); });
+      g.strokeStyle = '#c98bff'; g.lineWidth = 2.5; g.beginPath();
+      pts.forEach((p, i) => { const x = W - (now - p.t) / 12000 * W; i ? g.lineTo(x, y(p.v)) : g.moveTo(x, y(p.v)); }); g.stroke();
+    } finally { busy = false; }
+  };
+  const iv = setInterval(tick, 150);
+  el.querySelector('#ihRec').onclick = e => { recOn = !recOn; if (recOn){ rec.length = 0; t0 = performance.now(); } e.target.textContent = recOn ? 'Stop recording' : 'Record again'; };
+  el.querySelector('#ihCopy').onclick = async () => { const txt = `series=${S.series} reading=${store.inhOld ? 'old' : 'new'}\nms,dif,dia,state,hitOn\n` + rec.map(r => r.join(',')).join('\n'); try { await navigator.clipboard.writeText(txt); toast('Copied'); } catch(e){ const pre = el.querySelector('#ihNow'); pre.textContent = txt; const r = document.createRange(); r.selectNodeContents(pre); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected, tap Copy'); } };
+  el.querySelector('#ihClose').onclick = () => { clearInterval(iv); el.remove(); };
+}
+async function moodTest(){
+  if (S.mode !== 'live'){ toast('Connect your device first'); return; }
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:86vh;overflow:auto;text-align:left;justify-items:stretch"><h2>Mood test</h2><p id="mtStat">Each step plays for 4 seconds. Watch the Proxy and note which steps animate.</p><pre id="mtOut" style="margin:0;font:11px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;color:var(--fg)"></pre><button class="btn primary" id="mtCopy">Copy results</button><button class="btn" id="mtClose">Close</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
+  let stop = false; el.querySelector('#mtClose').onclick = () => { stop = true; el.remove(); };
+  const L = [`series=${S.series} variant=${ledVariant()}`], out = () => { el.querySelector('#mtOut').textContent = L.join('\n'); };
+  const clear = async () => { try { await ble.write('/p/app/led/pclr', new Uint8Array(0), 0, 4); } catch(_){ try { await ble.write('/p/app/led/pclr', new Uint8Array(0)); } catch(e){} } };
+  const moods = [['Fade', { kind:'tpl', tag:'pikaled2-fade-mood-light', name:'Fade', meta:{} }], ['Spin', { kind:'tpl', tag:'pikaled2-spin-mood-light', name:'Spin', meta:{} }], ['Confetti', { kind:'tpl', tag:'migration-confetti-mood-light', name:'Confetti', meta:{} }]];
+  let step = 0;
+  for (const [mn, ref] of moods){
+    for (const [en, f64, withMeta] of [['normal', false, true], ['float64', true, true], ['lamp only', false, false]]){
+      if (stop) return; step++;
+      let blob; try { cbor.f64 = f64; const lamp = moodLamp(ref); blob = withMeta ? moodPayload(ref) : cbor({ lamp }); } catch(e){ L.push(`${step}. ${mn} ${en}: build ERR ${e.message}`); out(); continue; } finally { cbor.f64 = false; }
+      for (const [wn, fn] of [['blob', () => ble.writeBlob('/p/app/led/pclr', blob)], ['legacy', () => ble.writeBlobLegacy('/p/app/led/pclr', blob)]]){
+        let res = 'ok'; try { await fn(); } catch(e){ res = 'ERR ' + (e.message || e); }
+        L.push(`${step}${wn === 'blob' ? 'a' : 'b'}. ${mn} ${en} ${wn} (${blob.length}b): ${res}`); el.querySelector('#mtStat').textContent = `Now showing step ${step}${wn === 'blob' ? 'a' : 'b'}: ${mn} ${en} ${wn}`; out();
+        await sleep(4000); await clear(); await sleep(600);
+      }
+    }
+  }
+  el.querySelector('#mtStat').textContent = 'Done. Tell Claude which step numbers animated, then tap Copy and paste.';
+  el.querySelector('#mtCopy').onclick = async () => { try { await navigator.clipboard.writeText(L.join('\n')); toast('Copied'); } catch(e){ const r = document.createRange(); r.selectNodeContents(el.querySelector('#mtOut')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected, tap Copy'); } };
+}
+/* paste light files (a Supabase edition_lights row, its files, or one hex blob) and try them on your device */
+function lightLab(){
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:88vh;overflow:auto;text-align:left;justify-items:stretch;gap:10px">
+    <h2 style="margin:0">Apply light files</h2>
+    <p class="muted" style="margin:0;font-size:13px">Paste a row from edition_lights (or just its files, or one hex blob). Proxy files only work on a Proxy, Peak Pro files only on a Peak Pro.</p>
+    <textarea id="llIn" rows="5" style="width:100%;font:11px ui-monospace,Menlo,monospace;background:var(--surface);color:var(--fg);border-radius:10px;padding:8px;border:1px solid var(--line,#333)" placeholder='{"files":{"/u/app/hc/0/colr":"a2..."}}'></textarea>
+    <button class="btn primary" id="llGo">Load</button>
+    <div id="llList" style="display:grid;gap:8px"></div>
+    <button class="btn" id="llClose">Close</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
+  el.querySelector('#llClose').onclick = () => { if (S.mode === 'live') ledJob(previewClear); el.remove(); };
+  let items = [];
+  const fromHex = h => new Uint8Array((h.replace(/[^0-9a-f]/gi, '').match(/../g) || []).map(x => parseInt(x, 16)));
+  const kind = u => { if (u.length === 8) return 'solid ' + '#' + toHex(u.slice(0, 3)); try { const t = cborDecode(u); if (t && t.lamp) return 'mood: ' + (t.lamp.name || 'lamp'); if (t && typeof t === 'object' && t[0] && t[0][0] != null) return 'Proxy mood (lamp ' + t[0][0] + ')'; } catch(e){} return 'data'; };
+  const blobFor = u => { const b = new Uint8Array(u); if (isProxy()) b.native = true; return b; };
+  el.querySelector('#llGo').onclick = () => {
+    const raw = el.querySelector('#llIn').value.trim(); items = [];
+    try {
+      if (raw.startsWith('{') || raw.startsWith('[')){
+        let j = JSON.parse(raw); if (Array.isArray(j)) j = j[0]; if (j.files) j = typeof j.files === 'string' ? JSON.parse(j.files) : j.files;
+        for (const [p, h] of Object.entries(j)) if (typeof h === 'string' && h) items.push({ p, u: fromHex(h) });
+      } else if (raw) items.push({ p:'pasted', u: fromHex(raw) });
+    } catch(e){ toast('Could not read that: ' + e.message); }
+    items = items.filter(x => x.u.length && /colr|pasted|phcl|accl/.test(x.p)); // the playable ones
+    el.querySelector('#llList').innerHTML = items.length ? items.map((x, n) => `<div class="card" style="padding:10px;display:grid;gap:6px">
+      <b style="font-size:13px">${esc(x.p)}</b><span class="muted" style="font-size:12px">${x.u.length} bytes · ${esc(kind(x.u))}</span>
+      <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn small primary" data-llpv="${n}">Preview</button>${[0,1,2,3].map(i => `<button class="btn small" data-llp="${n}:${i}">Set P${i + 1}</button>`).join('')}<button class="btn small" data-lll="${n}">Lantern</button></div></div>`).join('') : '<p class="muted">Nothing playable found.</p>';
+  };
+  el.querySelector('#llList').onclick = async e => {
+    if (S.mode !== 'live'){ toast('Connect your device first'); return; }
+    const pv = e.target.closest('[data-llpv]'), sp = e.target.closest('[data-llp]'), ln = e.target.closest('[data-lll]');
+    try {
+      if (pv){ const x = items[+pv.dataset.llpv]; clearTimeout(previewTimer);
+        await ledJob(() => x.u.length === 8 ? previewWrite('#' + toHex(x.u.slice(0, 3))) : previewWrite(blobFor(x.u)));
+        previewTimer = setTimeout(() => ledJob(previewClear), 8000); toast('Showing for 8 seconds'); }
+      if (sp){ const [n, i] = sp.dataset.llp.split(':').map(Number), x = items[n];
+        await ledJob(async () => {
+          if (x.u.length === 8){ await writeProfileColor(i, '#' + toHex(x.u.slice(0, 3))); return; }
+          if (isProxy()) await proxyColr(`/u/app/hc/${i}/colr`, blobFor(x.u)); else await ble.writeBlob(`/u/app/hc/${i}/colr`, x.u);
+          if (S.active === i){ try { if (isProxy()) await proxyColr('/p/app/thc/colr', blobFor(x.u)); else await ble.writeBlob('/p/app/thc/colr', x.u); } catch(_){} }
+        });
+        toast(`Set on P${i + 1}`); }
+      if (ln){ const x = items[+ln.dataset.lll];
+        await ledJob(async () => {
+          if (x.u.length === 8) await writeLanternColor('#' + toHex(x.u.slice(0, 3)));
+          else if (isProxy()) await proxyColr('/p/app/ltrn/colr', blobFor(x.u)); else await ble.writeBlob('/p/app/ltrn/colr', x.u);
+          await ble.write('/p/app/ltrn/cmd', new Uint8Array([1])); S.lantern = true;
+        });
+        toast('Lantern on'); }
+    } catch(err){ toast('Failed: ' + (err.message || err)); }
+  };
+}
+async function colorTest(){
+  if (S.mode !== 'live'){ toast('Connect your device first'); return; }
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:86vh;overflow:auto;text-align:left;justify-items:stretch"><h2>Color write test</h2><p id="ctStat">Running, watch your device…</p><pre id="ctOut" style="margin:0;font:11px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;color:var(--fg)"></pre><button class="btn primary" id="ctCopy">Copy results</button><button class="btn" id="ctClose">Close</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
+  el.querySelector('#ctClose').onclick = () => el.remove();
+  const L = [`series=${S.series} api=${S.api} active=${S.active}`], out = () => { el.querySelector('#ctOut').textContent = L.join('\n'); };
+  const hx = u => [...u].slice(0, 40).map(b => b.toString(16).padStart(2, '0')).join(' ');
+  const rd = async path => { try { const r = await ble.readAll(path); return `len=${r.length} ${hx(r)}`; } catch(e){ return 'read ERR ' + (e.message || e); } };
+  const red = proxyBlob('#ff0000');
+  const ways = [['write trunc', p => ble.write(p, red, 0, 4)], ['blob handle', p => ble.writeBlob(p, red)], ['write flag1', p => ble.write(p, red, 0, 1)], ['write flag0', p => ble.write(p, red, 0, 0)]];
+  for (const path of ['/u/app/hc/1/colr', '/u/app/hc/0/colr', '/p/app/thc/colr']){
+    L.push('', path, '  before: ' + await rd(path)); out();
+    for (const [n, fn] of ways){
+      let res; try { await fn(path); res = 'ok'; } catch(e){ res = 'ERR ' + (e.message || e); }
+      L.push(`  ${n}: ${res} -> ${await rd(path)}`); out();
+    }
+  }
+  L.push('', 'preview red on /p/app/led/pclr:');
+  try { await ble.writeBlob('/p/app/led/pclr', red); L.push('  sent, is the light red now?'); } catch(e){ L.push('  ERR ' + (e.message || e)); }
+  out(); await sleep(2500);
+  try { await ble.write('/p/app/led/pclr', new Uint8Array([0]), 0, 4); L.push('  cleared'); } catch(e){ L.push('  clear ERR ' + (e.message || e)); }
+  L.push('  pclr now: ' + await rd('/p/app/led/pclr')); out();
+  el.querySelector('#ctStat').textContent = 'Done. Profiles 1 and 2 are now red. Tap Copy and paste it to Claude.';
+  el.querySelector('#ctCopy').onclick = async () => { try { await navigator.clipboard.writeText(L.join('\n')); toast('Copied'); } catch(e){ const r = document.createRange(); r.selectNodeContents(el.querySelector('#ctOut')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected, tap Copy'); } };
+}
+async function devInspector(){
+  if (S.mode !== 'live'){ toast('Connect your device first'); return; }
+  const P = ['/p/bat/soc','/p/bat/chg/stat','/p/bat/volt','/p/bat/chg/etf','/p/app/htr/temp','/p/htr/temp','/p/htr/tcmd','/p/app/htr/tcmd','/p/app/stat/id','/p/app/stat/elap','/p/app/stat/tott','/p/app/hcs','/p/htr/chmt',
+    '/u/app/hc/0/name','/u/app/hc/0/temp','/u/app/hc/0/time','/u/app/hc/0/btmp','/u/app/hc/0/btim','/u/app/hc/0/intn','/u/app/hc/1/temp','/u/app/hc/1/time',
+    '/p/app/led/pclr','/p/app/thc/colr','/u/app/hc/0/colr','/u/app/hc/1/colr','/u/app/hc/2/colr','/u/app/hc/3/colr','/p/app/ltrn/colr','/u/app/hc/0/phcl','/p/app/odom/0/nc','/p/app/info/dtot','/p/app/odom/0/tm','/p/app/led/dif','/p/sys/fw/ver','/p/sys/fw/api','/p/sys/hw/mdcd','/u/sys/name','/u/app/ui/lbrt','/p/app/ltrn/time','/p/htr/tun/stdt','/p/htr/tun/sthc','/p/htr/tun/bct','/p/htn/mbct'];
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" style="width:min(100%,560px);max-height:86vh;overflow:auto;text-align:left;justify-items:stretch"><h2>Device inspector</h2><p id="diStat">Reading…</p><pre id="diOut" style="margin:0;font:11px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;color:var(--fg)"></pre><button class="btn primary" id="diCopy">Copy results</button><button class="btn" id="diClose">Close</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => el.classList.add('on'));
+  el.querySelector('#diClose').onclick = () => el.remove();
+  const lines = [`series=${S.series} api=${S.api} name=${S.devName || S.name}`];
+  for (const path of P){
+    try {
+      if (/colr$/.test(path)){ const full = await ble.readAll(path); let j = ''; try { j = JSON.stringify(cborDecode(full), (k, v) => v instanceof Uint8Array ? [...v] : v); } catch(e){ j = 'decode failed'; }
+        if (!j || j === 'decode failed' || full.length > 100) j += '  hex=' + [...full].map(b => b.toString(16).padStart(2, '0')).join(''); lines.push(path + '  len=' + full.length + '  ' + j); el.querySelector('#diOut').textContent = lines.join('\n'); continue; }
+      const r = await ble.read(path, 32), dv = new DataView(r.buffer, r.byteOffset, r.length), hex = [...r].map(b => b.toString(16).padStart(2, '0')).join(' ');
+      const parts = [`len=${r.length}`, `hex=${hex}`];
+      if (r.length >= 1) parts.push(`u8=${r[0]}`);
+      if (r.length >= 2) parts.push(`u16=${dv.getUint16(0, true)}`);
+      if (r.length >= 4) parts.push(`i32=${dv.getInt32(0, true)}`, `f32=${+dv.getFloat32(0, true).toPrecision(6)}`);
+      const txt = new TextDecoder().decode(r).split('\0')[0]; if (/^[\x20-\x7e]{2,}$/.test(txt)) parts.push(`str="${txt}"`);
+      lines.push(path + '  ' + parts.join('  '));
+    } catch(e){ lines.push(path + '  ERR ' + (e.message || e)); }
+    el.querySelector('#diOut').textContent = lines.join('\n');
+  }
+  el.querySelector('#diStat').textContent = 'Done. Tap Copy and paste it to Claude.';
+  el.querySelector('#diCopy').onclick = async () => { try { await navigator.clipboard.writeText(lines.join('\n')); toast('Copied'); } catch(e){ const r = document.createRange(); r.selectNodeContents(el.querySelector('#diOut')); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); toast('Selected, tap Copy'); } };
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-zdev]'); if (!b || S.mode === 'live') return; S.series = b.dataset.zdev; ed = null; openMoodEditor('zones'); draw(); }); // test build: flip the zone editor between Peak and Proxy
+async function lbSave(){
+  const L = lbStore(), name = ($('#lbName').value || '').trim();
+  if (!/^[A-Za-z0-9_.]{3,20}$/.test(name)){ LB.err = LB_ERRS.username_invalid; drawLeaderboard(); return; }
+  const code = (($('#lbRef') && $('#lbRef').value) || '').trim().replace(/^@/, '');
+  if (code && !/^[A-Za-z0-9_.]{3,32}$/.test(code)){ LB.err = 'That invite code doesn’t look right. It’s your friend’s Emberline username.'; drawLeaderboard(); return; }
+  if (code){ store.inviteRef = code; save(); } // lbCall sends it
+  LB.busy = true; LB.err = ''; drawLeaderboard();
+  const wasJoined = !!L.joined;
+  try {
+    const body = Object.assign({ username: name, bio: (($('#lbBio') && $('#lbBio').value) || '').slice(0, 160) }, lbPayload()); if (LB.avatar) body.avatar = LB.avatar; if (isPremium()){ if (LB.bannerImg) body.bannerImg = LB.bannerImg; else if (LB.bannerDraft) body.banner = LB.bannerDraft; } if (LB.pick) body.showcase = LB.pick.slice(0, 3);
+    const r = await lbCall(body);
+    // the server drops badges it doesn't know; if that happened, say why instead of failing silently
+    const sent = body.showcase || [], kept = (r.player && r.player.showcase) || [], lost = sent.filter(k => !kept.includes(k));
+    const bioLost = body.bio && r.player && r.player.bio == null;
+    LB.me = r.player; lbStore().meCache = r.player; LB.pick = null; LB.bioDraft = null; try { drawRank(); drawSocial(); } catch(_){} L.joined = true; L.username = name; LB.avatar = null; LB.bannerImg = null; LB.bannerDraft = null; LB.edit = false; save();
+    if (lost.length || bioLost){
+      LB.err = (lost.some(k => k.startsWith('sp:')) || bioLost)
+        ? 'Saved, but the server didn’t keep ' + (lost.length ? 'your new badges' : 'your bio') + '. Update the player function in Supabase (paste the newest player-function.ts and Deploy), and run add-social.sql.'
+        : 'Saved, but the server didn’t keep some badges. Try again.';
+      LB.edit = true; LB.pick = sent.slice(); LB.busy = false; drawLeaderboard(); return;
+    }
+    // the server keeps a banner only for Premium (and only a new enough player function takes pictures): say so instead of failing silently
+    const nb = String((r.player && r.player.banner) || '');
+    if ((body.bannerImg && !nb.includes('-banner.')) || (body.banner && nb !== body.banner)){
+      toast('Profile saved, but the banner didn’t save. Ask in the Discord: your Premium may have run out, or the server needs an update'); LB.busy = false; lbLoad(true); return;
+    }
+    if (code && r.player && !r.player.referred_by){ delete store.inviteRef; save(); toast('Couldn’t find a player called ' + code + '. You can add the code later from Squad Up.'); }
+    else toast(wasJoined ? 'Profile saved' : 'You’re on the leaderboard');
+    if (!wasJoined) setTimeout(keepOpenNotice, 700);
+    LB.busy = false; lbLoad(true);
+  } catch(e){ LB.busy = false; LB.err = e.code === 'puffco_blocked' ? e.message : (LB_ERRS[e.code] || (/load failed|failed to fetch|network/i.test(e.message) ? 'Couldn’t reach the leaderboard server.' : 'Couldn’t save: ' + e.message)); drawLeaderboard(); }
+}
+document.addEventListener('click', e => {
+  const id = e.target.id;
+  if (id === 'lbJoin'){ lbSave(); }
+  if (id === 'lbGoSign'){ show('set'); setTimeout(() => { const c = $('#acctCard'); if (c) c.scrollIntoView({ block:'center' }); }, 300); }
+  if (id === 'lbEdit'){ LB.edit = true; LB.err = ''; drawLeaderboard(); }
+  if (id === 'lbCancel'){ LB.edit = false; LB.avatar = null; LB.bannerImg = null; LB.bannerDraft = null; LB.pick = null; LB.err = ''; drawLeaderboard(); }
+  const keepName = () => { const v = $('#lbName') && $('#lbName').value; drawLeaderboard(); if (v != null && $('#lbName')) $('#lbName').value = v; };
+  const rm = e.target.closest('[data-scrm]'); if (rm){ LB.pick.splice(+rm.dataset.scrm, 1); keepName(); return; }
+  const pk = e.target.closest('[data-sck]'); if (pk && !pk.disabled){ const k = pk.dataset.sck, i = LB.pick.indexOf(k); if (i >= 0) LB.pick.splice(i, 1); else if (LB.pick.length < 3) LB.pick.push(k); keepName(); return; }
+  const row = e.target.closest('[data-lbi]'); if (row && LB.rows){ const r = LB.rows[+row.dataset.lbi]; if (r) openPlayer(r); }
+});
+// the photo picker input lives outside the leaderboard card: the card redraws every 30s, and a redraw while
+// the iPhone photo picker was open threw away the chosen picture
+const lbPicFile = (() => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.id = 'lbPicFile'; i.hidden = true; document.body.appendChild(i); return i; })();
+let lbPicBusy = false;
+lbPicFile.addEventListener('change', async () => {
+  const f = lbPicFile.files && lbPicFile.files[0]; if (!f || lbPicBusy) return;
+  lbPicBusy = true;
+  try { const v = f.type === 'image/gif' && isPremium() ? await avGif(f) : await cropAvatar(f); if (v){ LB.avatar = v; LB.err = ''; if (v.startsWith('data:image/gif')) toast('GIF profile picture ready. Tap Save profile'); } } catch(err){ LB.err = err.message; }
+  finally { lbPicBusy = false; lbPicFile.value = ''; } // reset after, so the same photo can be picked again
+  const keep = $('#lbName') && $('#lbName').value; drawLeaderboard(); if (keep != null && $('#lbName')) $('#lbName').value = keep;
+});
+// your Emberline profile lives on the server, keyed to your Puffco account: sign in on any phone or link and it comes back
+let lbRestoring = null;
+function lbRestore(){
+  if (!lbUsesPuffco() || lbRestoring) return lbRestoring;
+  lbRestoring = lbCall({ action:'me' }).then(r => {
+    const L = lbStore(), p = r && r.player;
+    if (p){
+      LB.me = p; L.joined = true; L.dev = !!p.dev; L.meCache = p;
+      if (p.username) L.username = p.username;
+      L.email = (acct() && acct().email) || L.email; save();
+      try { drawLeaderboard(); drawRank(); drawSocial(); } catch(e){}
+      try { if (view === 'set') drawSettings(); } catch(e){}
+    } else if (r && 'player' in r){ L.joined = false; L.meCache = null; save(); try { drawSocial(); drawLeaderboard(); } catch(e){} } // the server says there's no profile for this login
+    return p;
+  }).catch(e => { LB.meErr = (e && (LB_ERRS[e.code] || e.message)) || 'unknown error'; try { drawSocial(); } catch(_){} return null; }).finally(() => { lbRestoring = null; });
+  return lbRestoring;
+}
+function lbStart(){ // called when Stats opens: load now, refresh every 30s while open
+  if (lbUsesPuffco() && !LB.me){ lbRestore(); } else if (lbStore().joined && !LB.me) lbCall({ action:'me' }).then(r => { LB.me = r.player; if (r.player){ lbStore().dev = !!r.player.dev; if (r.player.username) lbStore().username = r.player.username; lbStore().meCache = r.player; save(); } drawLeaderboard(); try { drawRank(); drawSocial(); } catch(e){} }).catch(() => {});
+  lbPush(); lbLoad(); notesLoad(); notesBell();
+  clearInterval(LB.timer);
+  LB.timer = setInterval(() => { if (view !== 'stats' && view !== 'social'){ clearInterval(LB.timer); return; } if (!document.hidden) lbLoad(true); }, 180000); // every 3 min: each reload downloads every player, which used up the Supabase free data allowance at 30s
+}
+
+function drawStats(){
+  try { drawRank(); drawLeaderboard(); } catch(e){}
+  const ss = data().sessions; $('#sampleTag').hidden = true; drawAccountStats(); initHistory(); drawHistory();
+  const today = startOfDay(Date.now());
+  const days = [...Array(14)].map((_,i) => today - (13-i)*DAY);
+  const daily = days.map(d => dayCount(new Date(d)) || 0);
+  const wd = ['S','M','T','W','T','F','S'];
+  $('#cDaily').innerHTML = barSVG(daily, days.map(d => wd[new Date(d).getDay()]));
+
+  const bins = [...Array(8)].map(()=>0); ss.forEach(s => bins[Math.floor(new Date(s.t).getHours()/3)]++);
+  { const ah = acct() && acct().data && acct().data.stats && acct().data.stats.hourHist; if (ah) [0,3,6,9,12,15,18,21].forEach((h, i) => bins[i] = ah.slice(h, h + 3).reduce((a, b) => a + (b || 0), 0)); }
+  $('#cHour').innerHTML = barSVG(bins, ['12a','3a','6a','9a','12p','3p','6p','9p'], {hiLast:false});
+
+  const temps = ss.slice(-20).map(s => store.unit === 'F' ? s.target : Math.round(f2c(s.target)));
+  $('#cTemp').innerHTML = lineSVG(temps, '°');
+
+  const counts = [0,0,0,0]; ss.forEach(s => counts[s.p] = (counts[s.p]||0) + 1);
+  const tot = ss.length || 1;
+  $('#cProf').innerHTML = S.profiles.map((p,i) => `<div class="hbar"><span>${esc(p.name)}</span><div class="t"><b style="width:${(counts[i]/tot*100).toFixed(1)}%;background:${p.color}"></b></div><span class="mono" style="text-align:right">${Math.round(counts[i]/tot*100)}%</span></div>`).join('');
+
+  const last7 = daily.slice(7).reduce((a, b) => a + b, 0), prev7 = daily.slice(0, 7).reduce((a, b) => a + b, 0);
+  const avg = (last7/7).toFixed(1), delta = prev7 ? Math.round((last7-prev7)/prev7*100) : null;
+  const avgDur = ss.length ? Math.round(ss.slice(-30).reduce((a,s)=>a+s.dur,0)/Math.min(30,ss.length)) : 0;
+  const n = sinceClean();
+  $('#statTiles').innerHTML =
+    tile('Avg per day', avg, delta == null ? 'last 7 days' : `${delta>=0?'+':''}${delta}% vs prior week`) +
+    tile('Today', daily[13], 'dabs') +
+    tile('Since clean', n, `${Math.max(0, store.cleanEvery - n)} until next clean`) +
+    tile('Avg session', avgDur ? avgDur + 's' : '—', 'heat-up plus hit') +
+    (() => { const hs = ss.slice(-50).flatMap(s => s.hits || []); if (!hs.length) return '';
+      const avgH = hs.reduce((a, b) => a + b, 0) / hs.length, best = Math.max(...ss.flatMap(s => s.hits || []));
+      return tile('Avg hit', avgH.toFixed(1) + 's', `longest ${best.toFixed(1)}s`); })() +
+    (() => { // blinkers: single hits of 8 seconds or longer, all time (includes the session running now)
+      const t0 = startOfDay(Date.now()), live = cur && HIT.hits ? HIT.hits : [];
+      const all = ss.reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0) + live.filter(h => h >= 8).length;
+      const today = ss.filter(s => s.t >= t0).reduce((a, s) => a + (s.hits || []).filter(h => h >= 8).length, 0) + live.filter(h => h >= 8).length;
+      const tot = blinkerCount();
+      return tile('Blinkers', tot, goldUnlockedNow() ? `${today} today · Aurum unlocked` : `${today} today · ${Math.max(0, GOLD_GOAL - tot)} to Aurum`); })();
+
+  $('#recent').innerHTML = ss.length ? ss.slice(-8).reverse().map(s => {
+    const d = new Date(s.t);
+    return `<div class="it"><b>${esc(s.name)}</b><span class="mono">${store.unit==='F'?s.target:Math.round(f2c(s.target))}${U()}</span><span class="muted" style="font-size:12px">${d.toLocaleDateString([], {month:'short', day:'numeric'})} · ${d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'})}</span><span class="muted mono" style="font-size:12px">${s.hits && s.hits.length ? `hit ${Math.max(...s.hits).toFixed(1)}s` : s.dur + 's'}</span></div>`;
+  }).join('') : '<p class="muted">No sessions yet. They log automatically each time you heat up.</p>';
+}
+
+/* ================= events ================= */
+function syncRange(r){ const p = (r.value - r.min) / (r.max - r.min) * 100; r.style.setProperty('--p', p + '%'); }
+document.addEventListener('input', e => { if (e.target.type === 'range') syncRange(e.target); });
+function syncRanges(){ document.querySelectorAll('input[type=range]').forEach(syncRange); }
+const ORDER = ['home','prof','lights','stats','social','set']; // Shop tab removed (its page stays hidden)
+let enterTimer = 0;
+function moveTabPill(v){
+  const b = document.querySelector(`#nav button[data-v="${v}"]`), pill = $('#tabpill');
+  if (!b || !pill) return;
+  pill.style.width = b.offsetWidth + 'px';
+  pill.style.transform = `translateX(${b.offsetLeft}px)`;
+}
+function show(v){
+  if (view === 'lights' && v !== 'lights') ltLeave();
+  const from = ORDER.indexOf(view), to = ORDER.indexOf(v);
+  view = v; try { duelGate(); if (v === 'stats') drawDuelHist(); } catch(e){}
+  ORDER.forEach(k => $('#v-'+k).hidden = k !== v);
+  moveTabPill(v === 'lights' ? 'prof' : v); // Lights has no tab; it lives under Profiles
+  const sec = $('#v-'+v);
+  sec.classList.remove('enter','from-l'); void sec.offsetWidth;
+  [...sec.children].forEach((c,i) => c.style.setProperty('--i', i));
+  sec.classList.add('enter'); if (to < from) sec.classList.add('from-l');
+  clearTimeout(enterTimer); enterTimer = setTimeout(() => sec.classList.remove('enter','from-l'), 1900);
+  document.querySelectorAll('#nav button').forEach(b => b.dataset.v === (v === 'lights' ? 'prof' : v) ? b.setAttribute('aria-current','page') : b.removeAttribute('aria-current'));
+  if (v === 'prof'){ drawProfiles(); drawAccountProfiles(); drawLightsState(); }
+  if (v !== 'lights' && phIdx(moodTarget) >= 0) moodTarget = null; // preheat pick only lasts while on Lights
+  if (v === 'lights'){ drawLights(); drawMoods(); ltEnter(); }
+  if (v === 'set'){ drawRichWall(); drawSettings(); drawDevice(); drawAccount(); wireAcctForm('ac'); drawTestTools(); vrDrawLinkUI(); }
+  if (v === 'shop'){ closeShopForm(); drawShops(); }
+  if (v === 'stats'){ drawStats.sig = null; autoSync(); lbStart(); drawBadgeBook(); setTimeout(() => rankTaxNotice(), 900); }
+  if (v === 'social'){ lbStart(); socLoad(); }
+  draw(); syncRanges(); window.scrollTo(0,0);
+  sec.querySelectorAll('.pcard, .shop').forEach((c,j) => c.style.setProperty('--j', j));
+  sec.querySelectorAll('.bar, .hbar .t b').forEach((c,k) => c.style.setProperty('--k', k % 14));
+  if (v === 'stats') countUp(sec);
+  try { sessionStorage.setItem('emberline.view', v); } catch(e){}
+}
+$('#nav').addEventListener('click', e => { const b = e.target.closest('button'); if (b) show(b.dataset.v); });
+
+/* ===== liquid glass drag ===== */
+const GD_HOSTS = [ ['#nav', 'button'], ['#homeChips', '.pchip'], ['.seg.vap', 'button'], ['.seg.hseg', 'button'] ];
+let gdSynthetic = false, gdSwallowUntil = 0, gdSwallowHost = null;
+document.addEventListener('click', e => {
+  if (gdSynthetic || Date.now() > gdSwallowUntil || !gdSwallowHost) return;
+  if (gdSwallowHost.contains(e.target)){ e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);
+document.addEventListener('pointerdown', e => {
+  if (e.button > 0 || !e.isPrimary) return;
+  let host = null, itemSel = '';
+  for (const [h, it] of GD_HOSTS){ const el = e.target.closest(h); if (el){ host = el; itemSel = it; break; } }
+  if (!host) return;
+  const items = [...host.children].filter(c => c.matches(itemSel) && !c.disabled && c.offsetParent);
+  if (items.length < 2) return;
+  const hr = host.getBoundingClientRect();
+  const rects = items.map(b => { const r = b.getBoundingClientRect(); return { b, l: r.left - hr.left, w: r.width, c: r.left - hr.left + r.width / 2 }; });
+  const x0 = e.clientX, y0 = e.clientY, pid = e.pointerId;
+  let lens = null, dragging = false, hov = null, lastX = x0, lastT = performance.now(), holdT = 0, gone = false;
+  const at = cx => { const x = cx - hr.left; let best = rects[0]; for (const r of rects) if (Math.abs(r.c - x) < Math.abs(best.c - x)) best = r; return best; };
+  const lensW = () => Math.max(...rects.map(r => r.w)) * .94;
+  const place = (cx, sx) => {
+    const w = lensW(); let x = cx - hr.left - w / 2; x = Math.max(2, Math.min(hr.width - w - 2, x));
+    lens.style.setProperty('--w', w + 'px'); lens.style.setProperty('--x', x + 'px');
+    lens.style.setProperty('--sx', (1.03 + sx).toFixed(3)); lens.style.setProperty('--sy', (1.03 - sx * .5).toFixed(3));
+  };
+  const setHov = r => {
+    if (hov === r) return;
+    if (hov) hov.b.classList.remove('gd-hov');
+    hov = r; if (r) r.b.classList.add('gd-hov');
+    if (dragging) try { hapticTick(); } catch(_){}
+  };
+  const begin = cx => {
+    if (lens) return;
+    lens = document.createElement('span'); lens.className = 'gd-lens'; host.appendChild(lens);
+    host.classList.add('gd-host', 'gd-on');
+    place(cx, 0); void lens.offsetWidth; lens.classList.add('on');
+    setHov(at(cx));
+  };
+  holdT = setTimeout(() => begin(x0), 220);
+  const move = ev => {
+    if (ev.pointerId !== pid || gone) return;
+    const dx = ev.clientX - x0, dy = ev.clientY - y0;
+    if (!dragging){
+      if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) return end(null, true); // they're scrolling
+      if (Math.abs(dx) < 7) return;
+      dragging = true; clearTimeout(holdT); begin(ev.clientX); lens.classList.add('drag');
+      try { host.setPointerCapture(pid); } catch(_){}
+    }
+    const now = performance.now(), v = Math.abs(ev.clientX - lastX) / Math.max(8, now - lastT);
+    lastX = ev.clientX; lastT = now;
+    const cx = ev.clientX, sq = Math.min(.12, v * .08);
+    if (!move.raf) move.raf = requestAnimationFrame(() => { move.raf = 0; if (gone) return; place(move.cx, move.sq); setHov(at(move.cx)); });
+    move.cx = cx; move.sq = sq;
+  };
+  const end = (ev, cancel) => {
+    if (gone || (ev && ev.pointerId !== pid)) return; gone = true;
+    clearTimeout(holdT);
+    document.removeEventListener('pointermove', move, true); document.removeEventListener('pointerup', up, true); document.removeEventListener('pointercancel', cc, true);
+    try { host.releasePointerCapture(pid); } catch(_){}
+    const pick = dragging && !cancel ? (ev ? at(ev.clientX) : hov) : null;
+    if (lens){
+      const L = lens;
+      if (pick){ L.classList.remove('drag'); L.classList.add('land'); L.style.setProperty('--w', pick.w + 'px'); L.style.setProperty('--x', pick.l + 'px'); L.style.setProperty('--sx', 1); L.style.setProperty('--sy', 1); }
+      setTimeout(() => L.classList.remove('on'), pick ? 160 : 0);
+      setTimeout(() => L.remove(), 650);
+    }
+    if (hov) hov.b.classList.remove('gd-hov');
+    host.classList.remove('gd-on');
+    if (pick){
+      gdSwallowHost = host; gdSwallowUntil = Date.now() + 450; // eat the browser's own click for this drag
+      const live = pick.b.isConnected ? pick.b : [...host.children].filter(c => c.matches(itemSel))[rects.indexOf(pick)];
+      gdSynthetic = true; try { if (live) live.click(); } finally { gdSynthetic = false; }
+    }
+  };
+  const up = ev => end(ev, false), cc = ev => end(ev, true);
+  document.addEventListener('pointermove', move, true);
+  document.addEventListener('pointerup', up, true);
+  document.addEventListener('pointercancel', cc, true);
+}, true);
+$('#connBtn').addEventListener('click', () => {
+  if (S.mode === 'live') return; // connected: tapping the pill does nothing (disconnect is in the device menu)
+  if (C.state === 'reconnecting'){ appAuto(false); manualDisconnect = true; reconnectRun++; setConnUI('idle'); return; }
+  if (C.state === 'unsupported'){ show('home'); return; }
+  startConnect(false);
+});
+$('#bStart').onclick = async () => { if (S.mode !== 'live') return startConnect(false); BOOST.temp = 0; BOOST.time = 0; try { await ble.write('/p/app/hcs', new Uint8Array([S.active])); } catch(e){} modeCmd(7); }; // like the Puffco app: pick the profile, then start
+$('#bStop').onclick = () => modeCmd(8);
+$('#bLantern').onclick = async () => { const b = $('#bLantern'); b.disabled = true; try { await setLantern(!S.lantern); toast(S.lantern ? 'Lantern on' : 'Lantern off'); } finally { b.disabled = false; render(); try { drawLightsState(); } catch(e){} } };
+$('#bBoost').onclick = () => boostCmd();
+$('#shareBtn').onclick = async () => {
+  const url = inviteUrl(), data = { title:'Emberline', text:'Emberline: a free, faster app for the Puffco Peak Pro and Proxy. Open it in the Path browser.', url };
+  try { if (navigator.share){ await navigator.share(data); return; } } catch(e){ if (e && e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); toast('Link copied. Paste it to share Emberline'); }
+  catch(e){ const t = document.createElement('textarea'); t.value = url; t.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); toast('Link copied. Paste it to share Emberline'); } catch(_){ toast(url); } t.remove(); }
+};
+{ // first tap asks "Are you sure?" in the same button, second tap marks it
+  const bc = $('#bCleaned'); let armT = 0;
+  const label = t => { const n = [...bc.childNodes].find(x => x.nodeType === 3); if (n) n.nodeValue = t; else bc.prepend(t); };
+  const disarm = () => { clearTimeout(armT); armT = 0; bc.classList.remove('arm'); label('Mark cleaned'); };
+  bc.onclick = () => { if (armT){ disarm(); markCleaned(); } else { bc.classList.add('arm'); label('Are you sure?'); armT = setTimeout(disarm, 3500); } };
+}
+$('#homeChips').addEventListener('click', e => { const b = e.target.closest('[data-p]'); if (b) selectProfile(+b.dataset.p); });
+
+$('#profList').addEventListener('input', e => {
+  const i = +e.target.dataset.i, p = S.profiles[i]; if (isNaN(i)) return;
+  if (e.target.id === 'pn'+i) p.name = e.target.value.slice(0,16) || `Profile ${i+1}`;
+  if (e.target.id === 'pt'+i){ p.tempC = f2c(+e.target.value); $('#ptv'+i).textContent = fmtT(p.tempC) + U(); }
+  if (e.target.id === 'pd'+i){ p.time = +e.target.value; $('#pdv'+i).textContent = p.time + 's'; }
+  if (e.target.id === 'pbf'+i || e.target.id === 'pbt'+i){
+    if (e.target.id === 'pbf'+i) p.boostF = +e.target.value; else p.boostT = +e.target.value;
+    $('#pbfv'+i).textContent = fmtDelta(p.boostF); $('#pbtv'+i).textContent = `+${p.boostT}s`;
+    $('#pbsum'+i).textContent = `${fmtDelta(p.boostF)} · +${p.boostT}s per tap`;
+  }
+  if (e.target.id === 'pc'+i){ p.color = e.target.value; p.mood = null; e.target.parentElement.style.background = p.color; }
+});
+$('#profList').addEventListener('click', e => {
+  const vb = e.target.closest('[data-vap]');
+  if (vb && !vb.disabled){ const i = +vb.parentElement.dataset.vi; S.profiles[i].vapor = +vb.dataset.vap; vb.parentElement.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b === vb)); return; }
+  const q = e.target.closest('[data-qc]');
+  if (q){ const i = +q.parentElement.dataset.qi; S.profiles[i].color = q.dataset.qc; S.profiles[i].mood = null; drawProfiles(); syncRanges(); return; }
+  const cm = e.target.closest('[data-clrmood]'); if (cm){ S.profiles[+cm.dataset.clrmood].mood = null; drawProfiles(); syncRanges(); return; }
+  const b = e.target.closest('[data-save]'); if (b) saveProfile(+b.dataset.save);
+  const pm = e.target.closest('[data-phmood]'); if (pm){ moodTarget = 'ph:' + pm.dataset.phmood; show('lights'); drawMoods(); return; }
+  const po = e.target.closest('[data-phoff]'); if (po){ phSet(+po.dataset.phoff, null); drawProfiles(); toast('Preheat color off'); }
+});
+
+$('#tLantern').onchange = e => setLantern(e.target.checked);
+$('#tStealth').onchange = e => setStealth(e.target.checked);
+$('#lanternColor').oninput = e => { store.lantern = e.target.value; $('#lanternSw').style.background = store.lantern; };
+$('#bLanternMood').onclick = () => { moodTarget = 'lantern'; show('lights'); drawMoods(); };
+$('#lanternColor').onchange = async e => { store.lanternMood = null; drawLightsState(); save(); if (S.mode === 'live' && S.lantern){ try { await writeLanternColor(store.lantern); } catch(err){ toast('Lantern color failed'); } } };
+$('#brightList').addEventListener('input', e => { const i = +e.target.dataset.i; if (!brEdit) brEdit = store.bright.slice(); brEdit[i] = +e.target.value; $('#bv'+i).textContent = Math.round(brEdit[i]/2.55) + '%'; if (LT.on){ LT.brDirty = true; ltBar(); ltLiveBright(); } });
+$('#bBright').onclick = applyBrightness;
+$('#ltSave').onclick = ltSave;
+$('#ltDiscard').onclick = () => ltDiscard();
+$('#ledSchemes') && $('#ledSchemes').addEventListener('click', e => { const b = e.target.closest('[data-led]'); if (!b) return; applyScheme(LED_SCHEMES[+b.dataset.led]); drawLights(); });
+
+$('#themeList').addEventListener('click', e => { const b = e.target.closest('[data-theme-id]'); if (!b) return;
+  if (b.dataset.themeId === 'gold' && !goldUnlockedNow()){ showGoldLocked(); return; }
+  store.theme = b.dataset.themeId; save(); applyTheme(); drawSettings(); if (b.dataset.themeId === 'gold') goldSweep(); });
+$('#accColor').oninput = e => { store.accent = e.target.value; applyTheme(); };
+$('#accColor').onchange = () => save();
+$('#accReset').onclick = () => { store.accent = null; save(); applyTheme(); drawSettings(); };
+$('#unitSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; store.unit = b.dataset.u; G.shown = null; ckShown = {}; save(); if (store.ui === 'cockpit') buildCluster(); drawSettings(); draw(); });
+$('#cleanEvery').onchange = e => { store.cleanEvery = clamp(Math.round(+e.target.value || 150), 10, 1000); save(); e.target.value = store.cleanEvery; draw(); };
+$('#sinceSave').onclick = () => {
+  const n = clamp(Math.round(+$('#sinceEdit').value || 0), 0, 5000);
+  if (demo) demo.since = n;
+  else { store.localSince = n; if (S.odo != null && S.mode === 'live') setCleanBase(S.odo - n); save(); }
+  toast(`Counter set to ${n}`); draw();
+};
+$('#tAll').onchange = e => { store.showAll = e.target.checked; save(); };
+$('#tAuto').onchange = e => { store.autoConnect = e.target.checked; save(); };
+$('#tSelFlash').onchange = e => { store.selFlash = e.target.checked; save(); };
+$('#tWarn').onchange = e => { store.warnOn = e.target.checked; save(); drawSettings(); };
+$('#tBigHit').onchange = e => { store.bigHit = e.target.checked; save(); drawSettings(); };
+$('#bigHitSecs').onchange = e => { store.bigHitSecs = clamp(Math.round(+e.target.value || 8), 3, 30); e.target.value = store.bigHitSecs; save(); };
+$('#warnSecs').onchange = e => { store.warnSecs = clamp(Math.round(+e.target.value || 15), 3, 110); e.target.value = store.warnSecs; save(); };
+$('#warnColor').oninput = e => { store.warnColor = e.target.value; save(); };
+$('#warnTest').onclick = () => {
+  buzz([90,120,90]);
+  if (S.mode === 'live') flashHeatCycle(store.warnColor || '#ffffff', 2); else toast('Connect your Peak to test the flash');
+};
+$('#tFull').onchange = async e => { store.fullscreen = e.target.checked; save(); if (e.target.checked) await FS.enter(); else await FS.exit(); setTimeout(drawSettings, 300); };
+$('#uiLooks').addEventListener('click', e => { const b = e.target.closest('.look'); if (!b) return; store.ui = b.dataset.ui; save(); applyTheme(); drawSettings(); draw(); requestAnimationFrame(() => moveTabPill(view)); toast((LOOKS.find(l => l.id === store.ui) || LOOKS[0]).n + ' on'); });
+$('#setTitle').addEventListener('click', () => { const now = Date.now(); eggTaps.push(now); while (eggTaps.length && now - eggTaps[0] > 2500) eggTaps.shift(); if (eggTaps.length === 3){ FS.exit(); } if (eggTaps.length >= 5){ eggTaps.length = 0; eggPop(); } }); // test build: 3 taps leaves full screen
+$('#ckSeg').addEventListener('click', e => { const b = e.target.closest('[data-p]'); if (b) selectProfile(+b.dataset.p); });
+function askClear(){
+  const w = $('#clearWrap');
+  w.innerHTML = `<span>Delete all saved sessions?</span><button class="btn small" id="cYes" style="border-color:var(--bad);color:var(--bad)">Delete</button><button class="btn small ghost" id="cNo">Keep</button>`;
+  $('#cNo').onclick = () => { w.innerHTML = '<button class="btn small" id="bClear">Clear session history</button>'; $('#bClear').onclick = askClear; };
+  $('#cYes').onclick = () => { store.sessions = []; store.cleanLog = []; save(); toast('History cleared'); w.innerHTML = '<span class="muted">History cleared.</span>'; drawSettings(); };
+}
+$('#bClear').onclick = askClear;
+
+/* ================= shop ================= */
+const ICONS = {
+  ig:'<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="5"/><circle cx="12" cy="12" r="3.6"/><circle cx="16.9" cy="7.1" r=".6" fill="#fff"/></svg>',
+  wm:'<svg viewBox="0 0 24 24"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg>',
+  other:'<svg viewBox="0 0 24 24"><path d="M4 10l1.5-5h13L20 10M4 10v9h16v-9M4 10h16M9 19v-5h6v5"/></svg>'
+};
+function shopKind(url){ return /instagram\.com/i.test(url) ? 'ig' : /weedmaps\.com/i.test(url) ? 'wm' : 'other'; }
+const KIND_LABEL = { ig:'Instagram', wm:'Weedmaps', other:'Link' };
+const money = n => '$' + (Math.round(n * 100) / 100).toLocaleString(undefined, {maximumFractionDigits:2});
+function safeUrl(u){ u = (u || '').trim(); if (!u) return ''; if (!/^https?:\/\//i.test(u)) u = 'https://' + u; try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : ''; } catch(e){ return ''; } }
+function itemLine(it){ return [it.name, it.desc, it.grams ? it.grams + 'g' : '', it.price != null ? '$' + it.price : ''].filter(Boolean).join(' '); }
+function parseItem(line){
+  let t = line.trim(); if (!t) return null;
+  let price = null, grams = null;
+  const pm = t.match(/\$\s?(\d+(?:\.\d+)?)/) || t.match(/(\d+(?:\.\d+)?)\s?\$/);
+  if (pm){ price = +pm[1]; t = t.replace(pm[0], ' '); }
+  const gm = t.match(/(\d+(?:\.\d+)?)\s?(g|grams?)\b/i);
+  if (gm){ grams = +gm[1]; t = t.replace(gm[0], ' '); }
+  t = t.replace(/\s{2,}/g, ' ').replace(/[\s,·-]+$/,'').trim();
+  const dm = t.match(/^(.*?)(?:\s*[,(-]\s*|\s+)((?:non[- ]?micron\w*|\d+\s?u|\d+\s?micron\w*|full melt|fresh press|\d+\s?star)(?:.*)?)$/i);
+  let name = t, desc = '';
+  if (dm && dm[1]){ name = dm[1].trim(); desc = dm[2].replace(/\)$/,'').trim(); }
+  return { name: name || 'Item', desc, grams, price };
+}
+function drawShops(){
+  const list = $('#shopList'), shops = store.shops || [];
+  if (!shops.length){ list.innerHTML = '<div class="card empty">No shops yet. Tap Add to save your first spot.</div>'; return; }
+  list.innerHTML = shops.map((sh, i) => {
+    const k = shopKind(sh.url || ''), url = safeUrl(sh.url);
+    const items = (sh.items || []).map(it => `<div class="shop-item"><div><b>${esc(it.name)}${it.grams ? ' · ' + it.grams + 'g' : ''}</b>${it.desc ? `<div class="desc">${esc(it.desc)}</div>` : ''}</div><div class="price">${it.price != null ? money(it.price) : ''}</div>${it.price != null && it.grams ? `<div class="ppg">${money(it.price / it.grams)}/g</div>` : ''}</div>`).join('');
+    return `<div class="card shop" data-shop="${i}">
+      <div class="shop-head"><span class="shop-icon ${k}">${ICONS[k]}</span><div class="shop-title"><b>${esc(sh.name)}</b><span>${esc(sh.area || KIND_LABEL[k])}</span></div></div>
+      ${items ? `<div class="shop-items">${items}</div>` : ''}
+      ${sh.notes ? `<p class="muted" style="margin:0;font-size:14px">${esc(sh.notes)}</p>` : ''}
+      <div class="shop-actions">
+        ${url ? `<a class="btn small primary" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open ${KIND_LABEL[k] === 'Link' ? 'site' : KIND_LABEL[k]}</a>` : ''}
+        <button class="btn small" data-edit="${i}">Edit</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+let editing = -1;
+function closeShopForm(){ editing = -1; const f = $('#shopForm'); f.hidden = true; f.innerHTML = ''; $('#bAddShop').hidden = false; }
+function openShopForm(i){
+  editing = i; const sh = i >= 0 ? store.shops[i] : { name:'', area:'', url:'', notes:'', items:[] };
+  const f = $('#shopForm');
+  f.innerHTML = `<b style="font-size:18px">${i >= 0 ? 'Edit shop' : 'New shop'}</b>
+    <label>Name<input id="sfName" type="text" maxlength="40" value="${esc(sh.name)}" placeholder="Hi-Line Delivery"></label>
+    <label>Link<input id="sfUrl" type="url" inputmode="url" value="${esc(sh.url || '')}" placeholder="weedmaps.com/... or instagram.com/..."></label>
+    <label>Area or handle<input id="sfArea" type="text" maxlength="40" value="${esc(sh.area || '')}" placeholder="San Mateo · delivery"></label>
+    <label>Menu, one item per line<textarea id="sfItems" placeholder="Aki Farms 2g non-micronized $60">${esc((sh.items || []).map(itemLine).join('\n'))}</textarea></label>
+    <label>Notes<input id="sfNotes" type="text" maxlength="120" value="${esc(sh.notes || '')}" placeholder="Drop times, deals, anything"></label>
+    <div class="shop-actions"><button class="btn small primary" id="sfSave">Save</button><button class="btn small" id="sfCancel">Cancel</button>${i >= 0 ? '<span id="sfDelWrap"><button class="btn small ghost" id="sfDel" style="color:var(--bad)">Delete</button></span>' : ''}</div>`;
+  f.hidden = false; $('#bAddShop').hidden = true;
+  f.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block:'start'});
+  $('#sfSave').onclick = () => {
+    const name = $('#sfName').value.trim();
+    if (!name){ toast('Give the shop a name'); $('#sfName').focus(); return; }
+    const entry = { id: sh.id || 's' + Date.now(), name, url: $('#sfUrl').value.trim(), area: $('#sfArea').value.trim(), notes: $('#sfNotes').value.trim(),
+      items: $('#sfItems').value.split('\n').map(parseItem).filter(Boolean) };
+    if (editing >= 0) store.shops[editing] = entry; else store.shops.unshift(entry);
+    save(); closeShopForm(); drawShops(); toast(`Saved ${name}`);
+  };
+  $('#sfCancel').onclick = closeShopForm;
+  const del = $('#sfDel');
+  if (del) del.onclick = () => {
+    $('#sfDelWrap').innerHTML = `<button class="btn small" id="sfDelYes" style="color:var(--bad)">Delete ${esc(sh.name)}</button>`;
+    $('#sfDelYes').onclick = () => { store.shops.splice(editing, 1); save(); closeShopForm(); drawShops(); toast('Shop deleted'); };
+  };
+}
+$('#bAddShop').onclick = () => openShopForm(-1);
+$('#shopList').addEventListener('click', e => { const b = e.target.closest('[data-edit]'); if (b) openShopForm(+b.dataset.edit); });
+
+/* ================= cockpit cluster ================= */
+// Geometry in a 420 x 250 viewBox. Left gauge is a half-hex bracket; right mirrors it.
+const CKW = 420, CKY0 = 18, CKY1 = 228, CKYM = (CKY0 + CKY1) / 2;
+const CK_OUT = [[88,CKY0],[48,CKYM],[88,CKY1]];   // outer diagonal (left)
+const CK_IN  = [[110,CKY0],[70,CKYM],[110,CKY1]]; // inner diagonal (left)
+const mx = pts => pts.map(([x,y]) => [CKW - x, y]);
+const ptsStr = pts => pts.map(p => p.map(n => +n.toFixed(2)).join(',')).join(' ');
+const xAtY = (pts, y) => { const [a,b,c] = pts; const seg = y <= b[1] ? [a,b] : [b,c]; const k = (y - seg[0][1]) / (seg[1][1] - seg[0][1]); return seg[0][0] + (seg[1][0] - seg[0][0]) * k; };
+const yForFrac = f => CKY1 - (CKY1 - CKY0) * f;
+let ckShown = {};
+function ckScale(){
+  const F = store.unit === 'F';
+  return F ? { max:650, step:100, unit:'°F' } : { max:345, step:50, unit:'°C' };
+}
+function buildCluster(){
+  const host = $('#ckSvg'); if (!host) return;
+  const sc = ckScale();
+  const band = pts => pts.concat(pts === CK_OUT ? [] : []);
+  const bandL = CK_OUT.concat(CK_IN.slice().reverse());
+  const bandR = mx(CK_OUT).concat(mx(CK_IN).slice().reverse());
+  let labels = '';
+  for (let v = 0; v <= sc.max; v += sc.step){
+    const y = yForFrac(v / sc.max), x = xAtY(CK_OUT, y);
+    labels += `<line class="ck-tk l" x1="${x}" y1="${y}" x2="${x+7}" y2="${y}"/><text class="ck-num l" data-v="${v}" x="${x - 8}" y="${y + 6}" text-anchor="end">${v}</text>`;
+  }
+  for (let v = 0; v <= 10; v++){
+    const y = yForFrac(v / 10), x = CKW - xAtY(CK_OUT, y);
+    labels += `<line class="ck-tk r${v >= 8 ? ' hot' : ''}" x1="${x}" y1="${y}" x2="${x-7}" y2="${y}"/><text class="ck-num r" data-v="${v}" x="${x + 8}" y="${y + 6}">${v}</text>`;
+  }
+  // slim inner gauges parallel to the lower diagonal
+  const miniL = [[114,172],[132,222]], miniR = mx(miniL);
+  host.innerHTML = `<svg viewBox="-4 0 428 252" aria-hidden="true">
+    <defs>
+      <linearGradient id="ckFillBlue" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#8fd2ff"/><stop offset="1" stop-color="#3b8cff"/></linearGradient>
+      <linearGradient id="ckFillRed" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#ff4a3a"/><stop offset="1" stop-color="#d4141c"/></linearGradient>
+      <linearGradient id="ckBandBlue" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0c3aa0"/><stop offset="1" stop-color="#0a2466"/></linearGradient>
+      <linearGradient id="ckBandRed" x1="1" y1="0" x2="0" y2="0"><stop offset="0" stop-color="#6a0f1c"/><stop offset="1" stop-color="#3a0710"/></linearGradient>
+      <clipPath id="ckClipL"><rect id="ckClipLR" x="0" y="${CKY1}" width="210" height="0"/></clipPath>
+      <clipPath id="ckClipR"><rect id="ckClipRR" x="210" y="${CKY1}" width="210" height="0"/></clipPath>
+    </defs>
+    <g class="ck-hexg">
+      <polygon class="ck-p0" points="176,64 244,64 266,${CKYM} 244,184 176,184 154,${CKYM}"/>
+      <polygon class="ck-p1" points="182,64 244,64 216,${CKYM} 154,${CKYM}"/>
+      <polygon class="ck-p2" points="204,${CKYM} 266,${CKYM} 238,184 176,184"/>
+      <polygon class="ck-p3" points="176,64 206,64 184,${CKYM} 154,${CKYM}"/>
+      <text class="ck-mode" id="ckMode" x="210" y="${CKYM + 4}" text-anchor="middle">MEDIUM</text>
+      <text class="ck-modesub" id="ckModeSub" x="210" y="${CKYM + 20}" text-anchor="middle">PROFILE 2</text>
+    </g>
+    <text class="ck-toplbl l" x="116" y="12">${sc.unit}</text>
+    <text class="ck-toplbl r" x="${CKW - 104}" y="12" text-anchor="end">heat × 10</text>
+    <polygon class="ck-band l" points="${ptsStr(bandL)}"/>
+    <polygon class="ck-band r" points="${ptsStr(bandR)}"/>
+    <polygon class="ck-bandfill l" clip-path="url(#ckClipL)" points="${ptsStr(bandL)}"/>
+    <polygon class="ck-bandfill r" clip-path="url(#ckClipR)" points="${ptsStr(bandR)}"/>
+    <polyline class="ck-line l" points="178,${CKY0} ${ptsStr(CK_OUT)} 186,${CKY1}"/>
+    <polyline class="ck-line l thin" points="178,${CKY0 + 4} ${ptsStr([[110,CKY0+4]])}"/>
+    <polyline class="ck-line r" points="${CKW-178},${CKY0} ${ptsStr(mx(CK_OUT))} ${CKW-186},${CKY1}"/>
+    <line class="ck-base l" x1="88" y1="${CKY1 + 4}" x2="200" y2="${CKY1 + 4}"/>
+    <line class="ck-base r" x1="220" y1="${CKY1 + 4}" x2="${CKW - 88}" y2="${CKY1 + 4}"/>
+    ${labels}
+    <line class="ck-needle" id="ckNeedleL" x1="0" y1="0" x2="0" y2="0"/>
+    <line class="ck-needle red" id="ckNeedleR" x1="0" y1="0" x2="0" y2="0"/>
+    <line class="ck-mini" x1="${miniL[0][0]}" y1="${miniL[0][1]}" x2="${miniL[1][0]}" y2="${miniL[1][1]}"/>
+    <line class="ck-mini-f" id="ckBatBar" x1="${miniL[1][0]}" y1="${miniL[1][1]}" x2="${miniL[1][0]}" y2="${miniL[1][1]}"/>
+    <text class="ck-sm" x="${miniL[0][0] + 8}" y="${miniL[0][1] + 4}">1</text>
+    <text class="ck-sm" x="${(miniL[0][0]+miniL[1][0])/2 + 8}" y="${(miniL[0][1]+miniL[1][1])/2 + 4}">½</text>
+    <text class="ck-sm" x="${miniL[1][0] + 8}" y="${miniL[1][1] + 2}">0</text>
+    <text class="ck-sm ck-ic" x="${miniL[1][0] + 14}" y="${(miniL[0][1]+miniL[1][1])/2 + 16}">BAT</text>
+    <line class="ck-mini" x1="${miniR[0][0]}" y1="${miniR[0][1]}" x2="${miniR[1][0]}" y2="${miniR[1][1]}"/>
+    <line class="ck-mini-f c" id="ckClnBar" x1="${miniR[1][0]}" y1="${miniR[1][1]}" x2="${miniR[1][0]}" y2="${miniR[1][1]}"/>
+    <text class="ck-sm" id="ckClnMax" x="${miniR[0][0] - 8}" y="${miniR[0][1] + 4}" text-anchor="end">150</text>
+    <text class="ck-sm" id="ckClnMid" x="${(miniR[0][0]+miniR[1][0])/2 - 8}" y="${(miniR[0][1]+miniR[1][1])/2 + 4}" text-anchor="end">75</text>
+    <text class="ck-sm" x="${miniR[1][0] - 8}" y="${miniR[1][1] + 2}" text-anchor="end">0</text>
+    <text class="ck-sm ck-ic" x="${miniR[1][0] - 14}" y="${(miniR[0][1]+miniR[1][1])/2 + 16}" text-anchor="end">CLN</text>
+    <text class="ck-set" id="ckTarget" x="116" y="94" text-anchor="middle">510</text>
+    <text class="ck-speed" id="ckTemp" x="116" y="${CKYM + 12}" text-anchor="middle">72</text>
+    <text class="ck-unit" id="ckUnit" x="140" y="${CKYM + 30}" text-anchor="middle">${sc.unit}</text>
+    <text class="ck-gear" id="ckGear" x="${CKW - 112}" y="${CKYM + 14}" text-anchor="middle">P</text>
+    <text class="ck-status" id="ckStatus" x="${CKW - 112}" y="${CKYM + 34}" text-anchor="middle">IDLE</text>
+  </svg>`;
+  ckShown = {};
+}
+const GEAR = { 7:'H', 8:'D', 9:'N' };
+function setClip(id, frac){
+  const r = $(id); const y = yForFrac(frac);
+  r.setAttribute('y', y.toFixed(2)); r.setAttribute('height', (CKY1 - y + 1).toFixed(2));
+  return y;
+}
+function updateCluster(){
+  if (!$('#ckClipLR')) return;
+  const sc = ckScale(), tempU = store.unit === 'F' ? c2f(G.temp) : G.temp;
+  const fl = clamp(tempU / sc.max, 0, 1), fr = clamp(G.frac, 0, 1);
+  const yl = setClip('#ckClipLR', fl), yr = setClip('#ckClipRR', fr);
+  const nl = $('#ckNeedleL'), nr = $('#ckNeedleR');
+  const xo = xAtY(CK_OUT, yl), xi = xAtY(CK_IN, yl);
+  nl.setAttribute('x1', (xo - 3).toFixed(1)); nl.setAttribute('x2', (xi + 12).toFixed(1)); nl.setAttribute('y1', yl.toFixed(1)); nl.setAttribute('y2', yl.toFixed(1));
+  const xo2 = CKW - xAtY(CK_OUT, yr), xi2 = CKW - xAtY(CK_IN, yr);
+  nr.setAttribute('x1', (xo2 + 3).toFixed(1)); nr.setAttribute('x2', (xi2 - 12).toFixed(1)); nr.setAttribute('y1', yr.toFixed(1)); nr.setAttribute('y2', yr.toFixed(1));
+  // light up the label nearest the value, like the dash
+  const litL = Math.round(tempU / sc.step) * sc.step, litR = Math.round(fr * 10);
+  if (ckShown.litL !== litL){ ckShown.litL = litL; document.querySelectorAll('#ckSvg .ck-num.l').forEach(t => t.classList.toggle('lit', +t.dataset.v === litL)); }
+  if (ckShown.litR !== litR){ ckShown.litR = litR; document.querySelectorAll('#ckSvg .ck-num.r').forEach(t => t.classList.toggle('lit', +t.dataset.v === litR)); }
+  const p = S.profiles[S.active];
+  const set = (id, v) => { if (ckShown[id] !== v){ ckShown[id] = v; const el = $(id); if (el) el.textContent = v; } };
+  set('#ckTemp', S.mode === 'live' ? String(fmtT(G.temp)) : '--');
+  set('#ckTarget', String(fmtT(p.tempC)));
+  set('#ckGear', GEAR[S.state] || 'P');
+  set('#ckMode', (p.name || 'Profile').toUpperCase().slice(0, 12));
+  set('#ckModeSub', `${isProxy() ? 'PROXY' : (CHAMBERS[S.chamber] || '').toUpperCase()} · ${vaporName(p.vapor).toUpperCase()} · ${p.time}s`);
+  const left = Math.max(0, Math.round(S.total - liveElapsed()));
+  set('#ckStatus', S.state === 8 && HIT.on ? `HIT ${HIT.live.toFixed(1)}` : S.state === 8 ? `${left}s` : (STATE_NAMES[S.state] || 'Idle').toUpperCase());
+  const lerp = (a, b, k) => a + (b - a) * k;
+  const bf = clamp((S.battery || 0) / 100, 0, 1), cf = clamp(sinceClean() / store.cleanEvery, 0, 1);
+  const bb = $('#ckBatBar'); bb.setAttribute('x2', lerp(132, 114, bf).toFixed(1)); bb.setAttribute('y2', lerp(222, 172, bf).toFixed(1));
+  const cb = $('#ckClnBar'); cb.setAttribute('x2', lerp(CKW - 132, CKW - 114, cf).toFixed(1)); cb.setAttribute('y2', lerp(222, 172, cf).toFixed(1));
+  cb.style.stroke = cf >= 1 ? '#ff3b30' : cf > .85 ? '#ffc400' : '';
+  set('#ckClnMax', String(store.cleanEvery)); set('#ckClnMid', String(Math.round(store.cleanEvery / 2)));
+  const ts = new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}).replace(/\s?([AP]M)$/i, (m, a) => ' ' + a.toLowerCase());
+  set('#ckTime', ts);
+  set('#ckAmb', S.mode === 'live' ? `+${fmtT(G.temp)}°${store.unit}` : `--°${store.unit}`);
+}
+
+
+/* ================= mood lights (official format) ================= */
+const MOODS = JSON.parse(document.getElementById('moodData').textContent);
+/* ---- Premium moods: exclusive light patterns for supporters (Peak and Peak Pro). Rich Plasma and Rich Flourish are Plasma's and Flourish's own
+   animations recolored in Rich's purple and white; Gold Rush and Aurora Drift recolor Candle Flicker's and Hologram's ---- */
+const PREM_MOODS = [{"id":"prem-rich-plasma","name":"Rich Plasma","desc":"Plasma\u2019s own animation in Rich\u2019s purple and white. Premium only.","prem":true,"colors":["#ffffff","#ebd8ff","#a23bff","#8f0dff","#6200b5","#380067"],"lamp":{"name":"pikaled2","param":{"anim":1,"color":["#ffffff","#ebd8ff","#a23bff","#8f0dff","#6200b5","#380067","#1d0036","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#ebd8ff","#a23bff","#ab4fff","#d2a8ff","#b76dff","#a542ff","#3a006b","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019","#0c0019"],"plNum":0,"speed":32,"bright":255,"diFrac":1,"offset":[2214608896,2214610944,2214610944,2214604800,2214600704,2214600704,2214596608,2216691712,2216692736,2214596608,2214592512,2214593536,2214595584,2214595584,2214593536,2214592512,0,0,0,0],"plDenom":0,"colorLen":32,"speedDi0":14,"speedDi1":64}}},{"id":"prem-rich-flourish","name":"Rich Flourish","desc":"Flourish\u2019s growth animation in Rich\u2019s purple and white. Premium only.","prem":true,"colors":["#4b008a","#9d2fff","#250045","#961dff","#ecdbff"],"lamp":{"name":"pikaled2","param":{"anim":1,"color":["#480084","#480084","#500094","#7200d3","#9923ff","#b05bff","#a94cff","#8b02ff","#6200b4","#4a0088","#480084","#480084","#b260ff","#b260ff","#a745ff","#7400d6","#380067","#240044","#28004b","#460082","#8700f9","#ae57ff","#b260ff","#b260ff","#ffffff","#e1c5ff","#b971ff","#9e30ff","#9212ff","#9e30ff","#b971ff","#e1c5ff"],"plNum":0,"speed":18,"bright":255,"diFrac":0,"offset":[1929388032,1929383936,1929383936,1929388032,1929392128,1929392128,0,3211264,3670016,0,1930960896,1930960896,0,0,1125679104,1125679104,0,0,0,0],"plDenom":0,"colorLen":0,"speedDi0":3.6,"speedDi1":36}}},{"id":"prem-gold-rush","name":"Gold Rush","desc":"A warm flicker in molten gold. Premium only.","prem":true,"colors":["#ffdc68","#6e4300","#a56e00"],"lamp":{"name":"pikaled2","param":{"anim":1,"color":["#ffe99b","#ffe897","#ffde71","#ffd241","#f2c130","#eab627","#ebb828","#f6c634","#ffd64f","#ffe280","#ffde6e","#ffdb65","#e9b526","#b07600","#b97d00","#ffe899","#ffe280","#ffe17b","#f6c635","#f6c635","#c18400","#ffe99b","#ffdc6a","#cf9207","#996500","#bc8000","#fdcf3d","#ffe99e","#ffe58d","#ffe076","#ffdf72","#ffe386"],"plNum":0,"speed":9,"bright":255,"diFrac":0,"offset":[42035200,42055680,41953280,41973760,41994240,42014720,42035200,764725248,18159616,41973760,764725248,764725248,764725248,1033160704,1435875328,1435875328,0,0,0,0],"plDenom":0,"colorLen":0,"speedDi0":1.8,"speedDi1":18}}},{"id":"prem-aurora","name":"Aurora Drift","desc":"Hologram\u2019s shimmer in aurora cyan, violet and pink. Premium only.","prem":true,"colors":["#ff00d4","#7a00ff","#00e5ff"],"lamp":{"name":"pikaled2","param":{"anim":1,"color":["#00e5ff","#12c3ff","#24a1ff","#367fff","#514cff","#7508ff","#a600f1","#ce00e4","#e100de","#ff00d4","#eb00da","#d800e1","#c400e7","#ba00ea","#b000ed","#9c00f4","#8900fa","#9300f7","#7f00fd","#6c19ff","#632aff","#485dff","#367fff","#2d90ff","#1bb2ff","#09d4ff","#00e5ff","#5a3bff","#f500d7","#ba00ea","#9300f7","#3f6eff"],"plNum":0,"speed":65,"bright":255,"diFrac":0,"offset":[968189952,968210432,968108032,968128512,968148992,968169472,109144064,109113344,109113344,109082624,109057024,109169664,109057024,109169664,109169664,109164544,0,0,0,0],"plDenom":0,"colorLen":0,"speedDi0":13,"speedDi1":130}}}];
+// Flourish is a special edition colorway: only Premium, Rich, Flourish owners, or a Puffco account that has it see it
+const FLOURISH_ID = '00018E59EDJC58Y3BHWPV797DQ';
+const exclOk = x => x.id !== FLOURISH_ID || isPremium() || isRich() || S.edition === 'Flourish' || (((acct() || {}).data || {}).excl || []).some(e => e.id === x.id);
+const exclHere = () => MOODS.excl.filter(x => (!isProxy() || x.toad) && exclOk(x));
+const exclGet = id => MOODS.excl.find(x => x.id === id) || PREM_MOODS.find(x => x.id === id);
+const premMoodsHere = () => isProxy() ? [] : PREM_MOODS.map(x => ({ kind:'excl', id:x.id, name:x.name }));
+const PROXY_EDITIONS = { 0:'Onyx', 1:'Haze', 2:'Pine' }; // from the Puffco web app's product list
+const EDITIONS = { 0:'OG', 21:'OG', 1:'Opal', 22:'Opal', 2:'Indiglow', 4:'Guardian', 12:'Pearl', 13:'Onyx', 15:'Desert', 17:'Flourish', 19:'Storm', 23:'Daybreak', 25:'Plasma', 26:'Glacier' };
+/* ---- Emberline native effects: built for the Peak's own light engine, so they save to the device and run smooth without the app ---- */
+const FX_UI = (min, max, def) => [
+  { type:'colors', key:'userColors', label:'', min, max, default:def },
+  { type:'slider', key:'tempoFrac', label:'Tempo', min:0, max:1, default:.45 },
+  { type:'checkbox', key:'dynamicInhale', label:'Dynamic Inhale', default:0 } ];
+const FX_TPL = {
+  'emberline-fx-breathe':   { name:'Breathe ✦',   desc:'Slow fade in and out',            fx:'breathe',   ui: FX_UI(1, 4, '#9900CC') },
+  'emberline-fx-wave':      { name:'Wave ✦',      desc:'Breathing that ripples around',   fx:'wave',      ui: FX_UI(1, 4, '#00C8FF,#9900CC') },
+  'emberline-fx-heartbeat': { name:'Heartbeat ✦', desc:'Double pulse, then rest',          fx:'heartbeat', ui: FX_UI(1, 4, '#FF2D55') },
+  'emberline-fx-comet':     { name:'Comet ✦',     desc:'A light with a tail chasing around', fx:'comet',   ui: FX_UI(1, 3, '#FFFFFF') },
+  'emberline-fx-police':    { name:'Police ✦',    desc:'Two colors flash side to side',   fx:'police',    ui: FX_UI(2, 2, '#FF0000,#0040FF') },
+  'emberline-fx-strobe':    { name:'Strobe ✦',    desc:'Hard flashes',                    fx:'strobe',    ui: FX_UI(1, 4, '#FFFFFF') }
+};
+function fxLamp(fx, meta){
+  const cols = (meta.userColors && meta.userColors.length ? meta.userColors : ['#ffffff']).map(c => c.toLowerCase());
+  const t = meta.tempoFrac ?? .45, black = '#000000';
+  const dim = (c, k) => mixL(black, c, k);
+  let arr = [], zoneShift = 0;
+  if (fx === 'breathe' || fx === 'wave'){
+    const per = Math.max(6, Math.floor(32 / cols.length)), steps = [];
+    for (let k = 0; k < per; k++){ const x = k / per; steps.push(.03 + .97 * ease(0.5 - 0.5 * Math.cos(x * Math.PI * 2))); }
+    cols.forEach(c => steps.forEach(v => arr.push(dim(c, v))));
+    if (fx === 'wave') zoneShift = per / 3;
+  } else if (fx === 'heartbeat'){
+    const beat = [0, 1, .35, .9, .12, 0, 0, 0];
+    cols.forEach(c => beat.forEach(v => arr.push(dim(c, v))));
+  } else if (fx === 'comet'){
+    const n = Math.max(8, Math.floor(32 / cols.length)), tail = [1, .55, .28, .12, .05];
+    cols.forEach(c => { for (let k = 0; k < n; k++) arr.push(k < tail.length ? dim(c, tail[k]) : black); });
+    zoneShift = -(arr.length / 6);
+  } else if (fx === 'police'){
+    const [a, b] = cols; arr = [a, a, black, a, a, black, black, black, b, b, black, b, b, black, black, black];
+  } else { // strobe
+    cols.forEach(c => arr.push(c, black, black));
+  }
+  arr = arr.slice(0, 32);
+  const L = arr.length, offset = Array(ledCount()).fill(0);
+  // ring order around the device, so waves and comets travel instead of jumping
+  const ring = isProxy() ? [0, 1, 2, 3, 4, 5] : [0, 5, 2, 1, 4, 3];
+  const defs = zoneDefs();
+  defs.forEach((z, i) => {
+    let off = 0;
+    if (fx === 'police') off = (['baseR','glassR','logoB','back','r4','r5','r6'].includes(z.k)) ? 8 : 0;
+    else if (zoneShift) off = ((ring.indexOf(i) * zoneShift) % L + L) % L;
+    z.slots.forEach(sl => offset[sl] = Math.round(off * 4096));
+  });
+  const cpm = fx === 'strobe' ? 30 + t * t * 900 : fx === 'police' ? 20 + t * t * 260 : 4 + t * t * 160;
+  const speed = clamp(Math.round(cpm / 3), 1, 255);
+  return { name:'pikaled2', param:{ bright:255, speed, speedDi0: Math.min(speed * 2, 255) / 8, speedDi1: Math.min(speed * 2, 255), anim:1, plNum:0, plDenom:0, offset, color: MoodEngine.packRgb(arr), colorLen:L, diFrac: meta.dynamicInhale ? 1 : 0 } };
+}
+Object.assign(MOODS.tpl, FX_TPL);
+const ledVariant = () => S.series === 'toad' ? 'toad' : ['Opal','Indiglow','Guardian'].includes(S.edition) ? 'lightning' : 'og';
+const isProxy = () => S.series === 'toad';
+const ledCount = () => isProxy() ? 12 : 20;
+if (!Array.isArray(store.myMoods)) store.myMoods = [];
+applyAccount();
+try { const st = acct() && acct().data && acct().data.stats; if (st && st.month && !Object.keys(hist().days).length) ingestDabHistory({ dabs:{ dates: st.month.dates, units:[{ dabs: st.month.dabs }] } }); } catch(e){}
+setTimeout(() => autoSync(), 1500);
+let moodTarget = null; // 0..3 or 'lantern'
+
+function allMine(){
+  return store.myMoods.concat(MOODS.mine.map(m => Object.assign({ fromAccount:true }, m)));
+}
+const edMood = ref => ref && ref.kind === 'ed' ? EDITION_MOODS.find(x => x.id === ref.id) || null : null;
+const edMoodsHere = () => { let u = ''; try { u = String((LB.me && LB.me.username) || lbStore().username || '').toLowerCase(); } catch(e){} if (S.api === 2) return []; const mine = EDITION_MOODS.filter(x => x.proxy === isProxy()); return u === 'rich' || isPremium() ? mine : mine.filter(x => x.name === S.edition); }; // limited edition colorways: Rich and Premium get them all, an owner gets their own edition's
+// Rich only. From owners' shared lights (Oct 2026): Plasma's own colorway (on 11 owners' Plasmas) and Glacier's (the factory lantern light on a Glacier). Flourish is already an exclusive for everyone.
+// Sunrise was taken out: it's a normal Puffco library mood. The old 'Plasma' and 'Haze' entries were really Lupus Awareness and Hologram, which are already exclusives
+const EDITION_MOODS = [{"id":"ed-plasma","name":"Plasma","proxy":false,"speed":32,"colors":["#f1c8ff","#dfa8ff","#cc00ff","#a000e8","#7600b0","#52007a","#240038","#080010","#080010","#080010","#080010","#080010","#080010","#080010","#080010","#080010","#dfa8ff","#cc00ff","#e24ad4","#ff78a8","#ff4054","#ff1024","#7a0812","#080010","#080010","#080010","#080010","#080010","#080010","#080010","#080010","#080010"],"blob":"a2646c616d70a2646e616d656870696b616c65643265706172616dab64616e696d0165636f6c6f725860f1c8ffdfa8ffcc00ffa000e87600b052007a240038080010080010080010080010080010080010080010080010080010dfa8ffcc00ffe24ad4ff78a8ff4054ff10247a081208001008001008001008001008001008001008001008001008001065706c4e756d0065737065656418206662726967687418ff6664694672616301666f6666736574941a840040001a840048001a840048001a840030001a840020001a840020001a840010001a842008001a84200c001a840010001a840000001a840004001a84000c001a84000c001a840004001a840000000000000067706c44656e6f6d0068636f6c6f724c656e18206873706565644469300e6873706565644469311840646d657461a26776657273696f6e00686d6f6f64556c696450019f1af9b40009ec3607cba8c285f817"},{"id":"ed-glacier","name":"Glacier","proxy":false,"speed":12,"colors":["#020b1a","#031329","#041e3d","#052a52","#073566","#09477f","#0d62a5","#1878bb","#2f91d1","#59ace0","#8dcef1","#c5e8fa","#eaf8ff","#ffffff","#d8effb","#a7d8f3","#70bce7","#3c9ad4","#1979b7","#0d62a5","#09477f","#073566","#052a52","#041e3d","#031329","#020b1a","#052a52","#0d62a5","#2f91d1","#8dcef1","#eaf8ff","#70bce7"],"blob":"a2646c616d70a2646e616d656870696b616c65643265706172616dab64616e696d0165636f6c6f725860020b1a031329041e3d052a5207356609477f0d62a51878bb2f91d159ace08dcef1c5e8faeaf8ffffffffd8effba7d8f370bce73c9ad41979b70d62a509477f073566052a52041e3d031329020b1a052a520d62a52f91d18dcef1eaf8ff70bce765706c4e756d006573706565640c6662726967687418ff6664694672616300666f6666736574941a39b568001a39b5b8001a39b428001a39b478001a39b4c8001a39b518001a068168001a0680f0001a0680f0001a068078001a068014001a0681cc001a068014001a0681cc001a0681cc001a0681b8000000000067706c44656e6f6d0068636f6c6f724c656e006873706565644469300c6873706565644469310c646d657461a26776657273696f6e00686d6f6f64556c696450019fa3413ae116cef57b23ba54b575d1"}];
+function findMood(ref){
+  if (!ref) return null;
+  if (ref.kind === 'ed') return edMood(ref) ? ref : null;
+  if (ref.kind === 'excl'){ const x = exclGet(ref.id); return x && (!x.prem || isPremium()) && exclOk(x) ? ref : null; }
+  return ref;
+}
+/* ---- zones: official Peak LED regions (labels from Puffco's own app) ---- */
+const ZONES = {
+  og: [ { k:'baseL', n:'Base left',   slots:[0,1,5] },   { k:'glassR', n:'Glass right', slots:[10,11,19] },
+        { k:'logoT', n:'Logo top',    slots:[7] },       { k:'logoB',  n:'Logo bottom', slots:[8] },
+        { k:'baseR', n:'Base right',  slots:[2,3,4] },   { k:'glassL', n:'Glass left',  slots:[14,15] } ],
+  lightning: [ { k:'base', n:'Base', slots:[0,1,2,3,4,5] }, { k:'glass', n:'Glass', slots:[10,11,14,15,19] },
+        { k:'logoT', n:'Logo top', slots:[7] }, { k:'logoB', n:'Logo bottom', slots:[8] },
+        { k:'back', n:'Back', slots:[12,13] }, { k:'sides', n:'Sides', slots:[6,9] } ],
+  toad: [ { k:'r1', n:'Ring 1', slots:[0,1] }, { k:'r2', n:'Ring 2', slots:[2,3] }, { k:'r3', n:'Ring 3', slots:[4,5] },
+          { k:'r4', n:'Ring 4', slots:[6,7] }, { k:'r5', n:'Ring 5', slots:[8,9] }, { k:'r6', n:'Ring 6', slots:[10,11] } ]
+};
+const ZONE_TAG = 'emberline-zones';
+const ZONE_FX = [['solid','Solid'],['pulse','Pulse'],['fade','Fade to 2nd'],['rainbow','Rainbow'],['flicker','Candle'],['strobe','Strobe'],['off','Off']];
+function zoneDefs(){ return ZONES[ledVariant()] || ZONES.og; }
+// zone list shown top to bottom on the device (glass first, base last); the data order stays the same
+const ZONE_TOP_DOWN = ['glassR','glassL','logoT','logoB','baseR','baseL','glass','sides','back','base'];
+function zoneOrder(){ const d = zoneDefs(); return d.map((z, i) => i).sort((a, b) => { const ia = ZONE_TOP_DOWN.indexOf(d[a].k), ib = ZONE_TOP_DOWN.indexOf(d[b].k); return (ia < 0 ? 99 + a : ia) - (ib < 0 ? 99 + b : ib); }); }
+function zoneDefaults(){ const c = ['#ff2d55','#30d158','#ffd60a','#ff9f0a','#ff2d55','#30d158']; return { zones: zoneDefs().map((z, i) => ({ c: c[i], c2:'#0a84ff', fx:'solid' })), motion:'still', tempoFrac:.5 }; }
+function zoneLampFromColors(cols){
+  const offset = Array(ledCount()).fill(isProxy() ? 0 : 65536);
+  zoneDefs().forEach((z, i) => z.slots.forEach(s => offset[s] = i * 4096));
+  return { name:'pikaled2', param:{ bright:255, speed:64, anim:1, plNum:0, plDenom:1, offset, color: MoodEngine.packRgb(cols), colorLen:32 } };
+}
+function zoneStillColors(meta){ return meta.zones.map(z => z.fx === 'off' ? '#000000' : z.c); }
+function zoneLamp(meta){
+  const cols = zoneStillColors(meta);
+  if (meta.motion !== 'rotate') return zoneLampFromColors(cols);
+  // rotate: every zone runs through all zone colors, each starting on its own (uses the Peak's built-in animation, saved on the device)
+  const n = cols.length, per = 5, L = n * per, arr = [];
+  cols.forEach(c => { for (let k = 0; k < per; k++) arr.push(c); });
+  const offset = Array(ledCount()).fill(0);
+  zoneDefs().forEach((z, i) => z.slots.forEach(s => offset[s] = i * per * 4096));
+  const cpm = Math.pow(meta.tempoFrac ?? .5, 2) * 480, speed = Math.max(1, Math.round(cpm / 3));
+  return { name:'pikaled2', param:{ bright:255, speed, speedDi0: Math.min(speed * 2, 255) / 8, speedDi1: Math.min(speed * 2, 255), anim:1, plNum:0, plDenom:0, offset, color: MoodEngine.packRgb(arr), colorLen:L, diFrac:0 } };
+}
+/* live per-zone effects: the app renders frames and streams them to the Peak's preview channel */
+function hex2rgb(h){ return [1,3,5].map(i => parseInt(h.slice(i, i + 2), 16)); }
+function rgb2hex(r){ return '#' + r.map(v => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join(''); }
+function mix(a, b, t){ const A = hex2rgb(a), B = hex2rgb(b); return rgb2hex(A.map((v, i) => v + (B[i] - v) * t)); }
+function hsv(h){ const f = n => { const k = (n + h * 6) % 6; return 255 * (1 - Math.max(0, Math.min(k, 4 - k, 1))); }; return rgb2hex([f(5), f(3), f(1)]); }
+const flick = [];
+const zPh = [], zClock = { last:0 };
+const zSpeed = v => 0.08 + Math.pow(v ?? .5, 1.6) * 1.1;   // cycles per second: ~12s (slow) to ~0.85s (fast)
+const lin = c => { c /= 255; return c <= .04045 ? c / 12.92 : Math.pow((c + .055) / 1.055, 2.4); };
+const unlin = c => 255 * (c <= .0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - .055);
+function mixL(a, b, t){ const A = hex2rgb(a).map(lin), B = hex2rgb(b).map(lin); return rgb2hex(A.map((v, i) => unlin(v + (B[i] - v) * t))); }  // light-correct blend, no muddy midpoint
+const ease = x => x * x * (3 - 2 * x);
+function zoneFrame(meta, t){
+  const dt = zClock.last ? Math.min(.5, Math.max(0, t - zClock.last)) : 0; zClock.last = t;
+  return meta.zones.map((z, i) => {
+    zPh[i] = ((zPh[i] || 0) + dt * zSpeed(z.sp ?? meta.tempoFrac)) % 1000;
+    const ph = zPh[i], wave = 0.5 - 0.5 * Math.cos(ph * Math.PI * 2);
+    switch (z.fx){
+      case 'off': return '#000000';
+      case 'pulse': return mixL('#000000', z.c, .06 + .94 * ease(wave));
+      case 'fade': return mixL(z.c, z.c2 || '#000000', z.bias ? Math.pow(ease(wave), z.bias) : ease(wave)); // bias < 1 = stays on the 2nd color longer
+      case 'rainbow': return hsv(((ph * .5) + i / 6) % 1);
+      case 'strobe': return (ph * 2) % 1 < .5 ? z.c : '#000000';
+      case 'flicker': { flick[i] = (flick[i] ?? .8) * .7 + (0.55 + Math.random() * 0.45) * .3; return mixL('#000000', z.c, flick[i]); }
+      default: return z.c;
+    }
+  });
+}
+const zoneLive = { on:false, meta:null, timer:null, busy:false, t0:0 };
+const ZFX_ANIM = ['pulse','fade','rainbow','flicker','strobe'];
+function zoneLiveStart(meta, quiet){
+  if (S.mode !== 'live'){ if (!quiet) needLive('preview zones'); return false; }
+  if (store.musicOn){ if (!quiet) toast('Turn off Music sync first'); return false; } // two things animating the same light fight (and it's a lot of writes)
+  if (S.api === 2) return false;
+  zoneLive.meta = meta; zoneLive.t0 = performance.now(); clearTimeout(previewTimer);
+  if (zoneLive.on) return true;
+  zoneLive.on = true; zoneLive.lastKey = ''; zoneLive.fails = 0;
+  zoneLive.timer = setInterval(() => {
+    if (!zoneLive.on || zoneLive.busy || S.mode !== 'live') return;
+    if (S.state >= 7 && S.state <= 9) return; // the Peak owns the lights while heating
+    const m = zoneLive.meta, el = performance.now() - zoneLive.t0;
+    let cols = zoneFrame(m, el / 1000);
+    // optional fade envelope (boot intro): ease up from dark, and ease back down before it ends
+    let k = 1; const env = m.env;
+    if (env){ if (el < env.in) k = ease(Math.min(1, el / env.in)); else if (env.out != null && el > env.out) k = 1 - ease(Math.min(1, (el - env.out) / env.outMs)); }
+    if (k < 1) cols = cols.map(c => mixL('#000000', c, k));
+    const anim = k < 1 || m.zones.some(z => ZFX_ANIM.includes(z.fx)), key = cols.join();
+    if (!anim && key === zoneLive.lastKey) return;   // nothing changed, don't spam the Peak
+    zoneLive.lastKey = key; zoneLive.busy = true;
+    ledJob(() => ble.writeBlob('/p/app/led/pclr', lampBlob(zoneLampFromColors(cols))).then(() => { zoneLive.fails = 0; }, () => { if (++zoneLive.fails > 8) zoneLiveStop(true); })).finally(() => { zoneLive.busy = false; });
+  }, 60);
+  return true;
+}
+function zoneLiveStop(silent){
+  if (!zoneLive.on) return; zoneLive.on = false; clearInterval(zoneLive.timer);
+  if (S.mode === 'live') ledJob(previewClear);
+  if (!silent) drawMoodEditor();
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) zoneLiveStop(true); });
+/* Lights screen: the Peak shows the light you're looking at the whole time you're here. Changes try live and only stick when you tap Save.
+   Leaving Lights throws away anything unsaved and turns the preview off. */
+const LT = { on:false, pending:null, brDirty:false, brT:null };
+function ltTarget(){ return moodTarget ?? S.active; }
+function ltTargetName(){ const t = ltTarget(); if (phIdx(t) >= 0) return 'Preheat'; return t === 'lantern' ? 'Lantern' : ((S.profiles[t] || {}).name || 'P' + (t + 1)); }
+function ltCanShow(){ return S.mode === 'live' && !(S.state >= 7 && S.state <= 9); }
+function ltWrite(blobOrHex){ if (!ltCanShow()) return; clearTimeout(previewTimer); ledJob(() => previewWrite(blobOrHex).catch(() => {})); }
+// the Proxy only takes solid colors so far, so a mood shows as its main color there
+function moodSolid(ref){ try { const mc = moodColors(ref).filter((c, k, a) => a.indexOf(c) === k); return pickAccent(mc) || mc[0] || '#ffffff'; } catch(e){ return '#ffffff'; } }
+function ltShowRef(ref){ let blob; try { blob = S.api === 2 ? (moodColors(ref)[0] || '#ffffff') : moodPayload(ref); } catch(e){ return; } ltWrite(blob); }
+function ltShowCurrent(){
+  if (!LT.on || !ltCanShow()) return;
+  if (LT.pending) return ltShowRef(LT.pending);
+  const t = ltTarget();
+  if (t === 'lantern') return store.lanternMood ? ltShowRef(store.lanternMood) : ltWrite(store.lantern || '#ffffff');
+  if (phIdx(t) >= 0){ const pi = phIdx(t); return phMood(pi) ? ltShowRef(phMood(pi)) : phColor(pi) ? ltWrite(phColor(pi)) : undefined; }
+  clearTimeout(previewTimer);
+  ledJob(async () => {
+    if (!LT.on || !ltCanShow()) return;
+    let blob = null;
+    if (S.api !== 2){ try { const r = await ble.readAll(`/u/app/hc/${t}/colr`); if (r.length > 8 && (r[0] & 0xe0) === 0xa0){ blob = r; if (isProxy()) blob.native = true; } } catch(e){} }
+    const p = S.profiles[t] || {};
+    if (!blob){ blob = p.color || '#ffffff'; if (p.mood && S.api !== 2){ try { blob = moodPayload(p.mood); } catch(e){} } }
+    try { await previewWrite(blob); } catch(e){}
+  });
+}
+function ltBar(){
+  const el = $('#ltBar'); if (!el) return;
+  const editing = LT.on && !!ed, show = LT.on && (editing || LT.pending || LT.brDirty);
+  el.hidden = !show; document.body.classList.toggle('lt-open', !!show); if (!show) return;
+  if (editing){ $('#ltBarTxt').innerHTML = `${esc(ed.name || (ed.tag === ZONE_TAG ? 'My zones' : 'My mood'))}<small>Live on your ${isProxy() ? 'Proxy' : 'Peak'} · not saved</small>`; return; }
+  const what = [LT.pending && LT.pending.name, LT.brDirty && 'brightness'].filter(Boolean).join(' + ');
+  $('#ltBarTxt').innerHTML = `${esc(what)}<small>Not saved to ${esc(ltTargetName())} yet</small>`;
+}
+function ltLiveBright(){
+  clearTimeout(LT.brT);
+  LT.brT = setTimeout(() => { if (S.mode === 'live' && brEdit){ const b = brEdit.slice(); ledJob(() => writeBright(b).catch(() => {})); } }, 120);
+}
+function ltPick(ref){ LT.pending = ref; ltShowRef(ref); drawMoods(); ltBar(); }
+function ltRestoreBright(){ if (S.mode !== 'live') return; const b = brightFor(S.active); ledJob(() => writeBright(b).catch(() => {})); }
+function ltDiscard(quiet){
+  if (ed && !quiet){ if (ed.back){ ed = ed.back; drawMoodEditor(); return; } ed = null; drawMoodEditor(); ltShowCurrent(); return; } // editor open: close it without saving (zones go back to New mood)
+  const hadBr = LT.brDirty;
+  LT.pending = null; LT.brDirty = false; clearTimeout(LT.brT);
+  if (hadBr){ ltRestoreBright(); if (!quiet) drawLights(); }
+  if (!quiet){ drawMoods(); ltShowCurrent(); }
+  ltBar();
+}
+async function ltSave(){
+  if (ed){ const b = $('#meApply'); if (b) b.click(); return; } // editor open: same as Save and apply
+  const t = ltTarget(), ref = LT.pending, br = LT.brDirty;
+  LT.pending = null; LT.brDirty = false; ltBar();
+  if (ref){ try { await writeMoodTo(t, ref); } catch(e){ toast('Could not save the mood: ' + e.message); } }
+  if (br){ await applyBrightness(); if (brightProf() !== S.active) ltLiveBright(); }
+  drawMoods(); ltShowCurrent();
+}
+function ltEnter(){ LT.on = true; LT.pending = null; LT.brDirty = false; ltShowCurrent(); ltBar(); }
+function ltLeave(){
+  if (!LT.on) return;
+  const hadBr = LT.brDirty;
+  LT.on = false; LT.pending = null; LT.brDirty = false; clearTimeout(LT.brT);
+  if (ed){ ed = null; drawMoodEditor(); }
+  zoneLiveStop(true); edLiveEnd(); clearTimeout(previewTimer);
+  if (S.mode === 'live'){ ledJob(previewClear); if (hadBr || (brEdit && brightFor(S.active).join() !== (store.bright || []).join())) ltRestoreBright(); }
+  ltBar();
+}
+document.addEventListener('visibilitychange', () => { if (!LT.on || S.mode !== 'live') return; if (document.hidden) ledJob(previewClear); else ltShowCurrent(); });
+/* connect intro: the first time the app connects, only the Peak's logo lights up with the Emberline theme for 10s, then the lights go back to normal */
+const INTRO_ZONES = { motion:'still', tempoFrac:.5, zones:[
+  { c:'#000000', fx:'off' },                            // base left: off
+  { c:'#000000', fx:'off' },                            // glass right: off
+  { c:'#5b009c', c2:'#0a84ff', fx:'pulse', sp:.07 },    // logo top
+  { c:'#ffffff', c2:'#64007d', fx:'fade',  sp:.25, bias:.25 },    // logo bottom: mostly purple, a quick flash of white
+  { c:'#000000', fx:'off' },                            // base right: off
+  { c:'#000000', fx:'off' } ] };                        // glass left: off  (only the logo lights up)
+const INTRO_PROXY = { motion:'still', tempoFrac:.5, zones: Array.from({ length: 6 }, () => ({ c:'#ffffff', c2:'#b4148c', fx:'fade', sp:.25, bias:.25 })) }; // Proxy ring: pinkish purple, with a white sweep going around
+let introDone = false;
+let introBrightUntil = 0; // Proxy intro holds full brightness until then
+// Proxy startup: one animated light (pink-purple ring with a white sweep spinning around) that the Proxy plays on its own,
+// faded in and out with brightness. Smooth because nothing is streamed frame by frame.
+async function proxyIntro(){
+  const lbrt = v => { const b = new Uint8Array(4); new DataView(b.buffer).setInt32(0, Math.round(v), true); return ble.write('/u/app/ui/lbrt', b).catch(() => {}); };
+  let lamp; try { lamp = moodLamp({ kind:'tpl', tag:'pikaled2-spin-mood-light', name:'Intro', meta:{ userColors:['#b4148c', '#ffffff'], tempoFrac:.42, dynamicInhale:0 } }); } catch(e){ return; }
+  const blob = lampBlob(lamp);
+  introBrightUntil = Date.now() + 5400;
+  const steps = 8, ease = t => t * t * (3 - 2 * t);
+  ledJob(async () => {
+    await lbrt(0);
+    try { await previewWrite(blob); } catch(e){ return; }
+    for (let i = 1; i <= steps; i++){ await lbrt(256 * ease(i / steps)); await sleep(60); } // glide on
+  });
+  setTimeout(() => ledJob(async () => {
+    if (S.mode !== 'live' || !isProxy() || (S.state >= 7 && S.state <= 9)) return;
+    for (let i = steps - 1; i >= 0; i--){ await lbrt(256 * ease(i / steps)); await sleep(70); } // glide off
+    await previewClear();
+    const b = brightFor(S.active) || store.bright; if (b) await writeBright(b).catch(() => {}); else await lbrt(256);
+  }), 4300);
+}
+function connectIntro(){
+  if (introDone || S.mode !== 'live' || S.api === 2 ||
+      (S.state >= 7 && S.state <= 9) || zoneLive.on) return;
+  introDone = true;
+  const meta = JSON.parse(JSON.stringify(isProxy() ? INTRO_PROXY : INTRO_ZONES));
+  meta.env = { in: 500, out: 4300, outMs: 650 }; // 5 seconds: glide on fast, glide off at the end
+  zPh.length = 0; zClock.last = 0; if (isProxy()) meta.zones.forEach((z, i) => { zPh[i] = .5 + i / 12; }); else zPh[3] = .5; // start on purple
+  if (isProxy()){ proxyIntro(); return; } // Proxy: let the device animate it itself, much smoother than streaming frames over Bluetooth
+  if (!zoneLiveStart(meta, true)) return;
+  // Proxy: play the intro at full brightness, then put the user's brightness back
+  if (isProxy()){ introBrightUntil = Date.now() + 5150; const full = new Uint8Array(4); new DataView(full.buffer).setInt32(0, 256, true); ble.write('/u/app/ui/lbrt', full).catch(() => {});
+    setTimeout(() => { if (S.mode !== 'live' || !isProxy()) return; const b = brightFor(S.active) || store.bright; if (b) writeBright(b).catch(() => {}); }, 5150); }
+  setTimeout(() => { if (zoneLive.on && zoneLive.meta === meta) zoneLiveStop(true); }, 5050); // leave it alone if the zone editor took over
+}
+
+function moodLamp(ref){
+  if (ref.tag === ZONE_TAG) return zoneLamp(ref.meta || zoneDefaults());
+  if (ref.kind === 'excl'){ const x = exclGet(ref.id); return x && MoodEngine.lampFromExclusive(x, ledVariant()); }
+  const tpl = MOODS.tpl[ref.tag]; if (!tpl) return null;
+  if (tpl.fx) return fxLamp(tpl.fx, ref.meta || {});
+  return MoodEngine.compile(tpl, ref.meta || {}, ledVariant()).lamp;
+}
+function moodColors(ref){
+  if (ref.tag === ZONE_TAG) return zoneStillColors(ref.meta || zoneDefaults()).filter(c => c !== '#000000');
+  if (ref.kind === 'ed'){ const x = edMood(ref); return x ? x.colors : []; }
+  if (ref.kind === 'excl'){ const x = exclGet(ref.id); return x ? x.lamp.param.color : []; }
+  const l = moodLamp(ref); const c = l ? MoodEngine.previewColors(l) : [];
+  return c.length ? c : (ref.meta && ref.meta.userColors) || [];
+}
+function moodPayload(ref){
+  if (ref.kind === 'ed'){ const x = edMood(ref); if (!x || isProxy()) throw new Error('Edition mood not available here'); return new Uint8Array(x.blob.match(/../g).map(b => parseInt(b, 16))); }
+  const lamp = moodLamp(ref); if (!lamp) throw new Error('Unknown mood');
+  const meta = { version: 1, moodName: String(ref.name || 'Mood').slice(0, 24) };
+  const m = ref.kind === 'excl' ? { userColors: (exclGet(ref.id) || {}).colors } : (ref.meta || {});
+  if (m.userColors) meta.userColors = m.userColors.map(h => MoodEngine.packRgb([h]));
+  for (const k of ['tempoFrac','density','dynamicInhale']) if (typeof m[k] === 'number') meta[k] = m[k];
+  if (isProxy()){ const mm = Object.assign({}, meta); if (m.userColors) mm.userColors = m.userColors.slice(); return lampBlob(lamp, mm); }
+  return cbor({ lamp, meta });
+}
+function moodSpeed(ref){
+  if (ref.kind === 'ed') return (edMood(ref) || {}).speed || 40;
+  try { const l = moodLamp(ref); const s = l.param.speed; return typeof s === 'number' ? s : 40; } catch(e){ return 40; }
+}
+function swatchStyle(ref){
+  if (ref.tag === ZONE_TAG){ const c = moodColors(ref); if (!c.length) return 'background:#000'; const w = 100 / c.length; return 'background:linear-gradient(90deg,' + c.map((x, i) => `${x} ${(i * w).toFixed(1)}% ${((i + 1) * w).toFixed(1)}%`).join(',') + ')'; }
+  const cols = moodColors(ref).slice(0, 32); if (!cols.length) return 'background:var(--fill)';
+  const list = cols.concat(cols.slice(0, 1)).join(',');
+  const sp = moodSpeed(ref), dur = sp > 0 ? Math.max(1.2, Math.min(14, 400 / sp)) : 0;
+  return `background:linear-gradient(90deg,${list});background-size:200% 100%;${dur ? `animation:moodPan ${dur.toFixed(1)}s linear infinite` : ''}`;
+}
+/* original Peak / older firmware: moods the way Puffco's app does it.
+   32-color list -> /u/app/led/ca/N, offsets -> /u/app/led/oa/N, then an 8-byte "table" color that points at slot N.
+   Slots: 0 = active session, 1-4 = profiles, 5/6 = lantern. */
+async function api2Mood(target, ref){
+  let L = null; try { L = moodLamp(ref); } catch(e){}
+  if (!L || L.name !== 'pikaled2' || !L.param || !L.param.color) return false; // only the classic animations fit this format
+  const P = L.param;
+  let h = target === 'lantern' ? 5 : target === 'temp' ? 0 : target + 1;
+  if (target === 'lantern' && S.lantern){ try { const r = await ble.read('/p/app/ltrn/colr', 8); if (r[3] === 1 && (r[6] & 15) - 8 === 5) h = 6; } catch(e){} } // swap slots so a lit lantern changes smoothly
+  const c = Array.from(P.color), ca = new Uint8Array(128);
+  for (let k = 0; k < 32; k++){ const j = k * 3; if (j + 2 < c.length){ ca[k * 4] = c[j]; ca[k * 4 + 1] = c[j + 1]; ca[k * 4 + 2] = c[j + 2]; } }
+  await ble.writeBlob(`/u/app/led/ca/${h}`, ca);
+  if (P.offset && P.offset.length){ const oa = new Uint8Array(P.offset.length * 4), dv = new DataView(oa.buffer); P.offset.forEach((v, k) => dv.setUint32(k * 4, v >>> 0, true)); await ble.writeBlob(`/u/app/led/oa/${h}`, oa); }
+  const idx = 8 + h, cl = P.colorLen == null ? 32 : P.colorLen;
+  const rg = new Uint8Array([P.bright == null ? 255 : P.bright, clamp(Math.round(P.speed == null ? 255 : P.speed), 0, 255), P.anim || 0, 1, P.plNum || 0, P.plDenom || 0, (idx << 4) | idx, cl < 32 ? cl : 0]);
+  const path = target === 'lantern' ? '/p/app/ltrn/colr' : target === 'temp' ? '/p/app/thc/colr' : `/u/app/hc/${target}/colr`;
+  await ble.write(path, rg);
+  return true;
+}
+async function writeMoodTo(target, ref){
+  const name = ref.name || 'Mood';
+  const pi = phIdx(target);
+  if (pi >= 0){
+    phSet(pi, JSON.parse(JSON.stringify(ref)));
+    toast(`${name} will show while ${(S.profiles[pi] || {}).name || 'P' + (pi + 1)} heats up`);
+    setTimeout(() => { if (moodTarget === target){ moodTarget = null; show('prof'); drawProfiles(); } }, 700);
+    return;
+  }
+  if (target === 'lantern'){
+    store.lanternMood = ref; save(); drawLightsState(); toast(`${name} picked for the lantern`);
+    if (!needLive('light the lantern')) return;
+    if (S.api === 2){ let ok = false; try { ok = await api2Mood('lantern', ref); } catch(e){} if (!ok) await writeLanternColor(moodColors(ref)[0] || '#ffffff'); }
+    else await ble.writeBlob('/p/app/ltrn/colr', moodPayload(ref));
+    await ble.write('/p/app/ltrn/cmd', new Uint8Array([1])); S.lantern = true;
+    try { await ble.wf32('/p/app/ltrn/time', store.lanternTime || 7200); } catch(e){}
+    toast(`${name} is on the lantern`); drawLightsState();
+    return;
+  }
+  const i = target, p = S.profiles[i];
+  p.mood = ref; { const mc = moodColors(ref).filter((c, k, a) => a.indexOf(c) === k); p.color = pickAccent(mc) || p.color; p.pal = mc.filter(c => Math.max(...hexBytes(c)) > 40).slice(0, 6); }
+  if (S.mode !== 'live'){ p.lightDirty = true; toast(`${name} saved on ${p.name}. It goes to your ${devWord()} when you connect and save.`); render(); return; }
+  if (S.api === 2){
+    let ok = false; try { ok = await api2Mood(i, ref); if (ok && S.active === i){ try { await api2Mood('temp', ref); } catch(e){} } } catch(e){ ok = false; }
+    if (ok){ toast(`${name} set on ${p.name}`); render(); return; }
+    await writeProfileColor(i, p.color); toast(`This mood can't animate on your Peak yet, so ${p.name} is set to its main color`); return;
+  }
+  const blob = moodPayload(ref);
+  await ble.writeBlob(`/u/app/hc/${i}/colr`, blob);
+  if (S.active === i){ try { await ble.writeBlob('/p/app/thc/colr', blob); } catch(e){} }
+  toast(`${name} set on ${p.name}`); render();
+}
+function previewMood(ref, ms){
+  if (S.mode !== 'live' || (S.state >= 7 && S.state <= 9)) return;
+  let blob; try { blob = S.api === 2 ? (moodColors(ref)[0] || '#ffffff') : moodPayload(ref); } catch(e){ return; }
+  clearTimeout(previewTimer);
+  ledJob(() => previewWrite(blob).catch(() => {}));
+  previewTimer = setTimeout(() => ledJob(previewClear), ms || 4000);
+}
+async function applyMood(ref){
+  const t = moodTarget ?? S.active;
+  if (LT.on){ LT.pending = null; ltShowRef(ref); ltBar(); } else previewMood(ref, 4000);
+  try { await writeMoodTo(t, ref); } catch(e){ toast('Could not write the mood: ' + e.message); }
+  drawMoods();
+}
+function moodTile(ref, idx, group){
+  const on = LT.on && LT.pending ? sameMood(LT.pending, ref) : phIdx(moodTarget) >= 0 ? sameMood(phMood(phIdx(moodTarget)), ref) : moodTarget === 'lantern' ? store.lanternMood && sameMood(store.lanternMood, ref) : S.profiles[moodTarget ?? S.active].mood && sameMood(S.profiles[moodTarget ?? S.active].mood, ref);
+  const tplName = ref.kind === 'excl' && (exclGet(ref.id) || {}).prem ? (isPremium() ? '⭐ Premium' : '🔒 Premium') : ref.kind === 'ed' ? 'Edition' : ref.kind === 'excl' ? 'Exclusive' : ref.tag === ZONE_TAG ? 'Zones' : (MOODS.tpl[ref.tag] || {}).name || '';
+  return `<button class="mood" data-mg="${group}" data-mi="${idx}" aria-pressed="${!!on}"><i class="mood-sw" style="${swatchStyle(ref)}"></i>${group === 'm' ? '<span class="medit">Edit</span>' : ''}<b>${esc(ref.name)}</b><span>${esc(tplName)}</span></button>`;
+}
+function sameMood(a, b){ return a && b && a.kind === b.kind && (a.kind === 'excl' ? a.id === b.id : (a.id && a.id === b.id) || (a.tag === b.tag && JSON.stringify(a.meta) === JSON.stringify(b.meta))); }
+/* ---- randomizer (test build): random but good-looking color combos and effects ---- */
+const RND = { cur: null, hist: [] };
+const RND_FX = [ // effect, colors min..max, tempo range, extra
+  { tag:'pikaled2-fade-mood-light', n:[2,4], t:[.3,.65], w:3 },
+  { tag:'pikaled2-spin-mood-light', n:[2,4], t:[.3,.6], w:3 },
+  { tag:'pikaled2-split-gradient-mood-light', n:[2,3], t:[.25,.55], w:2 },
+  { tag:'pikaled2-vertical-slideshow-mood-light', n:[2,4], t:[.3,.55], w:2 },
+  { tag:'pikaled2-disco-mood-light', n:[3,5], t:[.4,.7], w:1, bold:true },
+  { tag:'migration-confetti-mood-light', n:[3,5], t:[.3,.55], d:[4,8], w:2, bold:true },
+  { tag:'migration-lava-lamp-mood-light', n:[3,3], t:[.2,.45], d:[1,4], w:2, lava:true },
+  { tag:'emberline-fx-breathe', n:[1,2], t:[.3,.55], w:1 },
+  { tag:'emberline-fx-wave', n:[2,3], t:[.35,.6], w:1 },
+  { tag:'emberline-fx-comet', n:[1,2], t:[.35,.6], w:1 }
+];
+const RND_WORDS = [['Neon','Velvet','Cosmic','Electric','Midnight','Solar','Frozen','Candy','Molten','Lunar','Toxic','Crystal','Golden','Ghost','Ultra','Hyper','Dream','Wild'],
+  ['Drift','Bloom','Pulse','Haze','Storm','Wave','Glow','Rush','Tide','Flare','Mist','Orbit','Ember','Prism','Static','Fizz','Nova','Daze']];
+const rr = (a, b) => a + Math.random() * (b - a), ri = (a, b) => Math.floor(rr(a, b + 1)), pick = a => a[Math.floor(Math.random() * a.length)];
+function hsl(h, sat, l){ h = ((h % 360) + 360) % 360; sat /= 100; l /= 100; const k = n => (n + h / 30) % 12, a = sat * Math.min(l, 1 - l), f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return '#' + [f(0), f(8), f(4)].map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join(''); }
+// LED-friendly color: strong saturation, and yellows/greens a bit brighter so they don't go muddy
+const ledColor = (h, l) => { h = ((h % 360) + 360) % 360; const lift = h > 35 && h < 160 ? 6 : 0; return hsl(h, rr(85, 100), Math.min(62, (l ?? rr(48, 56)) + lift)); };
+function rndPalette(n, lava, bold){
+  const base = Math.random() * 360;
+  if (lava){ // dark base, bright blobs, like Puffco's lava lamps. Deep yellows/oranges turn brown, so those get a deep red base instead
+    const h = base, dh = (h > 25 && h < 100) ? 345 : h; return [hsl(dh, 100, rr(12, 17)), ledColor(h + rr(10, 25)), ledColor(h + rr(35, 55), 60)]; }
+  const scheme = bold ? pick(['triad', 'split', 'comp', 'rainbow']) : pick(['analog', 'analog', 'comp', 'triad', 'split', 'mono', 'rainbow']);
+  let hues;
+  if (scheme === 'rainbow'){ const step = rr(300, 360) / n; hues = Array.from({ length: n }, (_, i) => base + i * step); }
+  else hues = ({ analog: [0, 42, 84, -42, 126, -84], comp: [0, 180, 30, 210, -30, 150], triad: [0, 120, 240, 40, 160, 280], split: [0, 150, 210, 40, 190, 320], mono: [0, 0, 0, 0, 0, 0] })[scheme].slice(0, n).map(o => base + o + (scheme === 'mono' ? 0 : rr(-6, 6)));
+  const out = scheme === 'mono' ? hues.map((h, i) => ledColor(h + i * 10, [54, 34, 64, 44, 60, 40][i])) : hues.map(h => ledColor(h));
+  if (n >= 3 && Math.random() < .15) out[ri(1, n - 1)] = '#ffffff'; // now and then a white accent
+  return out;
+}
+function rndMood(){
+  const pool = RND_FX.filter(f => MOODS.tpl[f.tag]), bag = []; pool.forEach(f => { for (let i = 0; i < f.w; i++) bag.push(f); });
+  let f = pick(bag); if (RND.cur && bag.length > 1 && f.tag === RND.cur.tag && Math.random() < .7) f = pick(bag); // mix it up
+  const n = ri(f.n[0], f.n[1]), meta = { userColors: rndPalette(n, f.lava, f.bold), tempoFrac: Math.round(rr(f.t[0], f.t[1]) * 100) / 100, dynamicInhale: 0 };
+  if (f.d) meta.density = ri(f.d[0], f.d[1]);
+  return { kind:'tpl', tag: f.tag, name: pick(RND_WORDS[0]) + ' ' + pick(RND_WORDS[1]), meta };
+}
+function rndCard(){
+  const r = RND.cur, t = r ? (MOODS.tpl[r.tag] || {}).name || '' : '';
+  return `<div class="sgroup" id="rndCard"><div class="row between"><span class="label">Randomizer</span><span class="muted" style="font-size:12px">Test build</span></div>
+    ${r ? `<div class="mood" style="pointer-events:none;width:100%;max-width:none"><i class="mood-sw" style="${swatchStyle(r)}"></i><b>${esc(r.name)}</b><span>${esc(t)}${r.meta.userColors.length ? ' · ' + r.meta.userColors.length + ' colors' : ''}</span></div>` : '<p class="muted" style="margin:0">Tap Shuffle for a random color combo and effect.</p>'}
+    <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn primary" id="rndGo" style="flex:1">${r ? 'Shuffle again' : 'Shuffle'}</button>${RND.hist.length > 1 ? '<button class="btn" id="rndBack">Back</button>' : ''}</div>
+    ${r ? `<div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="rndSet" style="flex:1">Set on ${esc((phIdx(moodTarget) >= 0 ? 'preheat' : (moodTarget ?? S.active) === 'lantern' ? 'lantern' : (S.profiles[moodTarget ?? S.active] || {}).name || 'profile').slice(0, 10))}</button><button class="btn" id="rndSave" style="flex:1">Save mood</button></div>` : ''}</div>`;
+}
+// keep the shuffled mood showing on the device while you're on Lights (cleared when you leave the page)
+function rndShow(ref){
+  if (S.mode !== 'live' || (S.state >= 7 && S.state <= 9)) return;
+  let blob; try { blob = S.api === 2 ? (moodColors(ref)[0] || '#ffffff') : moodPayload(ref); } catch(e){ return; }
+  clearTimeout(previewTimer); ledJob(() => previewWrite(blob).catch(() => {}));
+}
+function rndWire(){
+  const go = $('#rndGo'); if (!go) return;
+  go.onclick = () => { RND.cur = rndMood(); RND.hist.push(RND.cur); if (RND.hist.length > 20) RND.hist.shift(); drawMoods(); rndShow(RND.cur); };
+  const bk = $('#rndBack'); if (bk) bk.onclick = () => { RND.hist.pop(); RND.cur = RND.hist[RND.hist.length - 1] || null; drawMoods(); if (RND.cur) rndShow(RND.cur); };
+  const st = $('#rndSet'); if (st) st.onclick = async () => { try { await writeMoodTo(moodTarget ?? S.active, RND.cur); } catch(e){ toast('Could not set it: ' + (e.message || e)); } drawMoods(); };
+  const sv = $('#rndSave'); if (sv) sv.onclick = () => { const m = { id: 'local-' + Date.now(), name: RND.cur.name, tag: RND.cur.tag, meta: JSON.parse(JSON.stringify(RND.cur.meta)) }; store.myMoods.unshift(m); save(); toast(`Saved "${m.name}" to your moods`); drawMoods(); };
+}
+/* ---- mood shuffle: a profile picks a random mood from your chosen saved moods after every session ---- */
+function shufCfg(i){ store.shuffle = store.shuffle || {}; return store.shuffle[i] || (store.shuffle[i] = { on:false, ids:[] }); }
+const moodKey = m => m.kind === 'excl' ? 'x:' + m.id : m.kind === 'ed' ? 'e:' + m.id : m.id || (m.tag + ':' + JSON.stringify(m.meta || {}));
+// everything a profile can shuffle through: your saved moods plus the Puffco exclusives
+function shufAll(){ return allMine().map(m => Object.assign({ kind:'tpl' }, m)).concat(edMoodsHere().map(x => ({ kind:'ed', id:x.id, name:x.name })), exclHere().map(x => ({ kind:'excl', id:x.id, name:x.name })), isPremium() ? premMoodsHere() : []); }
+function shufPool(i){ const ids = shufCfg(i).ids; return shufAll().filter(m => ids.includes(moodKey(m))); }
+async function shuffleNext(i, why){
+  const c = shufCfg(i); if (!c.on) return;
+  const pool = shufPool(i); if (!pool.length) return;
+  const curM = S.profiles[i] && S.profiles[i].mood, options = pool.length > 1 ? pool.filter(m => !(curM && sameMood(curM, m))) : pool;
+  const pick = options[Math.floor(Math.random() * options.length)];
+  try { await writeMoodTo(i, pick); } catch(e){ return; }
+  toast(`${why || 'Shuffle'}: ${pick.name || 'Mood'} is up next on ${(S.profiles[i] || {}).name || 'P' + (i + 1)}`);
+}
+function shufCard(){
+  const t = moodTarget ?? S.active; if (typeof t !== 'number') return '';
+  const c = shufCfg(t), n = shufPool(t).length, name = (S.profiles[t] || {}).name || 'P' + (t + 1);
+  return `<div class="sgroup shuf-card"><div class="row between"><span class="label">Mood shuffle</span><span class="muted" style="font-size:12px">${esc(name)}</span></div>
+    <label class="toggle"><span><b>Pick a random mood each session</b><br><span class="muted" style="font-size:13px">${c.on ? (n ? `Shuffling ${n} mood${n === 1 ? '' : 's'}. A new one is picked after every session.` : 'Choose at least 2 moods to shuffle.') : 'Off. This profile keeps the mood you set.'}</span></span><input type="checkbox" class="switch" id="shufOn" ${c.on ? 'checked' : ''}></label>
+    <button class="btn" id="shufPick" style="width:100%">${n ? `Edit moods in the mix (${n})` : 'Choose moods'}</button></div>`;
+}
+function shufSheet(i){
+  const all = shufAll(), c = shufCfg(i), sel = new Set(c.ids);
+  const el = document.createElement('div'); el.className = 'egg';
+  const paint = () => {
+    el.innerHTML = `<div class="egg-card" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;width:min(100%,420px)">
+      <h2 style="margin:0;text-align:center">Moods in the mix</h2>
+      <p style="margin:0;text-align:center;font-size:14px">Tap the moods ${esc((S.profiles[i] || {}).name || 'this profile')} can pick from. Your moods and Puffco exclusives both work.</p>
+      <div class="row" style="gap:8px"><button class="btn small" data-sh="all" style="flex:1">Select all</button><button class="btn small" data-sh="none" style="flex:1">Clear</button></div>
+      <div class="shuf-list">${all.length ? all.map(m => { const k = moodKey(m), on = sel.has(k); return `<button class="shuf-item${on ? ' on' : ''}" data-shk="${esc(k)}" aria-pressed="${on}"><i class="mood-sw" style="${swatchStyle(m)}"></i><span><b>${esc(m.name || 'Mood')}</b><small>${esc(m.kind === 'ed' ? m.name + ' edition' : m.kind === 'excl' ? 'Puffco exclusive' : (MOODS.tpl[m.tag] || {}).name || (m.tag === ZONE_TAG ? 'Zones' : ''))}</small></span><em>${on ? '✓' : ''}</em></button>`; }).join('') : '<p class="muted" style="margin:0">No moods yet.</p>'}</div>
+      <button class="btn primary" id="shDone" style="width:100%">${sel.size ? `Done · ${sel.size} mood${sel.size === 1 ? '' : 's'}` : 'Done'}</button></div>`;
+    requestAnimationFrame(() => el.classList.add('on'));
+  };
+  paint(); document.body.appendChild(el);
+  el.addEventListener('click', e => {
+    const it = e.target.closest('[data-shk]'), a = e.target.closest('[data-sh]');
+    if (it){ const k = it.dataset.shk; sel.has(k) ? sel.delete(k) : sel.add(k); const y = el.querySelector('.shuf-list').scrollTop; paint(); el.querySelector('.shuf-list').scrollTop = y; return; }
+    if (a){ if (a.dataset.sh === 'all') all.forEach(m => sel.add(moodKey(m))); else sel.clear(); paint(); return; }
+    if (e.target.id === 'shDone'){
+      c.ids = [...sel]; if (c.ids.length) c.on = true; save(); el.classList.remove('on'); setTimeout(() => el.remove(), 260); drawMoods();
+      if (c.on && c.ids.length) shuffleNext(i, 'Shuffle on');
+    }
+  });
+}
+function drawMoods(){
+  { const el = $('#moodFor'); if (el){ const t = moodTarget ?? S.active, n = phIdx(t) >= 0 ? `${(S.profiles[phIdx(t)] || {}).name || 'P' + (phIdx(t) + 1)} preheat` : t === 'lantern' ? 'the lantern' : ((S.profiles[t] || {}).name || 'P' + (t + 1)); el.textContent = `Tap a mood to set it on ${n}`; } }
+  const box = $('#moodLib'); if (!box) return;
+  const tgt = moodTarget ?? S.active;
+  $('#moodTarget').innerHTML = S.profiles.map((p, i) => `<button data-mt="${i}" aria-pressed="${tgt === i}">${esc(p.name.slice(0, 7))}</button>`).join('') + `<button data-mt="lantern" aria-pressed="${tgt === 'lantern'}">Lantern</button>`;
+  const excl = exclHere().map(x => ({ kind:'excl', id:x.id, name:x.name }));
+  const mine = allMine().map(m => Object.assign({ kind:'tpl' }, m));
+  const edm = edMoodsHere().map(x => ({ kind:'ed', id:x.id, name:x.name }));
+  box.innerHTML = shufCard() + rndCard() + (edm.length ? `<div class="sgroup"><div class="label">${esc(S.edition)} edition</div><div class="moods">${edm.map((r, i) => moodTile(r, i, 'e')).join('')}</div></div>` : '') +
+    (premMoodsHere().length ? `<div class="sgroup"><div class="label">Premium moods ${premStar(14)}</div><div class="moods">${premMoodsHere().map((r, i) => moodTile(r, i, 'p')).join('')}</div>${isPremium() ? '' : '<p class="muted" style="margin:6px 0 0;font-size:12px">For Premium supporters. Tap one to see Premium</p>'}</div>` : '') +
+    `<div class="sgroup"><div class="label">Puffco exclusives</div><div class="moods">${excl.map((r, i) => moodTile(r, i, 'x')).join('')}</div></div>` +
+    `<div class="sgroup"><div class="row between"><span class="label">Your moods</span><span class="row" style="gap:6px"><button class="btn small" id="bNewMood">New mood</button></span></div><div class="moods">${mine.map((r, i) => moodTile(r, i, 'm')).join('') || '<p class="muted">No saved moods yet.</p>'}</div></div>`;
+  $('#bNewMood').onclick = () => openMoodEditor();
+  rndWire();
+  { const t = moodTarget ?? S.active, on = $('#shufOn'), pk = $('#shufPick');
+    if (on) on.onchange = e => { const c = shufCfg(t); c.on = e.target.checked; save(); if (c.on && shufPool(t).length < 1) shufSheet(t); else if (c.on) shuffleNext(t, 'Shuffle on'); drawMoods(); };
+    if (pk) pk.onclick = () => shufSheet(t); }
+}
+function moodFromTile(g, i){
+  if (g === 'e'){ const x = edMoodsHere()[i]; return { kind:'ed', id:x.id, name:x.name }; }
+  if (g === 'x'){ const x = exclHere()[i]; return { kind:'excl', id:x.id, name:x.name }; }
+  if (g === 'p') return premMoodsHere()[i];
+  return Object.assign({ kind:'tpl' }, allMine()[i]);
+}
+
+/* ---- mood editor ---- */
+let ed = null;
+function openMoodEditor(src){
+  if (src && src.tag === ZONE_TAG || src === 'zones'){
+    const s = src === 'zones' ? null : src;
+    ed = { tag: ZONE_TAG, name: s ? s.name : 'My zones', meta: s ? JSON.parse(JSON.stringify(s.meta)) : zoneDefaults(), editIdx: s && s.localIdx != null ? s.localIdx : null, zSel: zoneOrder()[0] };
+    const defs = zoneDefs(); while (ed.meta.zones.length < defs.length) ed.meta.zones.push({ c:'#ffffff', c2:'#000000', fx:'solid' }); ed.meta.zones.length = defs.length;
+    drawMoodEditor(); $('#moodEditor').hidden = false; $('#moodEditor').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }); return;
+  }
+  const tag = src && src.tag || 'pikaled2-fade-mood-light', tpl = MOODS.tpl[tag];
+  ed = { tag, name: src ? src.name : 'My mood', meta: Object.assign({}, defaultsForTpl(tpl), src ? JSON.parse(JSON.stringify(src.meta || {})) : {}), editIdx: src && src.localIdx != null ? src.localIdx : null };
+  drawMoodEditor();
+  $('#moodEditor').hidden = false; $('#moodEditor').scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+}
+function defaultsForTpl(tpl){
+  const m = {}; for (const u of tpl.ui || []) m[u.key] = u.type === 'colors' ? String(u.default).split(',') : u.default; return m;
+}
+function proxySVG(){
+  // Proxy, front view: angled mouthpiece, rubber cone, the glowing glass light band (12 lights, shown as 6 zones), round black battery body
+  const L = 44, R = 156, T = 150, B = 178, w = (R - L) / 6, slices = [];
+  for (let i = 0; i < 6; i++) slices.push(`<g data-z="${i}"><rect class="zl" x="${(L + i * w + .8).toFixed(1)}" y="${T - 4}" width="${(w - 1.6).toFixed(1)}" height="${B - T + 8}" clip-path="url(#zpBand)"/></g>`);
+  return `<svg class="zpeak" viewBox="0 0 200 300" aria-label="Proxy zones">
+    <defs>
+      <linearGradient id="zpBody" x1="0" x2="1"><stop offset="0" stop-color="#08080a"/><stop offset=".32" stop-color="#2b2b30"/><stop offset=".55" stop-color="#1a1a1e"/><stop offset="1" stop-color="#070709"/></linearGradient>
+      <linearGradient id="zpCone" x1="0" x2="1"><stop offset="0" stop-color="#0b0b0d"/><stop offset=".35" stop-color="#2c2c31"/><stop offset=".6" stop-color="#1b1b1f"/><stop offset="1" stop-color="#09090b"/></linearGradient>
+      <linearGradient id="zpShine" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".35"/><stop offset=".45" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity=".12"/></linearGradient>
+      <clipPath id="zpBand"><path d="M${L} ${T} Q100 ${T + 6} ${R} ${T} L${R} ${B} Q100 ${B + 6} ${L} ${B} Z"/></clipPath>
+    </defs>
+    <path d="M82 76 L82 34 Q82 22 93 22 L110 27 Q118 29 118 38 L118 76 Z" fill="url(#zpCone)" stroke="rgba(255,255,255,.14)"/>
+    <rect x="92" y="30" width="9" height="4" rx="2" fill="#000" transform="rotate(14 96 32)"/>
+    <rect x="113" y="48" width="3" height="8" rx="1.5" fill="#000"/>
+    <path d="M78 76 L122 76 L124 92 L76 92 Z" fill="url(#zpCone)" stroke="rgba(255,255,255,.1)"/>
+    <path d="M76 92 L124 92 Q150 118 ${R} ${T} L${L} ${T} Q50 118 76 92 Z" fill="url(#zpCone)" stroke="rgba(255,255,255,.12)"/>
+    <path d="M70 108 q8 -4 16 0 M96 104 q8 -4 16 0 M64 124 q10 -4 20 0 M92 120 q10 -4 20 0 M120 118 q8 -4 16 0" stroke="rgba(255,255,255,.07)" stroke-width="2" fill="none"/>
+    <path d="M${L - 1} ${T} Q100 ${T + 6} ${R + 1} ${T} L${R + 1} ${B} Q100 ${B + 6} ${L - 1} ${B} Z" fill="#050507"/>
+    ${slices.join('')}
+    <path d="M${L} ${T} Q100 ${T + 6} ${R} ${T} L${R} ${B} Q100 ${B + 6} ${L} ${B} Z" fill="url(#zpShine)" pointer-events="none"/>
+    <path d="M62 ${T - 2} q-2 10 0 22 q4 4 8 0 q2 -10 0 -18 Z" fill="#141417" stroke="rgba(255,255,255,.15)" pointer-events="none"/>
+    <path d="M${L + 2} ${B + 3} Q100 ${B + 9} ${R - 2} ${B + 3} L${R - 2} 262 Q${R - 2} 288 128 288 L72 288 Q${L + 2} 288 ${L + 2} 262 Z" fill="url(#zpBody)" stroke="rgba(255,255,255,.12)"/>
+    <text x="58" y="250" font-size="6" letter-spacing="2.5" fill="rgba(255,255,255,.28)" transform="rotate(-90 58 250)" font-family="system-ui,sans-serif">PROXY</text>
+  </svg>`;
+}
+function peakSVG(){
+  if (isProxy()) return proxySVG();
+  // Peak Pro, front view: tall glass on top, light ring under the glass, dark base with the logo, light strip at the foot
+  const L = ledVariant() === 'lightning';
+  return `<svg class="zpeak" viewBox="0 -28 200 328" aria-label="Peak zones">
+    <defs>
+      <linearGradient id="zgl" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity=".16"/><stop offset=".35" stop-color="#fff" stop-opacity=".03"/><stop offset=".8" stop-color="#fff" stop-opacity=".02"/><stop offset="1" stop-color="#fff" stop-opacity=".12"/></linearGradient>
+      <linearGradient id="zbase" x1="0" x2="1"><stop offset="0" stop-color="#0c0c10"/><stop offset=".45" stop-color="#26252c"/><stop offset="1" stop-color="#0c0c10"/></linearGradient>
+      <linearGradient id="zband" y1="0" y2="1"><stop offset="0" stop-color="#3a3a42"/><stop offset=".5" stop-color="#08080a"/><stop offset="1" stop-color="#2a2a30"/></linearGradient>
+      <clipPath id="zcone"><path d="M95 -24 h10 q4 0 5 4 l38 186 h-96 l38 -186 q1 -4 5 -4z"/></clipPath>
+      <clipPath id="zft"><rect x="0" y="0" width="200" height="227"/></clipPath><clipPath id="zfb"><rect x="0" y="227" width="200" height="80"/></clipPath><clipPath id="zfl"><path d="M12 3c2 3 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.2.3 1.8 1 2.7 2 3.2C11 8.5 11.3 5.6 12 3z" transform="translate(77 203) scale(2)"/></clipPath>
+    </defs>
+    <!-- base -->
+    <path d="M44 184 h112 q4 0 4 4 q2 46 10 86 q2 12 -10 12 h-120 q-12 0 -10 -12 q8 -40 10 -86 q0 -4 4 -4z" fill="url(#zbase)" stroke="rgba(255,255,255,.12)"/>
+    <rect x="42" y="180" width="116" height="14" rx="4" fill="url(#zband)" stroke="rgba(255,255,255,.14)"/>
+    ${L ? `<g data-z="5"><path class="zl" d="M37 214 q-3 34 -6 58 h5 q3 -26 5 -58z"/><path class="zl" d="M163 214 q3 34 6 58 h-5 q-3 -26 -5 -58z"/></g>
+           <g data-z="4"><rect class="zl" x="92" y="264" width="16" height="7" rx="3.5" opacity=".9"/></g>` : ''}
+    <!-- logo: the Emberline flame, top and bottom halves -->
+    <path d="M12 3c2 3 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.2.3 1.8 1 2.7 2 3.2C11 8.5 11.3 5.6 12 3z" transform="translate(77 203) scale(2)" fill="#141218" stroke="rgba(255,255,255,.1)" stroke-width=".35"/>
+    <g data-z="2"><g clip-path="url(#zft)"><path class="zl" d="M12 3c2 3 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.2.3 1.8 1 2.7 2 3.2C11 8.5 11.3 5.6 12 3z" transform="translate(77 203) scale(2)"/></g></g>
+    <g data-z="3"><g clip-path="url(#zfb)"><path class="zl" d="M12 3c2 3 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.2.3 1.8 1 2.7 2 3.2C11 8.5 11.3 5.6 12 3z" transform="translate(77 203) scale(2)"/></g></g>
+    <rect x="80" y="226.2" width="40" height="1.6" fill="#141218" clip-path="url(#zfl)" pointer-events="none"/>
+    <!-- foot light -->
+    ${L ? `<g data-z="0"><rect class="zl" x="34" y="284" width="132" height="7" rx="3.5"/></g>`
+        : `<g data-z="0"><rect class="zl" x="34" y="284" width="64" height="7" rx="3.5"/></g><g data-z="4"><rect class="zl" x="102" y="284" width="64" height="7" rx="3.5"/></g>`}
+    <!-- glass -->
+    <path d="M95 -24 h10 q4 0 5 4 l38 186 h-96 l38 -186 q1 -4 5 -4z" fill="url(#zgl)" stroke="rgba(255,255,255,.38)" stroke-width="1.2"/>
+    <g clip-path="url(#zcone)" opacity=".75">
+      <path d="M96 90 h8 l17 76 h-42z" fill="rgba(255,255,255,.07)" stroke="rgba(255,255,255,.3)"/>
+      <path d="M90 116 q12 -6 14 -18 M84 136 q20 -8 24 -26 M80 156 q26 -10 32 -34 M88 166 q24 -12 30 -30" stroke="rgba(255,255,255,.22)" fill="none"/>
+    </g>
+    <!-- light ring under the glass -->
+    ${L ? `<g data-z="1"><path class="zl" d="M52 166 h96 a48 8 0 0 1 -96 0z"/></g>`
+        : `<g data-z="5"><path class="zl" d="M52 166 h47 v8 a48 8 0 0 1 -47 -8z"/></g><g data-z="1"><path class="zl" d="M101 166 h47 a48 8 0 0 1 -47 8z"/></g>`}
+  </svg>`;
+}
+let zoneAnim = 0;
+function paintPeak(){
+  const svg = document.querySelector('#moodEditor .zpeak'); if (!svg || !ed || ed.tag !== ZONE_TAG){ zoneAnim = 0; return; }
+  const cols = zoneFrame(ed.meta, performance.now() / 1000);
+  svg.querySelectorAll('[data-z]').forEach(g => { const i = +g.dataset.z, c = cols[i] || '#000000';
+    g.querySelectorAll('.zl').forEach(r => { if (r.classList.contains('zarc')) r.style.stroke = c; else r.style.fill = c; r.style.filter = c === '#000000' ? 'none' : `drop-shadow(0 0 8px ${c})`; });
+    g.classList.toggle('sel', i === ed.zSel); });
+  zoneAnim = requestAnimationFrame(() => setTimeout(paintPeak, 50));
+}
+function drawZoneEditor(el){
+  const defs = zoneDefs(), m = ed.meta, z = m.zones[ed.zSel];
+  const ref = { kind:'tpl', tag: ZONE_TAG, name: ed.name, meta: m };
+  el.innerHTML = `
+    <div class="row between"><b style="font-size:18px">${ed.editIdx != null ? 'Edit zones' : 'Zone designer'}</b><button class="btn small ghost" id="meClose">${ed.back ? 'Back' : 'Close'}</button></div>
+    ${S.mode === 'live' ? '' : `<div class="row between" style="border:1px dashed var(--accent);border-radius:14px;padding:8px 10px"><span class="muted" style="font-size:13px">Test: preview as</span><div class="seg" id="zDevPrev"><button data-zdev="peach" aria-pressed="${!isProxy()}">Peak</button><button data-zdev="toad" aria-pressed="${isProxy()}">Proxy</button></div></div>`}
+    <div class="zwrap">${peakSVG()}
+      <div class="zlist">${zoneOrder().map(i => [defs[i], i]).map(([d, i]) => `<button class="zbtn" data-zs="${i}" aria-pressed="${i === ed.zSel}"><i style="background:${m.zones[i].fx === 'off' ? 'transparent' : m.zones[i].c}"></i>${esc(d.n)}<span>${(ZONE_FX.find(f => f[0] === m.zones[i].fx) || ZONE_FX[0])[1]}</span></button>`).join('')}</div></div>
+    <label class="mefield">Name<input type="text" id="meName" maxlength="24" value="${esc(ed.name)}"></label>
+    <div class="label">${esc(defs[ed.zSel].n)}</div>
+    <div class="chipline">${ZONE_FX.map(([k, n]) => `<button class="minichip" data-zfx="${k}" aria-pressed="${z.fx === k}">${n}</button>`).join('')}</div>
+    ${z.fx === 'off' || z.fx === 'rainbow' ? '' : `<div class="mecolors"><span class="colorbtn" style="background:${z.c}"><input type="color" data-zc="c" value="${z.c}" aria-label="Zone color"></span>
+      ${z.fx === 'fade' ? `<span class="colorbtn" style="background:${z.c2}"><input type="color" data-zc="c2" value="${z.c2}" aria-label="Second color"></span>` : ''}
+      <button class="btn small" id="zAll">Use on all zones</button></div>`}
+    ${['solid','off'].includes(z.fx) ? '' : `<div class="field"><div class="row between"><span class="muted">${esc(defs[ed.zSel].n)} speed</span><span class="val" id="mev_zsp">${Math.round((z.sp ?? m.tempoFrac ?? .5) * 100)}%</span></div>
+      <input type="range" data-sk="zsp" min="0" max="1" step="0.01" value="${z.sp ?? m.tempoFrac ?? .5}"></div>`}
+    <p class="muted zlive-note" style="margin:0;font-size:13px">${S.mode === 'live' ? `● Showing live on your ${isProxy() ? 'Proxy' : 'Peak'} while this is open` : 'Connect your device to see changes on it live'}</p>
+    <div class="field"><span class="muted" style="font-size:13px">When saved to a profile or the lantern</span>
+      <div class="seg" id="zMotion"><button data-zm="still" aria-pressed="${m.motion !== 'rotate'}">Zone colors</button><button data-zm="rotate" aria-pressed="${m.motion === 'rotate'}">Rotate colors</button></div>
+      ${m.motion === 'rotate' ? `<div class="field" style="margin-top:6px"><div class="row between"><span class="muted">Rotate speed</span><span class="val" id="mev_tempoFrac">${Math.round((m.tempoFrac ?? .5) * 100)}%</span></div>
+      <input type="range" data-sk="tempoFrac" min="0" max="1" step="0.01" value="${m.tempoFrac ?? .5}"></div>` : ''}
+      <p class="muted" style="margin:4px 0 0;font-size:12px">The device runs one animation clock for all its lights, so saved moods keep each zone's color (still or rotating). Pulse, candle and the other per-zone effects run live from the app.</p></div>
+    <div class="shop-actions"><button class="btn small primary" id="meApply">Save and apply</button>${ed.editIdx != null ? '<button class="btn small ghost" id="meRemove" style="color:var(--bad)">Delete</button>' : ''}</div>`;
+  syncRanges();
+  if (!zoneAnim) paintPeak();
+  if (zoneLive.on) zoneLive.meta = m;
+  else if (S.mode === 'live') zoneLiveStart(m, true);
+}
+function drawMoodEditor(){
+  if (typeof LT !== 'undefined') setTimeout(ltBar, 0); // the Save / Discard bar covers the editor too
+  const el = $('#moodEditor'); if (!ed){ el.hidden = true; zoneLiveStop(true); edLiveEnd(); return; }
+  if (ed.tag === ZONE_TAG){ edLiveEnd(); return drawZoneEditor(el); }
+  zoneLiveStop(true); edLivePreview();
+  const tpl = MOODS.tpl[ed.tag], ui = tpl.ui || [], cu = ui.find(u => u.type === 'colors') || { min:1, max:6 };
+  let cols = ed.meta.userColors || ['#ff0000'];
+  if (cols.length < cu.min){ cols = cols.concat(Array(cu.min - cols.length).fill('#ffffff')); }
+  if (cols.length > cu.max) cols = cols.slice(0, cu.max);
+  ed.meta.userColors = cols;
+  const ref = { kind:'tpl', tag: ed.tag, name: ed.name, meta: ed.meta };
+  el.innerHTML = `
+    <div class="row between"><b style="font-size:18px">${ed.editIdx != null ? 'Edit mood' : 'New mood'}</b><button class="btn small ghost" id="meClose">Close</button></div>
+    <i class="mood-sw big" style="${swatchStyle(ref)}"></i>
+    <label class="mefield">Name<input type="text" id="meName" maxlength="24" value="${esc(ed.name)}"></label>
+    <div class="label">Style</div>
+    <div class="chipline"><button class="minichip" id="meZones">Zones ✦</button>${Object.entries(MOODS.tpl).map(([t, v]) => `<button class="minichip mechip" data-tag="${t}" aria-pressed="${t === ed.tag}">${esc(v.name)}</button>`).join('')}</div>
+    <div class="label">Colors (${cu.min}–${cu.max})</div>
+    <div class="mecolors">${cols.map((c, i) => `<span class="colorbtn" style="background:${c}"><input type="color" data-ci="${i}" value="${c}" aria-label="Color ${i+1}"></span>`).join('')}
+      ${cols.length < cu.max ? '<button class="btn small" id="meAdd">+</button>' : ''}${cols.length > cu.min ? '<button class="btn small" id="meDel">−</button>' : ''}</div>
+    ${ui.filter(u => u.type === 'slider').map(u => `<div class="field"><div class="row between"><span class="muted">${esc(u.label)}</span><span class="val" id="mev_${u.key}">${fmtSlider(u, ed.meta[u.key])}</span></div>
+      <input type="range" data-sk="${u.key}" min="${u.min}" max="${u.max}" step="${u.step || 0.01}" value="${ed.meta[u.key] ?? u.default}"></div>`).join('')}
+    ${ui.filter(u => u.type === 'checkbox').map(u => `<label class="toggle"><span>${esc(u.label)}<br><span class="muted" style="font-size:13px">Lights react when you inhale</span></span><input type="checkbox" class="switch" data-ck="${u.key}" ${ed.meta[u.key] ? 'checked' : ''}></label>`).join('')}
+    <div class="shop-actions"><button class="btn small primary" id="meApply">Save and apply</button>${ed.editIdx != null ? '<button class="btn small ghost" id="meRemove" style="color:var(--bad)">Delete</button>' : ''}</div>`;
+  syncRanges();
+}
+let edLiveT = null, edLiveOn = false;
+function edLivePreview(){
+  if (!ed || S.mode !== 'live' || S.api === 2) return;
+  if (S.state >= 7 && S.state <= 9) return;
+  clearTimeout(edLiveT);
+  edLiveT = setTimeout(() => {
+    if (!ed || ed.tag === ZONE_TAG) return;
+    let blob; try { blob = moodPayload({ kind:'tpl', tag: ed.tag, name: ed.name, meta: ed.meta }); } catch(e){ return; }
+    clearTimeout(previewTimer); edLiveOn = true;
+    ledJob(() => ble.writeBlob('/p/app/led/pclr', blob).catch(() => {}));
+  }, 220);
+}
+function edLiveEnd(){ clearTimeout(edLiveT); if (edLiveOn && S.mode === 'live') ledJob(previewClear); edLiveOn = false; }
+const fmtSlider = (u, v) => u.key === 'tempoFrac' ? `${Math.round((v ?? u.default) * 100)}%` : String(Math.round(v ?? u.default));
+function saveEditorMood(){
+  if (ed.tag === ZONE_TAG){
+    const m = { id: 'local-' + Date.now(), name: ed.name || 'My zones', tag: ZONE_TAG, meta: JSON.parse(JSON.stringify(ed.meta)) };
+    if (ed.editIdx != null){ m.id = store.myMoods[ed.editIdx].id; store.myMoods[ed.editIdx] = m; } else { store.myMoods.unshift(m); ed.editIdx = 0; }
+    save(); return Object.assign({ kind:'tpl' }, m);
+  }
+  const m = { id: 'local-' + Date.now(), name: ed.name || 'My mood', tag: ed.tag, meta: JSON.parse(JSON.stringify(ed.meta)) };
+  if (ed.editIdx != null){ m.id = store.myMoods[ed.editIdx].id; store.myMoods[ed.editIdx] = m; } else store.myMoods.unshift(m);
+  save(); return Object.assign({ kind:'tpl' }, m);
+}
+
+/* ---- account profiles ---- */
+function drawAccountProfiles(){
+  const el = $('#acctProfiles'); if (!el) return;
+  if (!MOODS.profiles.length){ el.innerHTML = '<p class="muted" style="margin:0;font-size:14px">Link your Puffco account in Settings to load your saved heat profiles here.</p>'; return; }
+  el.innerHTML = MOODS.profiles.map((p, i) => `
+    <div class="acct">
+      <div class="grow"><b>${esc(p.name)}</b><span class="muted">${fmtT(f2c(p.tempF))}${U()} · ${p.time}s · ${vaporName(p.vapor)}${p.moodName ? ' · ' + esc(p.moodName) : ''}</span></div>
+      <div class="seg acct-seg" data-ap="${i}">${[0,1,2,3].map(s => `<button data-slot="${s}">P${s+1}</button>`).join('')}</div>
+    </div>`).join('');
+}
+function loadAccountProfile(i, slot){
+  const a = MOODS.profiles[i], p = S.profiles[slot];
+  p.name = a.name.slice(0, 16); p.tempC = f2c(a.tempF); p.time = clamp(a.time, 15, 120); p.vapor = a.vapor || 0;
+  if (a.moodId){
+    if (a.moodCat === 'exclusive' && MOODS.excl.find(x => x.id === a.moodId)) p.mood = { kind:'excl', id:a.moodId, name:a.moodName };
+    else { const m = MOODS.mine.find(x => x.id === a.moodId); if (m) p.mood = Object.assign({ kind:'tpl' }, m); }
+    if (p.mood) p.color = moodColors(p.mood)[0] || p.color;
+  }
+  drawProfiles(); syncRanges();
+  toast(`Loaded "${a.name}" into P${slot + 1}. Tap Save to ${devWord()} to keep it.`);
+}
+
+/* ---- device settings ---- */
+function revStr(v){ const L = 'ABCDEFGHJKMNPRTUVWXYZ'; if (!(v > 0)) return 'X*'; let s = '', n = v - 1; while (n >= 0){ s = L[n % L.length] + s; n = Math.floor(n / L.length) - 1; } return s; }
+slowPoll.n = 0;
+async function readDeviceInfo(){
+  try { const mc = await ble.u32('/p/sys/hw/mdcd'); S.edition = isProxy() ? (PROXY_EDITIONS[mc] || null) : (EDITIONS[mc] || null); } catch(e){}
+  try { S.devName = await ble.str('/u/sys/name'); } catch(e){}
+  try { const r = await ble.read('/p/sys/fw/ver', 4); S.fw = revStr(r[0]); } catch(e){}
+  try { const v = await ble.f32('/u/app/rdym/hc'); S.readyMode = v >= 0 && v < 4 ? Math.round(v) : -1; } catch(e){ S.readyMode = null; }
+  try { const v = await ble.f32('/u/bat/msoc'); S.batSaver = v > 0 && v < 100; } catch(e){ S.batSaver = null; }
+  try { S.lowBatInd = (await ble.f32('/u/app/lbws')) > 0; } catch(e){ S.lowBatInd = null; }
+  try { const v = await ble.f32('/p/app/ltrn/time'); if (v > 0) store.lanternTime = Math.round(v); } catch(e){}
+  try { S.heatHours = (await ble.f32('/p/app/odom/0/tm', 12)) / 3600; } catch(e){}
+  try { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, Math.floor(Date.now() / 1000), true); await ble.write('/p/sys/time', b); } catch(e){}
+}
+async function readBatteryDetail(){
+  try { S.batVolts = await ble.f32('/p/bat/volt'); } catch(e){}
+  try { S.batTemp = await ble.f32('/p/bat/temp'); } catch(e){}
+  try { const e2 = await ble.f32('/p/bat/chg/etf'); S.chgEta = isFinite(e2) && e2 > 0 && e2 < 86400 ? e2 : null; } catch(e){}
+}
+function drawDevice(){
+  const el = $('#devCard'); if (!el) return;
+  const live = S.mode === 'live', d = v => v == null ? '—' : v;
+  const rm = S.readyMode ?? -1;
+  el.innerHTML = `
+    <span class="label">${isProxy() ? 'Your Proxy' : 'Your Peak'}</span>
+    ${live ? '' : '<p class="muted" style="margin:0;font-size:13px">Connect your Peak to see and change these.</p>'}
+    <fieldset class="devfs" ${live ? '' : 'disabled'}>
+    <div class="row between"><span>Name</span><span class="row" style="gap:6px"><input type="text" id="devNameIn" class="num" maxlength="20" style="width:150px;text-align:right" value="${esc(S.devName || S.name || '')}"><button class="btn small" id="devNameSave">Save</button></span></div>
+    ${isProxy() ? '' : `<div class="field"><div class="row between"><span>Ready Mode</span></div>
+      <p class="muted" style="margin:0;font-size:13px">Starts heating as soon as you lift the Peak off the Power Dock.</p>
+      <div class="seg" id="readySeg" style="display:grid;grid-template-columns:repeat(5,1fr)"><button data-rm="-1" aria-pressed="${rm < 0}">Off</button>${S.profiles.map((p, i) => `<button data-rm="${i}" aria-pressed="${rm === i}">P${i+1}</button>`).join('')}</div></div>`}
+    <label class="toggle"><span>Battery preservation<br><span class="muted" style="font-size:13px">Stops charging at 80% to extend battery life</span></span><input type="checkbox" class="switch" id="tBatSaver" ${S.batSaver ? 'checked' : ''}></label>
+    <label class="toggle"><span>Low battery warning<br><span class="muted" style="font-size:13px">${devWord()} blinks when battery drops to 10%</span></span><input type="checkbox" class="switch" id="tLowBat" ${S.lowBatInd ? 'checked' : ''}></label>
+    <div class="row between"><span>Lantern turns off after</span><div class="seg" id="ltSeg">${[[1800,'30m'],[3600,'1h'],[7200,'2h'],[14400,'4h']].map(([s, l]) => `<button data-lt="${s}" aria-pressed="${(store.lanternTime || 7200) === s}">${l}</button>`).join('')}</div></div>
+    <div class="devinfo">
+      <div><span class="muted">Edition</span><b>${d(S.edition)}</b></div>
+      ${isProxy() ? '' : `<div><span class="muted">Chamber</span><b>${d(CHAMBERS[S.chamber])}</b></div>`}
+      <div><span class="muted">Firmware</span><b>${d(S.fw)}</b></div>
+      <div><span class="muted">Battery</span><b>${S.battery == null ? '—' : S.battery + '%'}${S.batVolts ? ' · ' + S.batVolts.toFixed(2) + 'V' : ''}</b></div>
+      <div><span class="muted">Battery temp</span><b>${S.batTemp ? (store.unit === 'F' ? Math.round(c2f(S.batTemp)) + '°F' : Math.round(S.batTemp) + '°C') : '—'}</b></div>
+      <div><span class="muted">Full in</span><b>${S.chgEta ? Math.round(S.chgEta / 60) + ' min' : '—'}</b></div>
+      <div><span class="muted">Total heat time</span><b>${S.heatHours ? S.heatHours.toFixed(1) + ' h' : '—'}</b></div>
+      <div><span class="muted">Dabs per day</span><b>${S.dpd ? S.dpd.toFixed(1) : '—'}</b></div>
+    </div>
+    <div class="shop-actions"><button class="btn small" id="bShowBat">Show battery on ${devWord()}</button><span id="offWrap"><button class="btn small ghost" id="bPowerOff" style="color:var(--bad)">Power off</button></span></div>
+    </fieldset>`;
+}
+async function devWrite(fn, ok){
+  if (!needLive('change device settings')){ drawDevice(); return; }
+  try { await fn(); toast(ok); } catch(e){ toast('Failed: ' + e.message); }
+  drawDevice();
+}
+
+/* ===== Torch dab (Rich only for now, Premium later): hits like a torched quartz banger =====
+   A hot start dab: the banger is torched, cools for a bit, and you drop the dab while the quartz is still hot.
+   It hits hardest at the start, then the quartz keeps cooling while you pull, and pulling cools it faster
+   (air through the banger). The 3D and 3DXL chambers heat from the side walls with a sensor in the wall,
+   so they follow a moving target well. We move the target with the live temp offset (/p/app/tmpo, the
+   same file Boost and the ± buttons use), about once a second:
+   preheat goes to the start temp, it holds there a few seconds once Ready, then cools like quartz does
+   (fast at first, then slower) down to the end temp. Boost re-torches it back to the start temp. */
+const TORCH_PRESETS = [
+  { id:'hot', n:'Hot start', s:600, e:470 },
+  { id:'classic', n:'Classic', s:565, e:480 },
+  { id:'low', n:'Low temp', s:530, e:460 }
+];
+const TORCH_HOLD = 4, TORCH_PULL = 1.8, TORCH_STEP = 3; // seconds at full heat once Ready; a pull cools 1.8x as fast; only send changes of 3°F+
+const TORCH = { at:0, last:0, te:0, sent:null, busy:false, sim:0 };
+function torchOk(){ return isRich(); } // Premium later: || isPremium()
+function torchCfg(){ const c = Object.assign({ on:false, s:600, e:470 }, store.torch || {}); c.s = clamp(Math.round(c.s), 480, 644); c.e = clamp(Math.round(c.e), 400, c.s - 20); return c; }
+function torchLive(){ let duel = false; try { duel = DUEL.on; } catch(e){} return torchCfg().on && torchOk() && !duel && (S.state === 7 || S.state === 8); } // never in a 1v1
+// the target (°F) te seconds into Ready: hold, then Newton's cooling toward the end temp, about 95% of the way there by the end
+function torchTargetF(te, total){
+  const c = torchCfg(), span = Math.max(10, (total || 45) - TORCH_HOLD);
+  return te <= TORCH_HOLD ? c.s : c.e + (c.s - c.e) * Math.exp(-3 * (te - TORCH_HOLD) / span);
+}
+async function torchSend(wantF){
+  const p = S.profiles[S.active] || {};
+  if (S.mode !== 'live'){ S.liveTargetC = f2c(wantF); TORCH.sent = wantF; return; }
+  const off = f2c(wantF) - p.tempC; if (!isFinite(off) || Math.abs(off) > 150) return; // never send anything wild
+  TORCH.busy = true;
+  try { await ble.wf32('/p/app/tmpo', off); BOOST.temp = off; S.liveTargetC = f2c(wantF); TORCH.sent = wantF; } catch(e){} finally { TORCH.busy = false; }
+}
+async function torchTick(){
+  if (BG.on) return;
+  const now = performance.now();
+  if (TORCH.sim && !(S.state === 7 || S.state === 8)){ // test tools: play the curve with no Peak
+    TORCH.te = (now - TORCH.sim) / 1000; if (TORCH.te > 50){ TORCH.sim = 0; TORCH.te = 0; } torchDot(); return;
+  }
+  if (!torchLive()){ if (TORCH.at || TORCH.sent != null){ TORCH.at = 0; TORCH.te = 0; TORCH.sent = null; torchDot(); } return; }
+  let wantF;
+  if (S.state === 7){ TORCH.at = 0; TORCH.te = 0; wantF = torchCfg().s; }
+  else {
+    if (!TORCH.at){ TORCH.at = TORCH.last = now; TORCH.te = 0; }
+    TORCH.te += (now - TORCH.last) / 1000 * (HIT.on ? TORCH_PULL : 1); TORCH.last = now;
+    wantF = Math.round(torchTargetF(TORCH.te, S.total));
+  }
+  torchDot();
+  if (TORCH.busy || (TORCH.sent != null && Math.abs(TORCH.sent - wantF) < TORCH_STEP && wantF !== torchCfg().e)) return;
+  if (TORCH.sent === wantF) return;
+  await torchSend(wantF); render();
+}
+setInterval(torchTick, 1000);
+// Boost while it's on: torch it again (back to the start temp) and add the boost time
+async function torchRetorch(){
+  const p = S.profiles[S.active] || {}, addS = p.boostT || 15;
+  TORCH.te = 0; TORCH.last = performance.now(); TORCH.sent = null;
+  if (S.mode === 'live'){ try { BOOST.time += addS; await ble.wf32('/p/app/timo', BOOST.time); } catch(e){} }
+  buzz(15); toast(`Re-torched: back to ${fmtT(f2c(torchCfg().s))}${U()} +${addS}s`); torchTick();
+}
+async function torchSet(c){
+  const was = torchCfg().on; store.torch = Object.assign(torchCfg(), c); save();
+  if (was && !store.torch.on && S.mode === 'live' && (S.state === 7 || S.state === 8)){ try { await ble.wf32('/p/app/tmpo', 0); BOOST.temp = 0; S.liveTargetC = null; } catch(e){} } // off mid-session: back to the profile temp
+  TORCH.sent = null; drawTorch(); render();
+}
+// the curve on the card: x is seconds into Ready, y is °F
+function torchSvg(total){
+  const c = torchCfg(), W = 300, H = 90, lo = c.e - 15, hi = c.s + 10, T = Math.max(20, total || 45);
+  const X = t => (t / T * W).toFixed(1), Y = f => (H - (f - lo) / (hi - lo) * H).toFixed(1);
+  let d = ''; for (let t = 0; t <= T; t += T / 60) d += (d ? 'L' : 'M') + X(t) + ',' + Y(torchTargetF(t, T));
+  return `<svg viewBox="-4 -6 ${W + 8} ${H + 12}" style="width:100%;height:auto;display:block" aria-hidden="true">
+    <defs><linearGradient id="trG" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff4d1a"/><stop offset=".5" stop-color="#ffb02e"/><stop offset="1" stop-color="#5ab0ff"/></linearGradient></defs>
+    <path d="${d}L${W},${H}L0,${H}Z" fill="url(#trG)" opacity=".15"/><path d="${d}" fill="none" stroke="url(#trG)" stroke-width="3" stroke-linecap="round"/>
+    <circle id="torchDot" r="5" fill="#fff" stroke="#ff7a1a" stroke-width="2" cx="0" cy="${Y(c.s)}" style="opacity:0;transition:cx 1s linear,cy 1s linear"/></svg>`;
+}
+function torchDot(){
+  const el = $('#torchDot'); if (!el) return;
+  const on = torchLive() || TORCH.sim, c = torchCfg(), T = Math.max(20, (torchLive() ? S.total : 0) || 45), W = 300, H = 90, lo = c.e - 15, hi = c.s + 10;
+  const te = Math.min(TORCH.te, T), f = S.state === 7 && torchLive() ? c.s : torchTargetF(te, T);
+  el.style.opacity = on ? 1 : 0; el.setAttribute('cx', (te / T * W).toFixed(1)); el.setAttribute('cy', (H - (f - lo) / (hi - lo) * H).toFixed(1));
+  const n = $('#torchNow'); if (n) n.textContent = on ? (S.state === 7 && torchLive() ? `Preheating to ${fmtT(f2c(c.s))}${U()}` : `${fmtT(f2c(f))}${U()} now${HIT.on && torchLive() ? ' · cooling faster while you pull' : ''}`) : '';
+}
+function drawTorch(){
+  const el = $('#torchCard'); if (!el) return;
+  el.hidden = !torchOk(); if (el.hidden) return;
+  const c = torchCfg(), F = f => `${fmtT(f2c(f))}${U()}`, pre = TORCH_PRESETS.find(p => p.s === c.s && p.e === c.e);
+  el.innerHTML = `<div class="row between"><span class="label">🔥 Torch dab <span class="muted" style="font-size:11px;letter-spacing:0">Rich only for now</span></span><button class="btn small ${c.on ? 'primary' : ''}" data-tor="on">${c.on ? 'On' : 'Off'}</button></div>
+    <p class="muted" style="margin:6px 0 8px;font-size:13px">Hits like a torched banger: starts hot, then cools off as you pull. Pulling cools it faster, and Boost torches it again.</p>
+    <div class="shop-actions" style="margin:0 0 8px">${TORCH_PRESETS.map(p => `<button class="btn small" data-tor="p:${p.id}" ${pre && pre.id === p.id ? 'style="box-shadow:inset 0 0 0 2px var(--accent)"' : ''}>${p.n}</button>`).join('')}</div>
+    ${torchSvg(S.state === 8 && torchLive() ? S.total : 45)}
+    <div class="row between mono" style="font-size:12px;margin-top:2px"><span>${F(c.s)} start</span><span id="torchNow" style="color:var(--accent)"></span><span>${F(c.e)} end</span></div>
+    <label style="display:grid;gap:2px;margin-top:8px;font-size:13px"><span class="row between"><span>Start (fresh torch)</span><b>${F(c.s)}</b></span><input type="range" data-tor="s" min="480" max="644" step="1" value="${c.s}"></label>
+    <label style="display:grid;gap:2px;margin-top:6px;font-size:13px"><span class="row between"><span>End (cooled off)</span><b>${F(c.e)}</b></span><input type="range" data-tor="e" min="400" max="${c.s - 20}" step="1" value="${c.e}"></label>
+    ${isProxy() ? '<p class="muted" style="margin:6px 0 0;font-size:12px">On a Proxy the start temp is capped by the Proxy itself.</p>' : ''}`;
+  torchDot();
+}
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('#torchCard [data-tor]'); if (!b || b.tagName === 'INPUT') return;
+  const k = b.dataset.tor; if (k === 'on') return torchSet({ on: !torchCfg().on });
+  const p = TORCH_PRESETS.find(x => 'p:' + x.id === k); if (p) torchSet({ s: p.s, e: p.e }); });
+document.addEventListener('change', e => { const i = e.target.closest && e.target.closest('#torchCard input[data-tor]'); if (i) torchSet({ [i.dataset.tor]: +i.value }); });
+
+/* ---- live adjust during a session ---- */
+async function adjustLive(kind, delta){
+  const heating = S.state >= 7 && S.state <= 9;
+  if (!heating) return;
+  const p = S.profiles[S.active] || {};
+  if (kind === 'temp'){
+    // /p/app/tmpo is how much to ADD to the profile temp (same file Boost uses), not the target itself
+    const base = p.tempC, minC = f2c(400), maxC = f2c(644);
+    if (S.mode === 'live'){
+      let off = BOOST.temp; try { const r = await ble.f32('/p/app/tmpo'); if (isFinite(r) && Math.abs(r) < 200) off = r; } catch(e){}
+      const next = clamp(base + off + delta * 5 / 9, minC, maxC), newOff = next - base;
+      if (Math.abs(newOff) > 150){ toast('Temp change blocked'); return; } // never send anything wild
+      try { await ble.wf32('/p/app/tmpo', newOff); BOOST.temp = newOff; S.liveTargetC = next; } catch(e){ toast('Temp change failed'); return; }
+      toast(`Target ${fmtT(next)}${U()}`);
+    } else { const next = clamp((S.liveTargetC ?? base) + delta * 5 / 9, minC, maxC); S.liveTargetC = next; S.tempC += delta * 5 / 9; toast(`Target ${fmtT(next)}${U()}`); }
+  } else {
+    // /p/app/timo is seconds ADDED to the profile time, not the total
+    const nextTotal = clamp(Math.round(S.total + delta), 15, 180), d = nextTotal - S.total;
+    if (!d) return;
+    if (S.mode === 'live'){
+      let off = BOOST.time; try { const r = await ble.f32('/p/app/timo'); if (isFinite(r) && Math.abs(r) < 600) off = r; } catch(e){}
+      const newOff = Math.round(off + d);
+      if (newOff > 170 || newOff < -(p.time || 30)){ toast('Time change blocked'); return; }
+      try { await ble.wf32('/p/app/timo', newOff); BOOST.time = newOff; } catch(e){ toast('Time change failed'); return; }
+    }
+    S.total = nextTotal; toast(`${Math.max(0, Math.round(S.total - liveElapsed()))}s left`);
+  }
+  render();
+}
+
+
+/* ================= Puffco account (sign in + sync) ================= */
+const PUFFCO_API = 'https://api.puffco.app';
+function acct(){ return store.account || null; }
+function moodItemToExcl(it){
+  const pj = it.projectors || {}, meta = pj.meta || it.meta || {};
+  if (!pj.peach || !pj.peach.lamp) return null;
+  const lamp = JSON.parse(JSON.stringify(pj.peach.lamp)), par = lamp.param || {};
+  for (const k of Object.keys(par)){ const v = par[k]; if (v && typeof v === 'object' && !Array.isArray(v) && v._key) par[k] = meta[v._key]; }
+  if (!Array.isArray(par.color) && !Array.isArray(par.colors)) return null;
+  return { id: it.id, name: it.name, desc: (it.desc || '').trim(), colors: meta.userColors || [], lamp };
+}
+function moodItemToMine(it){
+  const m = it.meta || {};
+  if (it.tag && !MOODS.tpl[it.tag] && it.projectors && it.projectors.peach && it.mappings){
+    MOODS.tpl[it.tag] = { name: it.tag.replace(/-mood-light$/,'').replace(/^(pikaled2|migration)-/,'').replace(/-/g,' ').replace(/\b\w/g, c => c.toUpperCase()), desc:'', ui: (it.ui || []).map(u => { const c = Object.assign({}, u); delete c.colorLabels; return c; }), mappings: it.mappings, peach: it.projectors.peach };
+    (store.account.extraTpl = store.account.extraTpl || {})[it.tag] = MOODS.tpl[it.tag];
+  }
+  if (!MOODS.tpl[it.tag]) return null;
+  const meta = {}; for (const k of ['userColors','tempoFrac','density','dynamicInhale']) if (k in m) meta[k] = m[k];
+  return { id: it.id, name: it.name, tag: it.tag, meta };
+}
+// Turn raw Puffco API responses into Emberline data. `r` maps a short key to parsed JSON.
+function mapAccount(r){
+  const out = { user:null, mine:[], excl:[], profiles:[], stats:{}, extraTpl:(store.account && store.account.extraTpl) || {} };
+  store.account = Object.assign(store.account || {}, { extraTpl: out.extraTpl });
+  if (r.me) out.user = { id: r.me.id, firstName: r.me.firstName || '', username: r.me.username || '', tempPreference: r.me.tempPreference };
+  const items = x => x ? (Array.isArray(x) ? x : x.items || []) : [];
+  const exById = new Map();
+  for (const it of items(r.exclusive)){ const x = moodItemToExcl(it); if (x) exById.set(x.id, x); }
+  for (const it of items(r.custom)){ const m = moodItemToMine(it); if (m) out.mine.push(m); }
+  for (const p of items(r.heatProfiles).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))){
+    const L = p.light || {};
+    if (L.category === 'exclusive'){ const x = moodItemToExcl(L); if (x && !exById.has(x.id)) exById.set(x.id, x); }
+    else if (L.id && !out.mine.find(m => m.id === L.id)){ const m = moodItemToMine(L); if (m) out.mine.push(m); }
+    const tempF = (p.units || 'Fahrenheit') === 'Fahrenheit' ? p.temperature : Math.round(p.temperature * 9 / 5 + 32);
+    out.profiles.push({ name: p.name, tempF, time: p.duration, vapor: p.vaporSetting || 0, moodId: L.id || null, moodName: L.name || null, moodCat: L.category || null });
+  }
+  out.excl = [...exById.values()];
+  if (r.profile){ out.stats.lifetimeDabs = r.profile.lifetimeDabs; out.stats.dailyStreak = r.profile.dailyStreak; out.stats.popularTempC = r.profile.popularTemp; out.stats.memberSince = r.profile.memberSinceYear; out.stats.devices = (r.profile.collection || []).map(c => ({ name: c.name, model: c.productName })); }
+  if (r.dabs && Array.isArray(r.dabs.dates)){
+    const per = r.dabs.dates.map((_, i) => (r.dabs.units || []).reduce((a, u) => a + ((u.dabs || [])[i] || 0), 0));
+    out.stats.month = { dates: r.dabs.dates, dabs: per, total: r.dabs.total, delta: r.dabs.delta };
+  }
+  if (r.insights && Array.isArray(r.insights.insights)){
+    for (const x of r.insights.insights){
+      if (x.type === 'session-length') out.stats.avgSession = x.averageSeconds;
+      if (x.type === 'session-temperature') out.stats.avgTempC = x.averageTemperature;
+      if (x.type === 'top-hour'){ out.stats.topHour = x.topHourLocal; out.stats.hourHist = x.histogram; }
+      if (x.type === 'streak') out.stats.streak = { start: x.start, end: x.end };
+      if (x.type === 'personal-best-streak') out.stats.bestStreak = { start: x.start, end: x.end };
+      if (x.type === 'milestone') out.stats.milestone = { total: x.total, next: x.nextTier, progress: x.progressToNext };
+    }
+  }
+  return out;
+}
+function applyAccount(){
+  const a = acct(); if (!a || !a.data) return;
+  if (a.data.extraTpl) Object.assign(MOODS.tpl, a.data.extraTpl);
+  const known = new Set(MOODS.excl.map(x => x.id));
+  for (const x of a.data.excl || []) if (!known.has(x.id)) MOODS.excl.push(x);
+  MOODS.mine = (a.data.mine || []).filter(m => MOODS.tpl[m.tag]);
+  MOODS.profiles = a.data.profiles || [];
+  if (a.data.user && a.data.user.firstName && (!store.name || store.name === 'Chase')) store.name = a.data.user.firstName;
+}
+class AcctError extends Error { constructor(kind, msg){ super(msg); this.kind = kind; } }
+// straight to Puffco. The iPhone app goes natively (no browser limits); once a browser has needed the relay, it
+// keeps using it for a day instead of failing first every time
+async function puffcoDirect(path, opts){
+  if (window.EMBER_APP && window.EMBER_APP.http) return window.EMBER_APP.http(PUFFCO_API + path, opts);
+  if (store.puffcoRelay && Date.now() - store.puffcoRelay < 864e5) throw new Error('use relay');
+  return fetch(PUFFCO_API + path, Object.assign({ mode:'cors', credentials:'omit' }, opts));
+}
+async function puffcoRelay(path, opts){
+  const r = await fetch(SB_URL + '/functions/v1/player', { method:'POST', headers:{ apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type':'application/json' },
+    body: JSON.stringify({ action:'puffco', path, method: opts.method || 'GET', headers: opts.headers || {}, body: typeof opts.body === 'string' ? opts.body : undefined }) });
+  const j = await r.json(); if (!j || !j.status) throw new Error('relay: ' + ((j && (j.body || j.error)) || r.status));
+  return new Response(j.body, { status: j.status, headers:{ 'Content-Type':'application/json' } });
+}
+async function apiFetch(path, opts = {}){
+  let res;
+  opts = Object.assign({}, opts, { headers: Object.assign({ 'x-app-type':'puffco-app', 'x-app-platform':'Web', 'x-app-version':'3.13.31' }, opts.headers || {}) });
+  try { res = await puffcoDirect(path, opts); }
+  catch(e){
+    // the browser couldn't reach Puffco (Puffco blocks some websites): go through Emberline's server instead
+    try { res = await puffcoRelay(path, opts); store.puffcoRelay = Date.now(); }
+    catch(e2){ throw new AcctError('blocked', 'Couldn’t reach Puffco’s servers right now. Check your internet and try again in a minute.'); }
+  }
+  if (res.status === 401 || res.status === 403) throw new AcctError('auth', 'Puffco rejected the sign-in.');
+  if (!res.ok){
+    // show what Puffco actually said (same messages as their app)
+    let body = ''; try { body = await res.text(); } catch(e){}
+    let code = ''; try { const j = JSON.parse(body); const e0 = (j.errors || [])[0] || {}; code = String(e0.code || e0.message || j.message || j.error || j.code || '').trim(); if (Array.isArray(j.message)) code = j.message.join(', '); } catch(e){ code = body.slice(0, 120); }
+    const MSG = { INVALID_CREDENTIALS:'That email or password doesn’t match a Puffco account. If you made your account with Google or Apple, it has no password, so set one in the Puffco app first (Account → Change password).',
+      EMAIL_NOT_VERIFIED:'Puffco says this email isn’t verified yet. Check your inbox for their email, then try again.',
+      INVALID_EMAIL:'Puffco says that isn’t a valid email address.', CLIENT_VERSION_NOT_SUPPORTED:'Puffco updated their app and now rejects this version. Tell Claude so it can update Emberline.', INVALID_SESSION:'Please sign in again.', FORBIDDEN_RESOURCE:'Puffco blocked that request.' };
+    const key = Object.keys(MSG).find(k => code.toUpperCase().includes(k));
+    if (key) throw new AcctError(key === 'INVALID_SESSION' ? 'auth' : 'http', MSG[key]);
+    throw new AcctError('http', `Puffco’s server said: ${code || 'error ' + res.status}`);
+  }
+  return res.json();
+}
+async function authed(path){
+  const a = acct(); if (!a || !a.auth) throw new AcctError('auth', 'Not signed in.');
+  const go = () => apiFetch(path, { headers: { Authorization: 'Bearer ' + a.auth.accessToken, Accept: 'application/json' } });
+  try { return await go(); }
+  catch(e){
+    if (e.kind !== 'auth' || !a.auth.refreshToken) throw e;
+    const t = await apiFetch('/api/users/refresh', { headers: { Authorization: a.auth.refreshToken, Accept: 'application/json' } });
+    a.auth = { accessToken: t.accessToken, refreshToken: t.refreshToken || a.auth.refreshToken }; save();
+    return go();
+  }
+}
+async function puffcoSignIn(email, password){
+  let t;
+  email = String(email || '').trim().toLowerCase();
+  try { t = await apiFetch('/api/users/login', { method:'POST', headers:{ 'Content-Type':'application/json', Accept:'application/json' }, body: JSON.stringify({ email, password }) }); }
+  catch(e){ if (e.kind === 'auth') throw new AcctError('auth', 'Wrong email or password. If you sign in to Puffco with Apple or Google, set a password in the Puffco app first (Account → Change password).'); throw e; }
+  if (!t || !t.accessToken) throw new AcctError('http', 'Puffco didn’t return a sign-in token.');
+  const switching = store.account && store.account.email && store.account.email !== email;
+  if (switching){ // a different Puffco account: forget the last one's profile so nothing carries over
+    store.account = null; LB.me = null; LB.rows = null; const L = lbStore(); L.joined = false; L.meCache = null; L.username = ''; L.dev = false;
+  }
+  store.account = Object.assign(store.account || {}, { auth: { accessToken: t.accessToken, refreshToken: t.refreshToken }, email }); save();
+  await puffcoSync();
+  lbRestore().then(p => { if (p && p.username) toast('Welcome back, ' + p.username); try { drawSocial(); drawRank(); } catch(e){} setTimeout(claimPrompt, 1200); });
+}
+async function puffcoSync(quiet){
+  drawStats.sig = null;
+  const r = {};
+  r.me = await authed('/api/users/me');
+  const opt = async (k, p) => { try { r[k] = await authed(p); } catch(e){ if (e.kind === 'blocked') throw e; } };
+  await opt('exclusive', '/api/v1/mood-lights?size=100&category=exclusive&legacyDefinitions=false');
+  await opt('custom', '/api/v1/mood-lights?size=100&category=custom&legacyDefinitions=false');
+  await opt('heatProfiles', '/api/v1/heat-profiles?legacyDefinitions=false');
+  if (r.me && r.me.id) await opt('profile', `/api/v1/users/${r.me.id}/profiles`);
+  await opt('dabs', '/api/metrics/dabs?period=m&userId=me');
+  for (const pd of ['d','w','y','all']) await opt('dabs_' + pd, `/api/metrics/dabs?period=${pd}&userId=me`);
+  await opt('insights', '/api/metrics/insights');
+  finishSync(r, 'account', quiet);
+}
+let syncing = null;
+function autoSync(force){
+  const a = acct(); if (!a || !a.auth || syncing) return;
+  if (!force && a.syncedAt && Date.now() - a.syncedAt < 10 * 60000) return;
+  syncing = puffcoSync(true).catch(e => console.warn('auto sync', e)).finally(() => { syncing = null; });
+}
+function finishSync(r, source, quiet){
+  ingestDabHistory(r);
+  const data = mapAccount(r);
+  store.account = Object.assign(store.account || {}, { data, source, syncedAt: Date.now() });
+  save(); applyAccount();
+  if (!quiet) toast(`Synced ${data.mine.length} moods, ${data.profiles.length} profiles${data.stats.lifetimeDabs ? ', and your stats' : ''}`);
+  drawStats.sig = null;
+  drawAccount(); if (view === 'lights') drawMoods(); if (view === 'prof') drawAccountProfiles(); if (view === 'stats') drawStats();
+}
+// Import from a .har file exported on puffco.app (works when the browser blocks sign-in)
+async function importHar(file){
+  const text = await file.text();
+  let har; try { har = JSON.parse(text); } catch(e){ throw new AcctError('file', 'That file isn’t a valid .har export.'); }
+  const entries = (har.log && har.log.entries) || [];
+  const r = {}, body = e => { const c = e.response && e.response.content || {}; if (!c.text) return null; try { return JSON.parse(c.encoding === 'base64' ? atob(c.text) : c.text); } catch(_){ return null; } };
+  const pick = (k, re) => { for (let i = entries.length - 1; i >= 0; i--){ const u = entries[i].request && entries[i].request.url || ''; if (re.test(u)){ const b = body(entries[i]); if (b){ r[k] = b; return; } } } };
+  pick('me', /api\.puffco\.app\/api\/users\/me(\?|$)/);
+  pick('exclusive', /mood-lights\?.*category=exclusive/);
+  pick('custom', /mood-lights\?.*category=custom/);
+  pick('heatProfiles', /\/api\/v1\/heat-profiles(\?|$)/);
+  pick('profile', /\/api\/v1\/users\/\d+\/profiles(\?|$)/);
+  pick('dabs', /\/api\/metrics\/dabs\?(?=.*period=m)/);
+  for (const pd of ['d','w','y','all']) pick('dabs_' + pd, new RegExp('/api/metrics/dabs\\?(?=.*period=' + pd + '(&|$))'));
+  if (!r.dabs) pick('dabs', /\/api\/metrics\/dabs\?/);
+  pick('insights', /\/api\/metrics\/insights/);
+  if (!r.custom && !r.exclusive && !r.heatProfiles && !r.me) throw new AcctError('file', 'No Puffco account data was found in that file. Export it from puffco.app while signed in, after opening Mood Lights and Heat Profiles.');
+  store.account = Object.assign(store.account || {}, { email: r.me && r.me.email || (store.account && store.account.email) });
+  finishSync(r, 'file');
+}
+function signOut(){ delete store.account; save(); MOODS.mine = []; MOODS.profiles = []; toast('Signed out of Puffco'); drawAccount(); }
+
+/* ---- account UI (Style card, welcome sheet, Stats section) ---- */
+function acctSummary(){
+  const a = acct(); if (!a || !a.data) return '';
+  const d = a.data, when = new Date(a.syncedAt);
+  return `<div class="acct-sum"><b>${esc(d.user && (d.user.firstName || d.user.username) || a.email || 'Puffco account')}</b><span class="muted">${a.source === 'file' ? 'Imported' : 'Synced'} ${when.toLocaleDateString([], { month:'short', day:'numeric' })} ${when.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' })} · ${d.mine.length} moods · ${d.profiles.length} profiles</span></div>`;
+}
+function acctFormHtml(prefix){
+  return `<form class="acct-form" id="${prefix}Form" autocomplete="on">
+      <label class="mefield">Email<input type="email" id="${prefix}Email" autocomplete="username" inputmode="email" required value="${esc(acct() && acct().email || '')}"></label>
+      <label class="mefield">Password<input type="password" id="${prefix}Pass" autocomplete="current-password" required></label>
+      <p class="muted acct-err" id="${prefix}Err" hidden></p>
+      <div class="shop-actions"><button class="btn primary" type="submit" id="${prefix}Go">Sign in</button>
+      <label class="btn small" for="${prefix}File" hidden>Import from file<input type="file" id="${prefix}File" accept=".har,application/json" hidden></label></div>
+      <p class="muted" style="margin:0;font-size:12px">Your password goes to Puffco&#8217;s server (api.puffco.app), through Emberline&#8217;s server if your browser can&#8217;t reach Puffco, and is never saved. Emberline keeps the sign-in token on this phone so it can sync again later.</p>
+    </form>`;
+}
+function drawAccount(){
+  const el = $('#acctCard'); if (!el) return;
+  const a = acct();
+  el.innerHTML = `<span class="label">Puffco account</span>` + (a && a.data
+    ? `${acctSummary()}<div class="shop-actions">${a.auth ? '<button class="btn small primary" id="acSync">Sync now</button>' : ''}<label class="btn small" for="acFile2" hidden>Import from file<input type="file" id="acFile2" accept=".har,application/json" hidden></label>${(store.sessions || []).some(x => !x.acct) && store.sessOwner !== acctId() ? '<button class="btn small" id="acClaim">Count this phone’s old sessions</button>' : ''}<button class="btn small ghost" id="acOut" style="color:var(--bad)">Sign out</button></div>`
+    : `<p class="muted" style="margin:0;font-size:14px">Link your Puffco account to bring in your saved moods, heat profiles and dab stats.</p>${acctFormHtml('ac')}`);
+}
+async function runAcct(prefix, fn){
+  const err = $('#' + prefix + 'Err'), go = $('#' + prefix + 'Go');
+  if (err) err.hidden = true; if (go){ go.disabled = true; go.textContent = 'Syncing…'; }
+  try { await fn(); return true; }
+  catch(e){ const m = e.message || 'Something went wrong.'; if (err){ err.textContent = m; err.hidden = false; } else toast(m); return false; }
+  finally { if (go && go.isConnected){ go.disabled = false; go.textContent = 'Sign in'; } }
+}
+function wireAcctForm(prefix, done){
+  const form = $('#' + prefix + 'Form'); if (!form) return;
+  form.addEventListener('submit', async e => { e.preventDefault(); if (await runAcct(prefix, () => puffcoSignIn($('#' + prefix + 'Email').value.trim(), $('#' + prefix + 'Pass').value))) done && done(); });
+  $('#' + prefix + 'File').addEventListener('change', async e => { const f = e.target.files[0]; if (!f) return; if (await runAcct(prefix, () => importHar(f))) done && done(); e.target.value = ''; });
+}
+function showWelcome(){
+  const el = $('#welcome'); if (!el) return;
+  el.innerHTML = `<div class="wl-card">
+      <div class="wl-icon"><svg viewBox="0 0 24 24"><path d="M12 3c2 3 5 5.5 5 10a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.2.3 1.8 1 2.7 2 3.2C11 8.5 11.3 5.6 12 3z"/></svg></div>
+      <h2>Welcome to Emberline</h2>
+      <p><b>Thank you for supporting Emberline!</b></p>
+      <p class="muted">Sign in with your Puffco account to sync your moods, heat profiles and stats. You can also do this later in Settings.</p>
+      ${acctFormHtml('wl')}
+      <button class="btn ghost" id="wlSkip" style="width:100%">Skip for now</button>
+    </div>`;
+  el.hidden = false;
+  const close = () => { el.hidden = true; store.onboarded = true; save(); };
+  wireAcctForm('wl', () => { close(); if (view === 'stats') drawStats(); });
+  $('#wlSkip').onclick = close;
+}
+/* ================= dab history (drill down: all → year → month → week → day) ================= */
+// Puffco only returns rolling windows, so every sync is merged into a local history that keeps growing.
+function dkey(d){ return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function mkey(d){ return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+function hist(){ if (!store.dabHist) store.dabHist = { days:{}, months:{}, years:{}, hours:{} }; return store.dabHist; }
+function ingestDabHistory(r){
+  const H = hist(), sumUnits = m => m.dates.map((_, i) => m.units.reduce((a, u) => a + (u.dabs[i] || 0), 0));
+  const take = (m, put) => { if (!m || !Array.isArray(m.dates) || !Array.isArray(m.units)) return; const v = sumUnits(m); m.dates.forEach((iso, i) => put(new Date(iso), v[i])); };
+  take(r.dabs, (d, n) => H.days[dkey(d)] = n);
+  take(r.dabs_w, (d, n) => H.days[dkey(d)] = n);
+  take(r.dabs_y, (d, n) => H.months[mkey(d)] = n);
+  take(r.dabs_all, (d, n) => H.years[d.getFullYear()] = n);
+  take(r.dabs_d, (d, n) => H.hours[dkey(d) + 'T' + String(d.getHours()).padStart(2, '0')] = n);
+  // keep the store small: hours for 60 days, days for 3 years
+  const cut = Date.now() - 60 * DAY; for (const k of Object.keys(H.hours)) if (new Date(k.slice(0, 10)).getTime() < cut) delete H.hours[k];
+}
+const localSess = () => (store.sessions || []);
+function dayCount(d){
+  const H = hist(), k = dkey(d);
+  if (d.getTime() > Date.now()) return 0;
+  const t0 = startOfDay(d.getTime()), n = localSess().filter(s => s.t >= t0 && s.t < t0 + DAY).length;
+  if (H.days[k] != null) return Math.max(H.days[k], n);
+  return n || (H.months[mkey(d)] != null ? null : 0);  // null = Puffco only has a monthly total for this period
+}
+function monthCount(y, m){
+  const H = hist(), k = y + '-' + String(m + 1).padStart(2, '0');
+  if (H.months[k] != null) return H.months[k];
+  let t = 0; const n = new Date(y, m + 1, 0).getDate(); for (let i = 1; i <= n; i++) t += dayCount(new Date(y, m, i)) || 0; return t;
+}
+function yearCount(y){ const H = hist(); if (H.years[y] != null) return H.years[y]; let t = 0; for (let m = 0; m < 12; m++) t += monthCount(y, m); return t; }
+function hourCount(d, h){
+  const H = hist(), k = dkey(d) + 'T' + String(h).padStart(2, '0');
+  if (H.hours[k] != null) return H.hours[k];
+  const t0 = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h).getTime();
+  return localSess().filter(s => s.t >= t0 && s.t < t0 + 3600000).length;
+}
+const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], WD = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function weekStart(d){ const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() - x.getDay()); return x; }
+let HV = { lvl:'month', at: Date.now() };   // levels: all, year, month, week, day
+function histModel(){
+  const at = new Date(HV.at), y = at.getFullYear(), m = at.getMonth(), bars = [];
+  let title = '', sub = '';
+  if (HV.lvl === 'all'){
+    const H = hist(), ys = new Set(Object.keys(H.years).map(Number));
+    Object.keys(H.months).forEach(k => ys.add(+k.slice(0, 4))); Object.keys(H.days).forEach(k => ys.add(+k.slice(0, 4))); localSess().forEach(s => ys.add(new Date(s.t).getFullYear()));
+    const now = new Date().getFullYear(); ys.add(now); const lo = Math.min(...ys, now - 4);
+    for (let yy = lo; yy <= now; yy++) bars.push({ v: yearCount(yy), l: String(yy), go:{ lvl:'year', at: new Date(yy, 0, 1).getTime() } });
+    title = 'All time'; sub = 'Tap a year';
+  } else if (HV.lvl === 'year'){
+    for (let mm = 0; mm < 12; mm++) bars.push({ v: monthCount(y, mm), l: MON[mm][0], go:{ lvl:'month', at: new Date(y, mm, 1).getTime() }, full: MON[mm] });
+    title = String(y); sub = 'Tap a month';
+  } else if (HV.lvl === 'month'){
+    const first = new Date(y, m, 1), last = new Date(y, m + 1, 0); let ws = weekStart(first), wi = 1, missing = false;
+    // older months: Puffco only gives a monthly total, so spread what's unknown evenly and mark it as an estimate
+    let known = 0, unknownDays = 0; for (let i = 1; i <= last.getDate(); i++){ const c = dayCount(new Date(y, m, i)); if (c == null) unknownDays++; else known += c; }
+    const perUnknown = unknownDays ? Math.max(0, monthCount(y, m) - known) / unknownDays : 0;
+    while (ws <= last){
+      let v = 0, est = false; for (let i = 0; i < 7; i++){ const d = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() + i); if (d.getMonth() !== m) continue; const c = dayCount(d); if (c == null){ missing = true; est = true; v += perUnknown; } else v += c; }
+      v = Math.round(v);
+      const a = new Date(Math.max(ws, first)), b = new Date(Math.min(new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() + 6), last));
+      bars.push({ v, est, l: `${a.getDate()}–${b.getDate()}`, go:{ lvl:'week', at: ws.getTime() }, full:`Week ${wi}` });
+      ws = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() + 7); wi++;
+    }
+    title = `${MON[m]} ${y}`; sub = missing ? `Faded bars are estimates. Puffco only keeps a monthly total this far back (${monthCount(y, m)}), and daily detail builds up from every sync.` : 'Tap a week';
+  } else if (HV.lvl === 'week'){
+    const ws = weekStart(at);
+    for (let i = 0; i < 7; i++){ const d = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() + i); bars.push({ v: dayCount(d) || 0, l: WD[i][0], go:{ lvl:'day', at: d.getTime() }, full: `${WD[i]} ${MON[d.getMonth()]} ${d.getDate()}` }); }
+    const we = new Date(ws.getFullYear(), ws.getMonth(), ws.getDate() + 6);
+    title = `${MON[ws.getMonth()]} ${ws.getDate()} – ${ws.getMonth() !== we.getMonth() ? MON[we.getMonth()] + ' ' : ''}${we.getDate()}`; sub = 'Tap a day';
+  } else {
+    for (let h = 0; h < 24; h++) bars.push({ v: hourCount(at, h), l: h % 6 ? '' : (h % 12 || 12) + (h < 12 ? 'a' : 'p'), full: `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}` });
+    title = `${WD[at.getDay()]}, ${MON[m]} ${at.getDate()}`; const tot = dayCount(at) || 0, hs = bars.reduce((a, b) => a + b.v, 0);
+    sub = tot > hs ? `${tot} dabs this day. Puffco only shares hour-by-hour for the last 24 hours, so earlier hours come from sessions Emberline saw.` : 'By hour';
+  }
+  let total = bars.reduce((a, b) => a + (b.v || 0), 0);
+  if (HV.lvl === 'day') total = Math.max(total, dayCount(at) || 0);
+  if (HV.lvl === 'month' && bars.some(b => b.est)) total = monthCount(y, m);
+  return { bars, title, sub, total };
+}
+function histStep(dir){
+  const d = new Date(HV.at);
+  if (HV.lvl === 'year') d.setFullYear(d.getFullYear() + dir);
+  else if (HV.lvl === 'month') d.setMonth(d.getMonth() + dir, 1);
+  else if (HV.lvl === 'week') d.setDate(d.getDate() + 7 * dir);
+  else if (HV.lvl === 'day') d.setDate(d.getDate() + dir);
+  if (d.getTime() > Date.now() + DAY) return;
+  HV.at = d.getTime(); drawHistory(dir);
+}
+function histBars(bars){
+  const W = 320, H = 170, L = 28, R = 6, T = 18, B = 22, iw = W - L - R, ih = H - T - B;
+  const max = niceMax(Math.max(...bars.map(b => b.v || 0), 1)), bw = iw / bars.length;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" class="hsvg" role="img"><defs><linearGradient id="goldBar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff2c4"/><stop offset=".4" stop-color="#f3cf6b"/><stop offset="1" stop-color="#9c6e1f"/></linearGradient></defs>`;
+  for (let i = 0; i <= 2; i++){ const yv = max * i / 2, yy = T + ih - ih * i / 2; svg += `<line x1="${L}" x2="${W - R}" y1="${yy}" y2="${yy}" class="hgrid"/><text x="${L - 6}" y="${yy + 4}" class="hax" text-anchor="end">${max < 4 ? +yv.toFixed(1) : Math.round(yv)}</text>`; }
+  bars.forEach((b, i) => {
+    const v = b.v || 0, bh = Math.max(v ? 3 : 0, ih * v / max), x = L + i * bw + bw * .18, w = bw * .64, yy = T + ih - bh;
+    svg += `<g class="hb${b.go ? ' tap' : ''}" data-hi="${i}" style="--d:${(i * 0.018).toFixed(3)}s"><rect x="${L + i * bw}" y="${T}" width="${bw}" height="${ih + B}" fill="transparent"/>
+      <rect class="hbar${b.est ? ' est' : ''}" x="${x.toFixed(1)}" y="${yy.toFixed(1)}" width="${w.toFixed(1)}" height="${bh.toFixed(1)}" rx="${Math.min(5, w / 2).toFixed(1)}"/>
+      ${v && bars.length <= 14 ? `<text x="${(x + w / 2).toFixed(1)}" y="${(yy - 4).toFixed(1)}" class="hval" text-anchor="middle">${v}</text>` : ''}
+      ${b.l ? `<text x="${(x + w / 2).toFixed(1)}" y="${H - 6}" class="hax" text-anchor="middle">${esc(b.l)}</text>` : ''}</g>`;
+  });
+  return svg + '</svg>';
+}
+function drawHistory(dir){ drawHistoryInner(dir); applyHaptics(); }
+function drawHistoryInner(dir){
+  const el = $('#histCard'); if (!el) return;
+  const md = histModel(), lv = ['day','week','month','year','all'];
+  const crumbs = []; const at = new Date(HV.at);
+  if (HV.lvl !== 'all') crumbs.push({ lvl:'all', t:'All' });
+  if (['month','week','day'].includes(HV.lvl)) crumbs.push({ lvl:'year', t: String(at.getFullYear()) });
+  if (['week','day'].includes(HV.lvl)) crumbs.push({ lvl:'month', t: MON[at.getMonth()] });
+  if (HV.lvl === 'day') crumbs.push({ lvl:'week', t:'Week' });
+  const n = md.bars.filter(b => b.v != null).length || 1;
+  el.innerHTML = `
+    <div class="seg hseg">${lv.map(l => `<button data-hl="${l}" aria-pressed="${HV.lvl === l}">${{ day:'Day', week:'Week', month:'Month', year:'Year', all:'All' }[l]}</button>`).join('')}</div>
+    <div class="hhead">
+      ${HV.lvl !== 'all' ? '<button class="hnav" data-hs="-1" aria-label="Previous">‹</button>' : '<span></span>'}
+      <div class="htitle"><div class="hcrumbs">${crumbs.map(c => `<button data-hc="${c.lvl}">${esc(c.t)}</button>`).join('<span>›</span>')}</div><b>${esc(md.title)}</b></div>
+      ${HV.lvl !== 'all' ? '<button class="hnav" data-hs="1" aria-label="Next">›</button>' : '<span></span>'}
+    </div>
+    <div class="hsum"><div><b>${md.total}</b><span>dabs</span></div><div><b>${(md.total / n).toFixed(HV.lvl === 'day' ? 1 : 1)}</b><span>avg per ${{ all:'year', year:'month', month:'week', week:'day', day:'hour' }[HV.lvl]}</span></div><div><b>${Math.max(...md.bars.map(b => b.v || 0))}</b><span>best</span></div></div>
+    <div class="hchart ${dir ? (dir > 0 ? 'in-r' : 'in-l') : 'in-z'}">${histBars(md.bars)}</div>
+    <p class="muted hsub">${esc(md.sub)}</p>`;
+  el._bars = md.bars;
+}
+function initHistory(){
+  const el = $('#histCard'); if (!el || el._wired) return; el._wired = true;
+  el.addEventListener('click', e => {
+    const l = e.target.closest('[data-hl]'); if (l){ HV = { lvl: l.dataset.hl, at: Date.now() }; drawHistory(); return; }
+    const c = e.target.closest('[data-hc]'); if (c){ HV.lvl = c.dataset.hc; drawHistory(-1); return; }
+    const st = e.target.closest('[data-hs]'); if (st){ histStep(+st.dataset.hs); return; }
+    const b = e.target.closest('.hb.tap'); if (b){ const g = el._bars[+b.dataset.hi].go; if (g){ HV = Object.assign({}, g); buzz(8); drawHistory(1); } }
+  });
+  // swipe left/right to move through time
+  let sx = null; el.addEventListener('touchstart', e => { sx = e.touches[0].clientX; }, { passive:true });
+  el.addEventListener('touchend', e => { if (sx == null) return; const dx = e.changedTouches[0].clientX - sx; sx = null; if (Math.abs(dx) > 50 && HV.lvl !== 'all') histStep(dx < 0 ? 1 : -1); }, { passive:true });
+}
+function showGoldLocked(){
+  const n = Math.max(0, blinkerCount()), el = $('#goldSheet');
+  el.innerHTML = `<div class="gs-card"><div class="gs-crest"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></div>
+    <span class="gs-kicker">Exclusive theme</span><h2 class="gs-title">Aurum</h2>
+    <p>Reserved for people who've hit <b>${GOLD_GOAL} blinkers</b>. A blinker is a single hit of 8 seconds or longer.</p>
+    <div class="gs-bar"><i style="width:${Math.min(100, n / GOLD_GOAL * 100).toFixed(1)}%"></i></div>
+    <div class="gs-count"><b>${n}</b> / ${GOLD_GOAL}</div>
+    <button class="btn gs-btn" id="gsClose">Keep pulling</button></div>`;
+  el.hidden = false; requestAnimationFrame(() => el.classList.add('open'));
+}
+function closeGoldSheet(){ const el = $('#goldSheet'); el.classList.remove('open'); setTimeout(() => { el.hidden = true; }, 350); }
+function goldUnlocked(){
+  store.goldUnlocked = true; save();
+  celebrate({ kind:'aurum', tier:4 }).then(goldUnlockedCard);
+}
+function goldUnlockedCard(){
+  const el = $('#goldSheet');
+  el.innerHTML = `<div class="gs-card gs-win"><div class="gs-flakes">${Array.from({ length: 28 }, (_, i) => `<i style="--x:${(Math.random() * 100).toFixed(0)}%;--d:${(Math.random() * 1.4).toFixed(2)}s;--s:${(0.6 + Math.random() * 0.9).toFixed(2)}"></i>`).join('')}</div>
+    <div class="gs-crest win"><svg viewBox="0 0 24 24"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/></svg></div>
+    <span class="gs-kicker">${GOLD_GOAL} blinkers</span><h2 class="gs-title">Aurum unlocked</h2>
+    <p>You earned it. Gold everything, from the gauge to the glass.</p>
+    <button class="btn gs-btn" id="gsApply">Wear it</button><button class="btn small ghost" id="gsClose">Later</button></div>`;
+  el.hidden = false; requestAnimationFrame(() => el.classList.add('open'));
+  buzz([60, 80, 60, 80, 120]);
+  if (S.mode === 'live'){ clearTimeout(previewTimer); ledJob(() => previewWrite('#ffc23a').catch(() => {})); previewTimer = setTimeout(() => ledJob(previewClear), 4000); }
+  if (view === 'set') drawSettings();
+}
+function goldSweep(){ const r = document.documentElement; r.classList.remove('gold-in'); void r.offsetWidth; r.classList.add('gold-in'); setTimeout(() => r.classList.remove('gold-in'), 1600); }
+// test tools for ranked rules: run rankFor on made-up sessions so real RP never changes
+function rankTest(k){
+  const T = new Date(); T.setDate(1); T.setHours(9, 0, 0, 0); const t0 = T.getTime(), fake = (t, hits) => ({ t, run:30, sc:1, hits });
+  if (k === 'unlock'){ store.testRankLock = 0; save(); drawRank(); toast('Fake lock cleared'); return; }
+  if (k === 'taxmath'){ // 160 RP of blinkers puts you in Blaze, then a plain 30s session and a 10-second-short one
+    const ss = [], taxed = x => Object.assign(x, { tax: RANK_TAX[rankTier(rankFor(ss, t0).rp).n] }); for (let i = 0; i < 27; i++) ss.push(taxed(fake(t0 + i * 60000, [9])));
+    const a = rankFor(ss, t0).rp, b = rankFor(ss.concat(taxed(fake(t0 + 28 * 60000, [3]))), t0).rp, c = rankFor(ss.concat(taxed({ t: t0 + 28 * 60000, run:25, sc:1, hits:[3] })), t0).rp;
+    toast(`${rankTier(a).n} ${a} RP · 30s session ${b - a > 0 ? '+' : ''}${b - a} · 25s session +${c - a}`); return; }
+  if (k === 'b2b'){ const r = rankFor([fake(t0, [3]), fake(t0 + 60000, [3])], t0); toast(`2 sessions 1 min apart: ${r.firsts + r.sessions} counted, ${r.rp} RP`); return; }
+  const ss = []; for (let i = 0; i < 200; i++) ss.push(fake(t0 + i * 60000, [9])); // 200 blinker sessions in one morning
+  const r = rankFor(ss, t0);
+  if (!r.lockedUntil){ toast(`No lock (${r.rp} RP). Something's wrong`); return; }
+  store.testRankLock = Date.now() + RANK_LOCK_MS; save(); drawRank();
+  rankLockAlert(store.testRankLock);
+  toast(`Locked at ${r.rp} RP, ${r.locked} sessions skipped`);
+}
+function drawTestTools(){
+  const el = $('#testTools'); if (!el) return;
+  if (!IS_TEST){ el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = `<span class="label">Test site tools</span>
+    <p class="muted" style="margin:0;font-size:13px">Only on the test link. Blinkers: <b>${blinkerCount()}</b>${goldUnlockedNow() ? ' · Aurum unlocked' : ''}</p>
+    <div class="shop-actions"><button class="btn small" data-tt="1">+1 blinker</button><button class="btn small" data-tt="10">+10</button><button class="btn small" data-tt="99">Set 99</button><button class="btn small" data-tt="reset">Reset</button></div>
+    <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
+    <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
+    <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
+    <div class="shop-actions"><button class="btn small" data-tt="pathnotiftry">Notifications test (details)</button><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="premthanks">Premium thank-you popup</button><button class="btn small" data-tt="supnudge">Support Emberline popup (non-Premium)</button><button class="btn small" data-tt="stripe">Premium popup as a non-subscriber (Stripe checkout)</button><button class="btn small" data-tt="sesscard">Session share card</button><button class="btn small" data-tt="appcam">iPhone app: camera color</button><button class="btn small" data-tt="appmusic">iPhone app: music sync</button><button class="btn small" data-tt="appfps">Frame rate (120 Hz check)</button><button class="btn small" data-tt="applive">iPhone app: Live Activity demo</button><button class="btn small" data-tt="appnotif">iPhone app: test notification</button><button class="btn small" data-tt="apphaptic">iPhone app: haptics</button><button class="btn small" data-tt="appbg">iPhone app: fake closed-app session</button><button class="btn small" data-tt="appmulti">iPhone app: 3 devices (demo)</button><button class="btn small" data-tt="appmultisess">iPhone app: fake session from another device</button><button class="btn small" data-tt="appsite">iPhone app: go back to the live app</button><button class="btn small" data-tt="hwsplash">Halloween startup</button><button class="btn small" data-tt="torch">Torch dab (Rich)</button><button class="btn small" data-tt="torchsim">Torch dab curve demo</button><button class="btn small" data-tt="premmoods">Premium moods (Lights tab)</button><button class="btn small" data-tt="gifpfp">GIF profile picture</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="seshnote">Group sesh Premium notification</button><button class="btn small" data-tt="ednote">Special edition moods Premium notification</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${(() => { try { return Object.keys(DFX_FX); } catch(e){ return []; } })().map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+}
+function drawAccountStats(){
+  const el = $('#acctStats'); if (!el) return;
+  const a = acct(), s = a && a.data && a.data.stats;
+  if (!s || (!s.month && !s.lifetimeDabs)){ el.hidden = true; return; }
+  el.hidden = false;
+  const days = r => r ? Math.round((new Date(r.end) - new Date(r.start)) / 86400000) + 1 : null;
+  const t = c => c == null ? '—' : (store.unit === 'F' ? Math.round(c2f(c)) + '°F' : Math.round(c) + '°C');
+  const hr = h => h == null ? '—' : (h % 12 || 12) + (h < 12 ? 'am' : 'pm');
+  el.innerHTML = `<div class="row between"><span class="label">From your Puffco account</span><span class="muted mono" style="font-size:12px">${a.source === 'file' ? 'imported' : 'synced'}</span></div>
+    <div class="tiles">
+      ${tile('Lifetime', s.lifetimeDabs ?? '—', 'dabs on your account')}
+      ${tile('Streak', days(s.streak) ?? s.dailyStreak ?? '—', `days · best ${days(s.bestStreak) ?? '—'}`)}
+      ${tile('Avg temp', t(s.avgTempC ?? s.popularTempC), 'last 90 days')}
+      ${tile('Avg session', s.avgSession ? Math.round(s.avgSession) + 's' : '—', `busiest at ${hr(s.topHour)}`)}
+    </div>
+    ${s.month ? `<div class="chart" style="margin-top:12px"><div class="row between"><span class="label">This month</span><span class="muted mono" style="font-size:12px">${s.month.total ?? ''} dabs</span></div><div style="margin-top:8px">${barSVG(s.month.dabs, s.month.dates.map(d => new Date(d).getDate()), { every:5 })}</div></div>` : ''}
+    ${s.hourHist ? `<div class="chart" style="margin-top:12px"><span class="label">Time of day (account)</span><div style="margin-top:8px">${barSVG([0,3,6,9,12,15,18,21].map(h => s.hourHist.slice(h, h + 3).reduce((x, y) => x + y, 0)), ['12a','3a','6a','9a','12p','3p','6p','9p'], { hiLast:false })}</div></div>` : ''}
+    ${s.milestone ? `<div style="margin-top:12px"><div class="row between"><span class="muted" style="font-size:13px">Next milestone: ${s.milestone.next}</span><span class="mono" style="font-size:13px">${Math.round(s.milestone.progress * 100)}%</span></div><div class="meter" style="margin-top:6px"><b style="width:${(s.milestone.progress * 100).toFixed(1)}%;background:var(--accent)"></b></div></div>` : ''}`;
+}
+
+/* ================= gauge (profile colored, smoothed) ================= */
+let curPc = '';
+function setProfileColor(hex, pal){
+  if (document.documentElement.hasAttribute('data-gold')){ hex = '#e9bb4f'; pal = ['#fff0b8']; }
+  const second = (pal || []).filter(c => c !== hex).sort((a, b) => vivid(b) - vivid(a))[0] || hex;
+  const key = hex + second; if (key === curPc) return; curPc = key;
+  const root = document.documentElement, wrap = $('#gWrap');
+  const [r,g,b] = hexBytes(hex), lum = (0.299*r + 0.587*g + 0.114*b) / 255;
+  [wrap, root].forEach(el => { el.style.setProperty('--pc', hex); el.style.setProperty('--pc2', second); el.style.setProperty('--pc-ink', lum > .6 ? '#15121a' : '#ffffff'); });
+  $('#gStop0').setAttribute('stop-color', second); $('#gStop1').setAttribute('stop-color', hex);
+}
+const G = { frac:0, temp:22, glow:0, shown:null };
+function liveElapsed(){ const e = +S.elapsed || 0; if (S.mode !== 'live' || S.state !== 8 || !S.elapsedAt) return e; return e + Math.min(1.5, (performance.now() - S.elapsedAt) / 1000); } // glide between Bluetooth reads
+const ARC = 433.5, R = 92, CX = 110, CY = 110;
+function gaugeTarget(){
+  if (S.mode !== 'live') return 0;
+  const p = S.profiles[S.active], tgt = p.tempC;
+  if (S.state === 8 && S.total > 0) return clamp((S.total - liveElapsed()) / S.total, 0, 1);  // ready: ring counts down
+  return clamp((S.tempC - 20) / (tgt - 20), 0, 1);                                         // heating / cooling: ring shows temp
+}
+function gaugeLoop(){
+  if (view === 'home' && !document.hidden){
+    const tf = gaugeTarget(), k = reduce ? 1 : 0.085;
+    if (S.mode !== 'live') G.temp = S.tempC;
+    G.frac += (tf - G.frac) * k;
+    G.temp += (S.tempC - G.temp) * (reduce ? 1 : 0.12);
+    const glowTarget = S.state === 7 ? .75 : S.state === 8 ? 1 : 0;
+    G.glow += (glowTarget - G.glow) * 0.05;
+    // only touch the page when something moved: rewriting the gauge 60 times a second, even standing still, heats the phone
+    const f = $('#gFill'), off = (ARC * (1 - G.frac)).toFixed(1), ign = f.classList.contains('ignite');
+    if (off !== G.off || ign !== G.ign){
+      G.off = off; G.ign = ign;
+      if (!ign) f.setAttribute('stroke-dashoffset', off);
+      $('#gHalo').setAttribute('stroke-dashoffset', off);
+      const a = (135 + 270 * G.frac) * Math.PI / 180, hx = (CX + R * Math.cos(a)).toFixed(1), hy = (CY + R * Math.sin(a)).toFixed(1);
+      $('#gHead').setAttribute('cx', hx); $('#gHead').setAttribute('cy', hy);
+      $('#gHeadGlow').setAttribute('cx', hx); $('#gHeadGlow').setAttribute('cy', hy);
+    }
+    const gl = G.glow.toFixed(2); if (gl !== G.gl){ G.gl = gl; $('#gWrap').style.setProperty('--glow', gl); }
+    const t = S.mode === 'live' ? fmtT(G.temp) : '--';
+    if (t !== G.shown){ G.shown = t; $('#gTemp').innerHTML = `${t}<sup>${U()}</sup>`; }
+    if (store.ui === 'cockpit') updateCluster();
+  }
+  requestAnimationFrame(gaugeLoop);
+}
+
+/* ================= motion helpers ================= */
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function countUp(root){
+  if (reduce) return;
+  root.querySelectorAll('.tile .n').forEach(el => {
+    const m = el.textContent.match(/^(-?\d+(?:\.\d+)?)(.*)$/); if (!m) return;
+    const end = parseFloat(m[1]), dp = (m[1].split('.')[1] || '').length, suf = m[2], t0 = performance.now();
+    const step = t => { const k = Math.min(1, (t - t0) / 900), e = 1 - Math.pow(1 - k, 4);
+      if (!el.isConnected) return; el.textContent = (end * e).toFixed(dp) + suf; if (k < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  });
+}
+let lastStateName = '';
+const _drawHome = drawHome;
+drawHome = function(){
+  _drawHome();
+  const chip = $('#gState');
+  if (chip.textContent !== lastStateName){ if (lastStateName) { chip.classList.remove('pop'); void chip.offsetWidth; chip.classList.add('pop'); } lastStateName = chip.textContent; }
+};
+function ignite(){
+  if (reduce) return;
+  const f = $('#gFill'); f.style.setProperty('--settle', (ARC * (1 - gaugeTarget())).toFixed(1));
+  f.classList.add('ignite'); setTimeout(() => f.classList.remove('ignite'), 1500);
+}
+
+/* ================= greeting ================= */
+const JOKES = [
+  "Rosin to the occasion today.",
+  "Low temps, high spirits.",
+  "Terps before jerks.",
+  "Wax on, wax off. Mr. Miyagi would be proud.",
+  "Stay lifted, not stressed.",
+  "Kief it real out there.",
+  "Don't worry, bud. It's all good.",
+  "Time flies when you're having buds.",
+  "Shatter some expectations today.",
+  "May your rips be smooth and your cleans be few.",
+  "Your Peak is ready. Question is, are you?",
+  "Dab responsibly. Clean regularly. You know the drill.",
+  "Hash tag blessed.",
+  "Keep calm and dab on.",
+  "You're one fat cap away from greatness.",
+  "Remember to hydrate between hits.",
+  "Life's too short for charred terps.",
+  "Somewhere it's 4:20. Probably here soon.",
+  "Q-tips are cheaper than a new chamber.",
+  "Let's get this bread. And maybe some snacks."
+];
+const MORNING = ["Wake and bake? More like wake and take.", "Coffee first. Or don't. No judgment.", "Rise and grind. The rosin, that is."];
+const LATE = ["Late night sesh. Drink some water.", "The munchies are calling. Answer wisely.", "Couch lock loading…"];
+function greeting(){
+  const d = new Date(), h = d.getHours(), m = d.getMinutes(), hm = h % 12 === 4 && m === 20, sm = h % 12 === 7 && m === 10;
+  const name = ((store.lb && store.lb.joined && store.lb.username) || '').trim(); // greet by leaderboard username
+  const part = h >= 5 && h < 12 ? 'Good morning' : h >= 12 && h < 17 ? 'Good afternoon' : h >= 17 && h < 22 ? 'Good evening' : 'Up late';
+  let msg;
+  if (hm) msg = "It's 4:20. You know exactly what to do.";
+  else if (sm) msg = "It's 7:10. Flip it upside down: OIL. Coincidence? Nope.";
+  else {
+    const pool = JOKES.concat(h >= 5 && h < 11 ? MORNING : [], h >= 22 || h < 5 ? LATE : []);
+    const last = (() => { try { return +sessionStorage.getItem('emberline.joke'); } catch(e){ return -1; } })();
+    let i = Math.floor(Math.random() * pool.length); if (i === last) i = (i + 1) % pool.length;
+    try { sessionStorage.setItem('emberline.joke', i); } catch(e){}
+    msg = pool[i];
+  }
+  const title = (hm || sm) ? `Happy ${hm ? '4:20' : '7:10'}${name ? ', ' + name : ''}` : `${part}${name ? ', ' + name : ''}`;
+  return { title, msg, time: d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}) };
+}
+function showGreeting(){
+  if (store.greet === false) return;
+  const g = $('#greet'), { title, msg, time } = greeting();
+  greetOpen = true;
+  $('#greetTitle').textContent = title; $('#greetMsg').textContent = msg; $('#greetTime').textContent = time;
+  let timer, remaining = 6000, started = 0, y0 = null, dy = 0;
+  const hide = () => { clearTimeout(timer); g.classList.remove('show','drag'); g.style.transform = ''; g.classList.add('gone'); setTimeout(() => { g.hidden = true; greetOpen = false; if (toastLater){ const m = toastLater; toastLater = null; toast(m); } }, 600); };
+  const arm = ms => { started = Date.now(); clearTimeout(timer); timer = setTimeout(hide, ms); };
+  requestAnimationFrame(() => requestAnimationFrame(() => { g.classList.add('show'); arm(remaining); }));
+  g.addEventListener('pointerdown', e => { y0 = e.clientY; dy = 0; remaining -= Date.now() - started; clearTimeout(timer); g.classList.add('drag'); g.setPointerCapture(e.pointerId); });
+  g.addEventListener('pointermove', e => {
+    if (y0 == null) return; dy = e.clientY - y0;
+    const d = dy < 0 ? dy : Math.pow(dy, .7);
+    g.style.transform = `translate3d(-50%, ${d}px, 0) scale(${1 - Math.min(Math.abs(dy), 120) / 1200})`;
+    g.style.opacity = dy < 0 ? String(Math.max(.2, 1 + dy / 160)) : '1';
+  });
+  const end = () => {
+    if (y0 == null) return; y0 = null; g.classList.remove('drag'); g.style.opacity = '';
+    if (dy < -36){ hide(); return; }
+    g.style.transform = ''; if (Math.abs(dy) < 6){ hide(); return; }
+    arm(Math.max(1200, remaining));
+  };
+  g.addEventListener('pointerup', end); g.addEventListener('pointercancel', end);
+}
+
+// moods
+$('#moodEditor').addEventListener('click', e => {
+  if (e.target.id === 'meZones'){ const prev = ed; openMoodEditor('zones'); if (prev && prev.tag !== ZONE_TAG){ ed.back = prev; drawMoodEditor(); } return; } // Close in zones goes back to New mood
+  if (!ed || ed.tag !== ZONE_TAG) return;
+  const zs = e.target.closest('[data-zs]'), fx = e.target.closest('[data-zfx]'), zm = e.target.closest('[data-zm]');
+  if (zs){ ed.zSel = +zs.dataset.zs; drawMoodEditor(); return; }
+  if (fx){ ed.meta.zones[ed.zSel].fx = fx.dataset.zfx; drawMoodEditor(); return; }
+  if (zm){ ed.meta.motion = zm.dataset.zm; drawMoodEditor(); return; }
+  if (e.target.id === 'zAll'){ const z = ed.meta.zones[ed.zSel]; ed.meta.zones.forEach(x => { x.c = z.c; x.c2 = z.c2; x.fx = z.fx; x.sp = z.sp; }); zPh.length = 0; drawMoodEditor(); return; }
+  const g = e.target.closest('.zpeak [data-z]'); if (g){ ed.zSel = +g.dataset.z; drawMoodEditor(); }
+}, true);
+$('#moodEditor').addEventListener('input', e => {
+  if (!ed || ed.tag !== ZONE_TAG) return;
+  if (e.target.dataset.zc){ ed.meta.zones[ed.zSel][e.target.dataset.zc] = e.target.value; e.target.parentElement.style.background = e.target.value;
+    const b = document.querySelector(`#moodEditor [data-zs="${ed.zSel}"] i`); if (b && e.target.dataset.zc === 'c') b.style.background = e.target.value; }
+});
+$('#moodEditor').addEventListener('change', e => {
+  if (!ed || ed.tag !== ZONE_TAG) return;
+
+});
+$('#bLightsBack').onclick = () => show('prof');
+{ const m = $('#metrics'); if (m){ try { m.open = !!store.metricsOpen; } catch(e){}
+  m.addEventListener('toggle', () => { store.metricsOpen = m.open; save(); if (m.open && view === 'stats'){ drawStats.sig = null; drawStats(); } }); } }
+document.addEventListener('click', e => { const b = e.target.closest('[data-golights]'); if (!b) return; moodTarget = +b.dataset.golights; show('lights'); drawMoods(); });
+$('#goldSheet').addEventListener('click', e => {
+  if (e.target.id === 'gsApply'){ store.theme = 'gold'; save(); applyTheme(); goldSweep(); closeGoldSheet(); if (view === 'set') drawSettings(); return; }
+  if (e.target.id === 'gsClose' || e.target === e.currentTarget) closeGoldSheet();
+});
+$('#testTools').addEventListener('click', e => {
+  const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
+  if (k === 'taxnote'){ rankTaxNotice(true); return; }
+  if (k === 'vr'){ vrOpen(); return; }
+  if (k === 'dprof'){ if (!needLive('load the 1v1 profile')) return; duelLoadProf(DUEL_PUBLIC, true).then(() => toast('1v1 profile on P1: ' + profTxt(DUEL_PUBLIC))); return; }
+  if (k === 'dprofback'){ if (!duelBack()) return toast('No saved Profile 1 from a 1v1'); duelRestoreProf(); return; }
+  if (k === 'dinvite'){ lobbyOn(); lobbyInv({ id:'test-friend', to: lobbyId(), n:'TestFriend', c:'#2bd9ff', code: rtCode(), r: { min:2, win:180, cap:600, prof:{ tempF:550, time:90, vapor:1, boostF:5, boostT:20 } } }); return; }
+  if (k === 'dqbot'){ duelSheet({ queue:true }); setTimeout(() => { if (!LOBBY.q) return; queueLeave(); duelStart('host', 'BOT', Object.assign({}, QUEUE_RULES), true); DUEL.auto = true; toast('Match found: Ember Bot'); duelGo(); }, 3000); return; }
+  if (k === 'dfriends'){ const me = LB.me || lbStore().meCache || (LB.me = { id:'me-test', username:'You' }); if (!me.username) me.username = 'You';
+    SOC.loaded = true; SOC.followingRows = [{ id:'f1', username:'Kayne_ken' }, { id:'f2', username:'bmo' }, { id:'f3', username:'NotFollowingBack' }]; SOC.followerSet = new Set(['f1', 'f2']);
+    LOBBY.online.set('f1', { at: Date.now(), busy:false }); LOBBY.online.set('f2', { at: Date.now(), busy:true }); duelSheet({ queue:false }); return; }
+  if (k === 'vrdemo'){ vrOpen({ demo:true }); return; }
+  if (k === 'vrsim'){ location.href = 'vrsim.html'; return; }
+  if (k === 'vr3d'){ location.href = 'vr3d.html'; return; }
+  if (k === 'ptmode'){ if (!$('#vrp')) vrOpen(); setTimeout(ptIntro, 300); return; }
+  if (k === 'dueldemo'){ duelDemo(); return; }
+  if (k === 'dfxall'){ dfxTryAll(); return; }
+  if (k.startsWith('dfx:')){ const fx = DFX_FX[k.slice(4)]; if (S.mode !== 'live') return toast(`Connect your ${devWord()} first`); if (store.dfx === false) return toast('Turn Puffco effects on first (1v1 screen)'); toast(`${fx.n}: ${fx.why}`); dfx(k.slice(4), true); return; }
+  if (k === 'dfxstop'){ dfxStop(); toast('Effect stopped'); return; }
+  if (k === 'micchk'){ vcMicCheck(); return; }
+  if (k === 'sesh'){ seshSheet(); return; }
+  if (k === 'gifpfp'){ if (!isPremium()) return toast('Turn on Act as Premium first'); lbPicFile.click(); return; } // pick a GIF, then Save profile in Social
+  if (k === 'premthanks'){ premThanksCheck(true); return; }
+  if (k === 'supnudge'){ supportNudge(true); return; }
+  if (k === 'stripe'){ premInfo(true); return; } // as someone without Premium, with the card checkout
+  if (k === 'sesscard'){ sessionCardPng().then(png => { if (!png) return toast('No session yet'); const el = document.createElement('div'); el.className = 'egg on'; el.style.zIndex = 300; el.innerHTML = `<div class="egg-card" style="gap:10px"><img src="${png}" style="width:100%;border-radius:16px"><div class="row" style="gap:8px"><button class="btn primary" data-sesshare>Share</button><button class="btn" data-x>Close</button></div></div>`; el.addEventListener('click', ev => { if (ev.target === el || ev.target.closest('[data-x]') || ev.target.closest('[data-sesshare]')) el.remove(); }); document.body.appendChild(el); }); return; }
+  if (k === 'appcam'){ if (!IS_APP) return toast('Only in the iPhone app'); window.EMBER_APP.post('camera', {}); return; }
+  if (k === 'appmulti'){ // what the Session screen and the device menu show with 2 more devices connected
+    const now = Date.now(), ds = devList(); const fake = [{ id: (ds[1] && ds[1].id) || 'demo-2', name:'Peak 2', series:'peach' }, { id: (ds[2] && ds[2].id) || 'demo-3', name:'Proxy', series:'toad' }];
+    fake.forEach(f => { if (!sideDev(f.id)) ds.push({ id:f.id, name:f.name, label:f.name, series:f.series, last:0 }); });
+    window.emberSide(JSON.stringify({ type:'status', devs:[{ id:fake[0].id, conn:true, st:8, hits:2, best:6.1, readyAt:now - 20000, endsAt:now + 45000 }, { id:fake[1].id, conn:true, st:5, hits:0 }] }));
+    if (!IS_APP){ const el = $('#sideDevs'); if (el){ el.hidden = false; el.innerHTML = Object.values(SIDE.st).map(x => { const d = sideDev(x.id) || {}; return `<button class="sd-row${x.st === 8 ? ' hot' : ''}" data-sdsw="${esc(x.id)}"><img alt="" src="${d.series === 'toad' ? DEV_IMG.proxy : DEV_IMG.peak}"><span class="sd-t"><b>${esc(d.label || d.name)}</b><small>${esc(sideWord(x))}</small></span><span class="sd-go">Switch</span></button>`; }).join(''); } }
+    show('home'); toast('Demo: 2 more devices on the Session screen'); return; }
+  if (k === 'appmultisess'){ const t = Date.now() - 90000, ds = devList(); let d = ds.find(x => x.id !== currentDevId()); if (!d){ d = { id:'demo-2', name:'Peak 2', label:'Peak 2', series:'peach', last:0 }; ds.push(d); save(); }
+    window.emberSide(JSON.stringify({ type:'sessions', sessions:[{ dev:d.id, t, p:0, readyAt:t + 25000, end:t + 85000, run:60, setF:520, hits:[9.4, 3.2], hitAt:[6, 30] }] })); return; }
+  if (k === 'appsite'){ if (!IS_APP) return toast('Only in the iPhone app'); window.EMBER_APP.post('site', { test:false }); return; }
+  if (k === 'appmusic'){ if (!IS_APP) return toast('Only in the iPhone app'); musicToggle(); return; }
+  if (k === 'appfps'){ let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 1000) requestAnimationFrame(f); else toast(`${n} fps${n > 100 ? ' · 120 Hz is on' : n > 70 ? '' : ' · 60 Hz'}`); }; requestAnimationFrame(f); return; }
+  if (k === 'applive' || k === 'appnotif' || k === 'apphaptic'){
+    if (!IS_APP) return toast('Only in the iPhone app');
+    const post = (op, a) => window.EMBER_APP.post(op, a);
+    if (k === 'appnotif'){ post('notify', { title:'Ready to dab', body:'This is what Emberline sends when your Peak is ready and the app is closed.' }); return; }
+    if (k === 'apphaptic'){ ['light', 'medium', 'heavy', 'success'].forEach((x, i) => setTimeout(() => post('haptic', { kind:x }), i * 450)); return; }
+    const p = S.profiles[S.active] || {}, base = { name: p.name || 'Session', color: /^#[0-9a-f]{6}$/i.test(p.color || '') ? p.color : '#8a2bff', targetF: 545 }, t = Date.now();
+    const at = (ms, st) => setTimeout(() => post('live', Object.assign({}, base, st)), ms);
+    at(0, { phase:'heat', tempF:380, hits:0, lastHit:0, best:0 }); at(3000, { phase:'heat', tempF:500, hits:0, lastHit:0, best:0 });
+    at(6000, { phase:'ready', tempF:545, readyAt:t + 6000, endsAt:t + 51000, hits:0, lastHit:0, best:0 });
+    at(12000, { phase:'ready', tempF:540, readyAt:t + 6000, endsAt:t + 51000, hits:1, lastHit:9.2, best:9.2, blinker:true });
+    at(20000, { phase:'ready', tempF:538, readyAt:t + 6000, endsAt:t + 51000, hits:2, lastHit:3.1, best:9.2 });
+    at(26000, { phase:'done', tempF:530, hits:2, lastHit:3.1, best:9.2 });
+    toast('Lock your phone to see it on the lock screen'); return;
+  }
+  if (k === 'appbg'){ const t = Date.now() - 120000; window.emberBgPause(); window.emberBgResume(JSON.stringify({ owned:true, sessions:[{ t, p:S.active, readyAt:t + 25000, end:t + 85000, run:60, hits:[9.2, 3.1], hitAt:[14, 30], setF:Math.round(c2f((S.profiles[S.active] || {}).tempC || 260)) }] })); return; } // what the app hands back after a session with the app closed
+  if (k === 'hwsplash'){ location.href = location.pathname + (location.search ? location.search + '&' : '?') + 'halloween' + location.hash; return; } // reload with the Halloween splash
+  if (k === 'torch' || k === 'torchsim'){ if (!torchOk()) return toast('Turn on Act as rich first'); show('home'); drawTorch(); if (k === 'torchsim'){ TORCH.sim = performance.now(); TORCH.te = 0; } setTimeout(() => { const c = $('#torchCard'); if (c) c.scrollIntoView({ block:'center' }); }, 300); return; }
+  if (k === 'premmoods'){ show('lights'); setTimeout(() => { const g = [...document.querySelectorAll('#moodLib .label')].find(x => /Premium moods/.test(x.textContent)); if (g) g.scrollIntoView({ block:'center' }); }, 300); return; }
+  if (k === 'ednote'){ edPremNote(true); return; }
+  if (k === 'seshnote'){ seshPremNote(true); return; }
+  if (k === 'seshdemo'){ seshStart(null, true); seshSheet(); return; }
+  if (k === 'pathnotif'){ pathNotifTry(); return; }
+  if (k === 'pathnotiftry'){ pathNotifTry(); return; }
+  if (k === 'notesnow'){ notesLoad(true).then(() => toast(`${NOTE.list.length} notifications, ${NOTE.unread} unread, ${NOTE.phones} phones`)); return; }
+  if (k === 'notesfake'){ NOTE.list.unshift({ id: 'f' + Date.now(), kind:'invite', from_id:'', from_name:'Test Friend', data:{ code:'ABC123', bet:10 }, read:false, created_at: new Date().toISOString() }); NOTE.unread++; notesBell(); notesOpen(); return; }
+  if (k === 'premme'){ store.testPrem = !store.testPrem; save(); b.textContent = store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'; drawPremCard(); try { drawSocial(); drawLeaderboard(); } catch(e){} toast(store.testPrem ? 'Premium on (this phone only, not saved to the server)' : 'Premium off'); return; }
+  if (k === 'preminfo'){ premInfo(); return; }
+  if (k === 'dblpop'){ dblPop(true); return; }
+  if (k === 'dblnote'){ if (!dblNow()) return toast('Double RP isn’t on right now'); dblNote(); return; }
+  if (k === 'dfxpv'){ store.dfxPv = !store.dfxPv; save(); b.textContent = '1v1 effects while heating: ' + (store.dfxPv ? 'preview channel' : 'live heat light'); return; }
+  if (k === 'dcap'){ store.duelCapSeen = ''; duelCapPop(); return; }
+  if (k === 'dcapfill'){ const full = duelDayNet() >= DUEL_DAY_MAX; store.duelDay = { d: dayKey(), id: acctId() || 'local', net: full ? 0 : DUEL_DAY_MAX }; store.duelCapSeen = ''; save(); toast(full ? 'Today’s 1v1 limit reset' : 'Today’s 1v1 limit filled (no RP added)'); return; }
+  if (k === 'duelbot' || k === 'duelfast'){ duelSheet(); duelStart('host', 'BOT', k === 'duelfast' ? { min:1, win:60, cap:300 } : duelRules(), true); return; }
+  if (k === 'rtcheck'){ const r = new Relay('ember-check-' + rtCode()), t0 = Date.now(); let done = false; toast('Checking the relay…');
+    r.on('open', () => { done = true; toast(`Relay works (${Date.now() - t0} ms)`); r.close(); }).on('error', p => { done = true; toast('Relay refused: ' + JSON.stringify(p || {}).slice(0, 80)); r.close(); }).connect();
+    setTimeout(() => { if (!done){ r.close(); toast('Relay didn’t answer in 8s. Realtime may be off in Supabase'); } }, 8000); return; }
+  if (k === 'hothead'){ hotHeadSheet(); return; }
+  if (k === 'ishop'){ itemShop(); return; }
+  if (k === 'pass'){ itemShop('pass'); return; }
+  if (k === 'passxp'){ const p = passState(); p.done['test:' + Date.now()] = 3000; save(); passRefresh(true); itemShop('pass'); return; }
+  if (k === 'sparks'){ store.sparks = sparks() + 1000; save(); toast(`Sparks: ${sparks()}`); return; }
+  if (k === 'ownall'){ store.testAll = store.testAll === false; save(); toast(store.testAll ? 'Own everything: on' : 'Own everything: off. Buy with Sparks to unlock'); return; }
+  if (k === 'passreset'){ if (!confirm('Reset your pass progress, Sparks and earned items?')) return; store.pass = null; store.sparks = 0; store.frames = []; store.banners = []; store.frame = null; store.banner = null; save(); toast('Pass, Sparks and items reset'); return; }
+  if (k === 'locker'){ itemShop('locker'); return; }
+  if (k === 'spotfake'){ store.spot = Object.assign({}, store.spot, { refresh: store.spot && store.spot.refresh || 'fake' }); SPOT.now = { name:'Gods Plan', by:'Drake', art:'', playing:true }; show('home'); drawSpot(); toast('Fake song shown (Rich only). Disconnect Spotify in Settings to clear'); return; }
+  if (k === 'squad'){ const me = LB.me || lbStore().meCache; if (me){ me.invites = 2; me.invites_joined = 3; if (!me.referred_by) me.created_at = new Date().toISOString(); } squadSheet(); if (!me) toast('Make a ranked profile first to see your link'); return; }
+  if (k === 'squadref'){ toast(`Your link: ${inviteUrl()} · Saved invite from a link: ${store.inviteRef || 'none'}`); return; }
+  if (k === 'hhmath'){ const s = (hits, hitAt) => hotHeadTry({ target:644, vapor:1.5, run:120, hits, hitAt }); const a = s([9,9,9,9,9], [20,40,60,80,100]), b = s([9,9,9,9,9], [20,40,60,80,70]);
+    toast(`Last blinker at 100s of 120: ${a.ok ? 'counts' : 'no'} · at 70s: ${b.ok ? 'counts' : 'too early'}`); return; }
+  if (k === 'lowtemp'){ const t0 = Date.now(), one = target => rankFor([{ t: t0, run: 30, sc: 1, hits: [9], target }], t0).rp; toast(`Set to 440°F: ${one(440)} RP · 450°F: ${one(450)} RP · 500°F: ${one(500)} RP`); return; }
+  if (k === 'frlb'){ const m = lbMonth(); LB.me = LB.me || { id:'me-test', username:'You', rp:140, tier:'Flame', month:m }; // made-up friends to see the dropdown
+    SOC.loaded = true; SOC.followingRows = [{ id:'f1', username:'Kayne_ken', rp:912, tier:'Champion', month:m }, { id:'f2', username:'bmo', rp:212, tier:'Blaze', month:m }, { id:'f3', username:'NotFollowingBack', rp:999, tier:'Champion', month:m }];
+    SOC.followerSet = new Set(['f1', 'f2']); store.frOpen = true; show('social'); setTimeout(socDrawFriends, 300); return; }
+  if (k === 'newmood'){ show('lights'); toast('July 2026 Drop is at the end of Exclusive moods (Peak only)'); return; }
+  if (k === 'pstats'){ openPlayer({ id:'test-player', username:'TestPlayer', tier:'Blaze', rp:212, blinkers:37, created_at:'2026-10-05T23:08:00Z', stats:{ sessions:41, hits:96, best:12.4, days:6, blAll:37 } }); setTimeout(() => { const n = document.querySelector('#lbProfile [data-pstats]'); if (n) n.click(); }, 300); return; } // a made-up profile with stats open
+  if (k === 'champbl'){ const t0 = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 9).getTime(), one = blk => rankFor([{ t: t0, run: 30, sc: 1, hits: [9, 11.5], blk }], t0).blinkers;
+    toast(`Hits 9s + 11.5s: ${one()} blinkers normally, ${one(CHAMP_BLINK)} in Champion`); return; }
+  if (k === 'asrich'){ store.testRich = !store.testRich; save(); applyWall(); drawRichWall(); drawTestTools(); toast(store.testRich ? 'Acting as rich: wallpaper is in Settings' : 'Back to you'); return; }
+  if (k === 'fstoggle'){ fsToggle(); return; } // what rich's triple tap on Settings does
+  if (k === 'lbmoves'){ const rows = LB.rows || []; if (!rows.length){ toast('Open Social first so the leaderboard loads'); return; } const st = store.lbPos, base = {}; rows.forEach((r, i) => { base[r.id] = Math.max(1, i + 1 + [2, -1, 0, 3, -2][i % 5]); }); st.base = base; save(); show('social'); setTimeout(drawLeaderboard, 300); toast('Fake moves on (real ones come back next visit)'); return; } // only changes the arrows, not RP
+  if (k === 'patherr'){ show('home'); setConnUI('error', bleError(new TypeError("undefined is not an object (evaluating 'window.webkit.messageHandlers.bluetooth.postMessage')"), 'request')); return; }
+  if (k.startsWith('tax:')){ show('home'); setTimeout(() => taxPop(k.slice(4)), 350); return; } // the animation, on the gauge
+  if (k === 'lock' || k === 'unlock' || k === 'b2b' || k === 'taxmath'){ rankTest(k); drawTestTools(); return; }
+  const real = blinkerCount() - (store.blinkerBonus || 0);
+  if (k === 'reset'){ store.blinkerBonus = -real; store.goldUnlocked = false; if (store.theme === 'gold') store.theme = 'orchid'; save(); applyTheme(); }
+  else if (k === '99'){ store.blinkerBonus = 99 - real; save(); }
+  else { const before = blinkerCount(); store.blinkerBonus = (store.blinkerBonus || 0) + (+k); save(); const now = blinkerCount();
+    if (before < GOLD_GOAL && now >= GOLD_GOAL && !store.goldUnlocked) goldUnlocked(); else toast(`${now} / ${GOLD_GOAL} blinkers`); }
+  save(); drawTestTools(); drawSettings();
+});
+$('#devSw').addEventListener('click', e => { e.stopPropagation(); toggleDevMenu(); });
+$('#devMenu').addEventListener('click', e => {
+  e.stopPropagation();
+  const d = e.target.closest('[data-dev]'), f = e.target.closest('[data-forget]');
+  if (f){ const list = devList(), x = list[+f.dataset.forget]; list.splice(+f.dataset.forget, 1);
+    if (x && x.id === store.lastDeviceId){ appAuto(false); const n = list[0]; store.lastDeviceId = n ? n.id : null; store.lastDeviceName = n ? n.name : null; }
+    save(); drawDevMenu(); toast(`Forgot ${x ? (x.label || x.name) : 'device'}`); return; }
+  if (d){ switchToDevice(devList()[+d.dataset.dev]); return; }
+  if (e.target.closest('#dmAdd')){ addDevice(); return; }
+  if (e.target.closest('#dmDis')){ toggleDevMenu(false); userDisconnect(); }
+});
+document.addEventListener('click', e => { const m = $('#devMenu'); if (m && !m.hidden && !e.target.closest('#devMenu, #devSw')) toggleDevMenu(false); });
+$('#moodTarget').addEventListener('click', e => { const b = e.target.closest('[data-mt]'); if (!b) return; if (LT.pending || LT.brDirty){ ltDiscard(true); toast('Unsaved changes discarded'); } moodTarget = b.dataset.mt === 'lantern' ? 'lantern' : +b.dataset.mt; drawMoods(); drawLights(); ltShowCurrent(); });
+$('#moodLib').addEventListener('click', e => {
+  const ed2 = e.target.closest('.medit');
+  const t = e.target.closest('[data-mg]'); if (!t) return;
+  if (t.dataset.mg === 'p' && !isPremium()){ premInfo(); return; } // Premium moods: a peek at Premium instead
+  const ref = moodFromTile(t.dataset.mg, +t.dataset.mi);
+  if (ed2){ const li = store.myMoods.findIndex(m => m.id === ref.id); openMoodEditor(Object.assign({}, ref, { localIdx: li >= 0 ? li : null, name: li >= 0 ? ref.name : ref.name + ' copy' })); return; }
+  if (phIdx(moodTarget) >= 0){ if (LT.on) ltShowRef(ref); writeMoodTo(moodTarget, ref); drawMoods(); return; } // preheat pick: no save bar, it lives in the app
+  ltPick(ref);
+});
+$('#moodEditor').addEventListener('click', async e => {
+  if (!ed) return;
+  const id = e.target.id;
+  if (id === 'meClose'){ if (ed.back){ ed = ed.back; drawMoodEditor(); $('#moodEditor').scrollIntoView({ block:'start' }); return; } ed = null; drawMoodEditor(); if (LT.on) ltShowCurrent(); return; }
+  const chip = e.target.closest('.mechip');
+  if (chip){ const keep = ed.meta.userColors; ed.tag = chip.dataset.tag; ed.meta = Object.assign(defaultsForTpl(MOODS.tpl[ed.tag]), { userColors: keep }); drawMoodEditor(); return; }
+  if (id === 'meAdd'){ ed.meta.userColors.push('#ffffff'); drawMoodEditor(); return; }
+  if (id === 'meDel'){ ed.meta.userColors.pop(); drawMoodEditor(); return; }
+  if (id === 'mePreview'){ try { await writeMoodTo('lantern', { kind:'tpl', tag: ed.tag, name: ed.name, meta: ed.meta }); } catch(err){ toast('Preview failed: ' + err.message); } return; }
+  if (id === 'meApply'){ const ref = saveEditorMood(); ed = null; drawMoodEditor(); await applyMood(ref); return; }
+  if (id === 'meRemove'){ store.myMoods.splice(ed.editIdx, 1); save(); ed = null; drawMoodEditor(); drawMoods(); toast('Mood deleted'); }
+});
+$('#moodEditor').addEventListener('input', e => {
+  if (!ed) return; const t = e.target;
+  if (t.id === 'meName'){ ed.name = t.value; ltBar(); return; }
+  if (t.dataset.ci != null){ ed.meta.userColors[+t.dataset.ci] = t.value; t.parentElement.style.background = t.value; }
+  if (t.dataset.sk && ed.tag === ZONE_TAG){
+    if (t.dataset.sk === 'zsp'){ ed.meta.zones[ed.zSel].sp = +t.value; $('#mev_zsp').textContent = Math.round(+t.value * 100) + '%'; }
+    else { ed.meta.tempoFrac = +t.value; $('#mev_tempoFrac').textContent = Math.round(+t.value * 100) + '%'; }
+    return; }
+  if (t.dataset.sk){ ed.meta[t.dataset.sk] = +t.value; const u = MOODS.tpl[ed.tag].ui.find(x => x.key === t.dataset.sk); $('#mev_' + t.dataset.sk).textContent = fmtSlider(u, +t.value); }
+  if (t.dataset.ck){ ed.meta[t.dataset.ck] = t.checked ? 1 : 0; }
+  const sw = $('#moodEditor .mood-sw.big'); if (sw) sw.setAttribute('style', swatchStyle({ kind:'tpl', tag: ed.tag, meta: ed.meta }));
+  edLivePreview();
+});
+// account profiles
+document.addEventListener('click', e => { const b = e.target.closest('.acct-seg [data-slot]'); if (!b) return; loadAccountProfile(+b.parentElement.dataset.ap, +b.dataset.slot); });
+// live adjust
+$('#adjustRow').addEventListener('click', e => { const b = e.target.closest('[data-adj]'); if (!b) return; const [k, v] = b.dataset.adj.split(':'); adjustLive(k, +v); });
+// device settings
+$('#devCard').addEventListener('click', async e => {
+  const t = e.target;
+  if (t.id === 'devNameSave'){ const n = $('#devNameIn').value.trim().slice(0, 20); if (!n) return; S.devName = n; await devWrite(() => ble.write('/u/sys/name', new Uint8Array([...enc.encode(n), 0])), `Renamed to ${n}`); S.name = n; render(); return; }
+  const rb = t.closest('[data-rm]'); if (rb){ const v = +rb.dataset.rm; S.readyMode = v; await devWrite(() => ble.wf32('/u/app/rdym/hc', v), v < 0 ? 'Ready Mode off' : `Ready Mode on for ${S.profiles[v].name}`); return; }
+  const lt = t.closest('[data-lt]'); if (lt){ store.lanternTime = +lt.dataset.lt; save(); await devWrite(() => ble.wf32('/p/app/ltrn/time', store.lanternTime), 'Lantern timer set'); return; }
+  if (t.id === 'bShowBat'){ await devWrite(() => ble.write('/p/app/mc', new Uint8Array([5])), 'Showing battery on your Peak'); return; }
+  if (t.id === 'bPowerOff'){ $('#offWrap').innerHTML = '<button class="btn small" id="bPowerOffYes" style="color:var(--bad)">Tap again to power off</button>'; return; }
+  if (t.id === 'bPowerOffYes'){ await devWrite(async () => { await ble.write('/p/app/ltrn/cmd', new Uint8Array([0])); await ble.write('/p/app/mc', new Uint8Array([0])); }, 'Powering off'); return; }
+});
+$('#devCard').addEventListener('change', async e => {
+  const t = e.target;
+  if (t.id === 'tBatSaver'){ S.batSaver = t.checked; await devWrite(() => ble.wf32('/u/bat/msoc', t.checked ? 80 : 100), t.checked ? 'Battery preservation on' : 'Battery preservation off'); }
+  if (t.id === 'tLowBat'){ S.lowBatInd = t.checked; await devWrite(() => ble.wf32('/u/app/lbws', t.checked ? 10 : 0), t.checked ? 'Low battery warning on' : 'Low battery warning off'); }
+});
+
+$('#acctCard').addEventListener('click', async e => {
+  if (e.target.id === 'acOut'){ signOut(); wireAcctForm('ac'); return; }
+  if (e.target.id === 'acClaim'){ const id = acctId(); if (!id) return; store.sessOwner = null; if (store.claimAsked) delete store.claimAsked[id]; save(); claimPrompt(); return; }
+  if (e.target.id === 'acSync'){ e.target.disabled = true; e.target.textContent = 'Syncing…'; try { await puffcoSync(); } catch(err){ toast(err.message); } drawAccount(); }
+});
+$('#acctCard').addEventListener('change', async e => {
+  if (e.target.id !== 'acFile2') return; const f = e.target.files[0]; if (!f) return;
+  try { await importHar(f); } catch(err){ toast(err.message); }
+});
+$('#connectCard').addEventListener('click', async e => {
+  if (e.target.id === 'ccPick'){ startConnect(true); return; }
+  if (e.target.id !== 'ccBtn') return;
+  if (C.state === 'unsupported'){
+    try { await navigator.clipboard.writeText(location.href); toast('Link copied. Paste it into Path browser.'); }
+    catch(err){ toast(location.href); }
+    return;
+  }
+  if (C.state === 'reconnecting'){ appAuto(false); manualDisconnect = true; reconnectRun++; setConnUI('idle'); return; }
+  startConnect(false);
+});
+
+/* ================= boot ================= */
+applyTheme();
+ble.onDisconnect = onDropped;
+// keep content clear of the fixed header
+(() => { const h = document.querySelector('header'); const set = () => document.body.style.setProperty('--hdrH', (h.offsetHeight + 6) + 'px'); set();
+  try { new ResizeObserver(set).observe(h); } catch(e){ window.addEventListener('resize', set); } })();
+bootConnection();
+// pause the background drift while scrolling or dragging so the glass doesn't have to re-blur every frame
+// iPhone: when the page suddenly gets much taller or shorter (badge book, show more) or the keyboard closes, WebKit can leave
+// the header and tab bar drawn too high (they "slide up the screen") until a reload. A 1px scroll nudge makes it place them again
+function fixedResync(){ requestAnimationFrame(() => { const x = window.scrollX, y = window.scrollY; window.scrollTo(x, y + 1); window.scrollTo(x, y); }); }
+const typing = () => { const a = document.activeElement; return !!a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName); };
+document.addEventListener('toggle', () => setTimeout(fixedResync, 60), true); // <details> open/close (toggle doesn't bubble)
+document.addEventListener('focusout', e => { if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) setTimeout(() => { if (!typing()) fixedResync(); }, 350); });
+if (window.visualViewport) visualViewport.addEventListener('resize', () => { if (!typing()) fixedResync(); });
+{ let st = 0; const on = () => { document.documentElement.classList.add('scrolling'); clearTimeout(st); st = setTimeout(() => document.documentElement.classList.remove('scrolling'), 180); };
+  addEventListener('scroll', on, { passive: true }); addEventListener('touchmove', on, { passive: true }); }
+
+// app feel: no pinch zoom or double-tap zoom (the photo cropper keeps its own pinch)
+['gesturestart','gesturechange','gestureend'].forEach(t => document.addEventListener(t, e => { if (!(e.target.closest && e.target.closest('.crop-stage'))) e.preventDefault(); }, { passive: false }));
+document.addEventListener('touchmove', e => { if (e.touches.length > 1 && !(e.target.closest && e.target.closest('.crop-stage'))) e.preventDefault(); }, { passive: false });
+// double-tap zoom is already off through touch-action (blocking taps here would eat fast double taps on Boost)
+
+armFullscreen();
+setTimeout(() => { if (lbUsesPuffco()) lbRestore(); }, 1500); // bring back your Emberline profile on a new phone or link
+let startView = 'home';
+try { startView = sessionStorage.getItem('emberline.view') || 'home'; } catch(e){}
+view = startView;
+show('home'); // the tab you were on opens once everything has loaded: Settings and Social use parts that load further down (opening them here broke the rest of the load)
+if (ORDER.includes(startView) && startView !== 'home') setTimeout(() => show(startView), 0);
+requestAnimationFrame(gaugeLoop);
+setTimeout(ignite, 350);
+// first time using the app: ask to sign in to Puffco and sync, otherwise the usual greeting
+if (!store.onboarded && !(store.account && store.account.data)) setTimeout(showWelcome, 600); else setTimeout(showGreeting, 500);
+setTimeout(claimPrompt, 7000);
+addEventListener('resize', () => moveTabPill(view));
+document.fonts && document.fonts.ready.then(() => moveTabPill(view));
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { applyTheme(); draw(); });
+
+/* ---- What's new: shows once per update ---- */
+const WN_VER = '2026-10-1v1rp'; // bumped: 1v1 RP is real now, with a daily limit
+/* ---- limited edition lights: owners can share their device's light files so we can add that edition's colorway ---- */
+const ED_LIGHT_PATHS = () => [0,1,2,3].map(i => `/u/app/hc/${i}/colr`).concat(['/p/app/thc/colr', '/p/app/ltrn/colr'],
+  S.api === 2 ? [0,1,2,3].flatMap(i => [`/u/app/hc/${i}/phcl`, `/u/app/hc/${i}/accl`]) : [0,1,2,3,4,5].map(i => `/u/app/led/aa/${i}`).concat([0,1,2,3,4,5,6,7].flatMap(i => [`/u/app/led/ca/${i}`, `/u/app/led/oa/${i}`])));
+function edIsLimited(){ return !!S.edition && (LIMITED_ED.includes(S.edition) || (isProxy() && S.edition !== 'Onyx')); }
+async function edShareSend(){
+  const files = {};
+  for (const p of ED_LIGHT_PATHS()){
+    if (S.mode !== 'live') return false;
+    try { const r = await ble.readAll(p); if (r && r.length) files[p] = toHex(r).slice(0, 8000); } catch(e){}
+  }
+  if (!Object.keys(files).length) return false;
+  // anonymous: no account, serial or device id, just the light data (hash only stops duplicate rows)
+  const hash = toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(S.edition + JSON.stringify(files)))));
+  try { await sbJSON('/rest/v1/edition_lights', { method:'POST', headers:{ Prefer:'return=minimal' }, body: JSON.stringify({ hash, edition:S.edition, series:S.series || (isProxy() ? 'toad' : 'peak'), fw:S.fw || null, api:S.api || null, files }) }); }
+  catch(e){ if (e.status !== 409) throw e; } // 409 = these exact lights are already saved
+  store.edShare = store.edShare || {}; store.edShare[S.edition] = { ok:true, at:Date.now(), claimed: (store.edShare[S.edition] || {}).claimed };
+  if (await edClaim(hash)) store.edShare[S.edition].claimed = true;
+  save(); return true;
+}
+// sharing a limited edition's lights earns Bug Hunter, same as the Limited Edition Testing page. Automatic for anyone with a profile
+const edHasBug = () => { const me = LB.me || lbStore().meCache; return !!(me && Array.isArray(me.awards) && me.awards.includes('bughunter')); };
+async function edClaim(hash){
+  const me = LB.me || lbStore().meCache; if (!me || !me.username) return false;
+  if (edHasBug()) return true;
+  try {
+    const r = await sbJSON('/functions/v1/player', { method:'POST', body: JSON.stringify({ action:'edition_claim', hash, username: me.username }) });
+    if (!r || !r.ok) return false;
+    if (!r.had){ toast(`🐛 Bug Hunter unlocked for sharing your ${S.edition}’s lights`); buzz([30, 40, 30]); }
+    [LB.me, lbStore().meCache].forEach(x => { if (x && !(x.awards || []).includes('bughunter')) x.awards = [...(x.awards || []), 'bughunter']; });
+    try { drawSocial(); } catch(e){}
+    return true;
+  } catch(e){ return e.status === 409; } // 409: these lights already earned a badge
+}
+function edShareAsk(force){
+  if (S.mode !== 'live' || !edIsLimited()) return;
+  const st = (store.edShare || {})[S.edition];
+  if (!force && st && st.ok && Date.now() - st.at < 7 * 864e5 && (st.claimed || edHasBug() || !(LB.me || lbStore().meCache || {}).username)) return; // shared recently (again if the badge is still waiting on a profile)
+  edShareSend().then(ok => { if (force) toast(ok ? `${S.edition} lights shared` : 'Could not read the lights'); }).catch(e => { if (force) toast('Share failed: ' + (e.message || e)); });
+}
+let ogNoticeShown = false;
+function ogPeakNotice(n){
+  if (ogNoticeShown || S.mode !== 'live' || store.ogSupportSeen) return;
+  const og = S.api === 2 || ['OG', 'Opal', 'Indiglow', 'Guardian'].includes(S.edition);
+  if (!og) return;
+  if ((document.querySelector('.egg') || greetOpen) && n < 20){ setTimeout(() => ogPeakNotice(n + 1), 1500); return; } // wait for other popups
+  ogNoticeShown = true; store.ogSupportSeen = true; save();
+  const name = S.edition && S.edition !== 'OG' ? 'Peak ' + S.edition : 'original Peak';
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Support update" style="gap:12px">
+    <span class="label">New</span>
+    <h2 style="margin:0">Your Peak is supported</h2>
+    <p class="muted" style="margin:0;font-size:14px">Animated moods and the hit timer now work on your ${esc(name)}, so blinkers count too. Thanks for your patience! Some extras may still be missing, report anything weird in the Discord.</p>
+    <button class="btn primary" id="ogOk" style="width:100%">Got it</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now();
+  el.querySelector('#ogOk').addEventListener('click', () => { if (Date.now() - opened < 400) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); });
+}
+// rank changes notice: once, on Stats, only for ranks the tax hits (Blaze and up)
+let rankNoteShown = false;
+function rankTaxNotice(force, n){
+  n = n || 0;
+  if (!force && (rankNoteShown || store.rankTaxSeen || demo)) return;
+  let tier = ''; try { tier = myRank().tier.n; } catch(e){ return; }
+  if (force && !RANK_TAX[tier]) tier = 'Blaze'; // test button: show what a Blaze player sees
+  const amt = RANK_TAX[tier]; if (!amt) return;
+  if ((document.querySelector('.egg') || greetOpen) && n < 20){ setTimeout(() => rankTaxNotice(force, n + 1), 1500); return; } // wait for other popups
+  if (view !== 'stats' && !force) return;
+  rankNoteShown = true; if (!force){ store.rankTaxSeen = true; save(); }
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Ranked changes" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
+    <span class="label" style="text-align:center">Ranked</span>
+    <h2 style="text-align:center;margin:0">Ranked just changed</h2>
+    <div style="display:grid;gap:2px"><b>Rank tax</b><span class="muted" style="font-size:14px">In the top ranks, every session that runs 30 seconds or longer now costs RP: Blaze −3, Inferno −5, Champion −8, Legend −10. You'll see it drop onto the gauge when preheat finishes.</span></div>
+    <div style="display:grid;gap:2px"><b>No more cool-down</b><span class="muted" style="font-size:14px">Back-to-back sessions count now. No waiting for your ${esc(devWord())} to cool off.</span></div>
+    <p style="margin:0;font-size:14px">You're in <b>${esc(tier)}</b>, so each session costs <b style="color:#ff3b4a">${amt} RP</b>. Blinkers still earn +5, so make them count.</p>
+    <button class="btn primary" id="rtnOk" style="width:100%">Got it</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now();
+  el.querySelector('#rtnOk').addEventListener('click', () => { if (Date.now() - opened < 500) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); });
+}
+const WN_ITEMS = [
+  ['1v1s are here <span class="beta-tag">BETA</span>', 'Tap 1V1 in Social. Get matched with someone near your rank, or invite a friend you follow (and who follows you back).'],
+  ['How you win', 'Matches last 2 minutes. Every second of every hit is 10 points, so long pulls win. Blinkers set your side on fire.'],
+  ['Bets', 'Random matches have a 10 RP buy-in and friend games can bet up to 25 RP. The winner takes the loser’s RP, straight into this month’s ranked score.'],
+  ['Daily limit', 'You can win up to 150 RP a day from 1v1s to start. After that, wins don’t add RP until tomorrow.'],
+  ['Fixes', 'Your first hit now counts the moment your Puffco hits Ready.']
+]
+function whatsNew(force){
+  if (!force && store.wnSeen === WN_VER) return;
+  // everyone sees this one, new users included
+  if (document.querySelector('.egg')) return;
+  if (store.wnSeen && store.wnSeen !== WN_VER) store.wnSeenOld = store.wnSeen; // saw the first 1v1 popup: this one leads with the RP news
+  store.wnSeen = WN_VER; save();
+  const el = document.createElement('div'); el.className = 'egg';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="What's new" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto">
+    <span class="label" style="text-align:center">New</span>
+    <h2 style="text-align:center;margin:0">${store.wnSeenOld === '2026-10-1v1' ? '1v1s now use real RP' : 'We added 1v1s'}</h2>
+    <div class="wn-vs" aria-hidden="true"><span style="--pc:#9900cc">Y</span><b>VS</b><span style="--pc:#ff3b8a">?</span></div>
+    ${WN_ITEMS.map(([t, d]) => `<div style="display:grid;gap:2px"><b>${t}</b><span class="muted" style="font-size:14px">${d}</span></div>`).join('')}
+    <button class="btn primary" id="wnPlay" style="width:100%">Play a 1v1</button><button class="btn" id="wnGo" style="width:100%">Later</button></div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now();
+  const shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.querySelector('#wnGo').addEventListener('click', () => { if (Date.now() - opened < 500) return; shut(); });
+  el.querySelector('#wnPlay').addEventListener('click', () => { if (Date.now() - opened < 500) return; shut(); show('social'); setTimeout(() => duelSheet({ queue:false }), 350); });
+}
+// Double RP: a popup once per event, after the other popups
+function dblPop(force){
+  const e = dblNow(); if (!e && !force) return; const ev = e || DOUBLE_RP[0];
+  if (!force && (store.dblSeen === ev.id || document.querySelector('.egg'))) return;
+  store.dblSeen = ev.id; save();
+  const el = document.createElement('div'); el.className = 'egg'; el.style.zIndex = 240;
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Double RP" style="gap:12px">
+    <div class="dbl-big">2x</div><h2 style="margin:0">${esc(ev.n)}</h2>
+    <p class="muted" style="margin:0;font-size:14px">Every session and every blinker counts <b style="color:#ff9900">double RP</b> until ${new Date(ev.to).toLocaleString([], { weekday:'long', hour:'numeric', minute:'2-digit' })}. Climb the leaderboard while it lasts.</p>
+    <p class="muted" style="margin:0;font-size:12px">1v1 bets stay the same. The 1000 RP a day limit still applies.</p>
+    <button class="btn primary" id="dblGo" style="width:100%">Let’s go</button></div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now(); el.querySelector('#dblGo').addEventListener('click', () => { if (Date.now() - opened < 400) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); });
+}
+(function dblWait(n){ if (!dblNow() || n > 60) return; const busy = greetOpen || document.getElementById('spl') || document.querySelector('.egg') || [...document.querySelectorAll('.welcome, #welcome')].some(w => !w.hidden && getComputedStyle(w).display !== 'none' && w.childElementCount > 0);
+  if (busy || store.wnSeen !== WN_VER) setTimeout(() => dblWait(n + 1), 1500); else if (store.dblSeen !== dblNow().id) dblPop(); else dblNote(); })(0);
+// a notification banner every time you open the app while Double RP is on (the big popup only shows once)
+// Premium: a one-time heads up that Group sesh is here. Tap it to start one
+function seshPremNote(force){
+  if (document.getElementById('sxNote') || (!force && store.seshNoteSeen)) return;
+  const el = document.createElement('div'); el.id = 'sxNote'; el.className = 'dbl-note sx'; el.setAttribute('role', 'status');
+  el.innerHTML = `<b>⭐</b><span><b>Premium: Group Sesh is here</b><small>Heat up with friends and hit it together${seshBonusOn() ? `. +${SESH_BONUS} RP a sesh this week` : ''}. Tap to start one</small></span>`;
+  document.body.appendChild(el); buzz([30, 40, 30]); store.seshNoteSeen = 1; save();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const hide = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 400); };
+  el.onclick = () => { hide(); seshSheet(); };
+  setTimeout(hide, 8000);
+}
+// waits for the profile (to know you're Premium) and for other popups to close
+(function seshNoteWait(n){ if (store.seshNoteSeen || n > 60) return;
+  const busy = greetOpen || document.getElementById('spl') || document.getElementById('dblNote') || document.querySelector('.egg') || store.wnSeen !== WN_VER;
+  if (!busy && isPremium()) setTimeout(() => { if (!document.querySelector('.egg') && !greetOpen) seshPremNote(); else seshNoteWait(n + 1); }, 2000); else setTimeout(() => seshNoteWait(n + 1), 3000); })(0);
+// Premium: a one-time heads up that the special edition colorways are in their Lights. Tap it to see them
+function edPremNote(force){
+  if (document.getElementById('edNote') || (!force && store.edNoteSeen2)) return;
+  const el = document.createElement('div'); el.id = 'edNote'; el.className = 'dbl-note ed'; el.setAttribute('role', 'status');
+  el.innerHTML = `<b>💎</b><span><b>Premium: special edition moods</b><small>Puffco’s own special edition colorways are yours: Plasma, Glacier and Flourish are in your Lights now, more coming. Tap to see</small></span>`;
+  document.body.appendChild(el); buzz([30, 40, 30]); store.edNoteSeen2 = 1; save();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const hide = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 400); };
+  el.onclick = () => { hide(); show('lights'); setTimeout(() => { const g = [...document.querySelectorAll('#moodLib .label')].find(x => /Puffco exclusives/i.test(x.textContent)); if (g) g.scrollIntoView({ block:'start', behavior:'smooth' }); }, 350); };
+  setTimeout(hide, 9000);
+}
+// waits for the profile (to know you're Premium) and for other banners and popups, the Group sesh one included
+(function edNoteWait(n){ if (store.edNoteSeen2 || n > 80) return;
+  const busy = greetOpen || document.getElementById('spl') || document.getElementById('dblNote') || document.getElementById('sxNote') || document.querySelector('.egg') || store.wnSeen !== WN_VER || (isPremium() && !store.seshNoteSeen);
+  if (!busy && isPremium()) setTimeout(() => { if (!document.querySelector('.egg') && !greetOpen && !document.getElementById('sxNote')) edPremNote(); else edNoteWait(n + 1); }, 2500); else setTimeout(() => edNoteWait(n + 1), 3000); })(0);
+function dblNote(){
+  const e = dblNow(); if (!e || document.getElementById('dblNote')) return;
+  const el = document.createElement('div'); el.id = 'dblNote'; el.className = 'dbl-note'; el.setAttribute('role', 'status');
+  el.innerHTML = `<b>🔥</b><span><b>Double RP is live</b><small>Sessions and blinkers count 2x until ${new Date(e.to).toLocaleString([], { weekday:'short', hour:'numeric', minute:'2-digit' })}</small></span>`;
+  document.body.appendChild(el); buzz([30, 40, 30]);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const hide = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 400); };
+  el.onclick = () => { hide(); dblPop(true); };
+  setTimeout(hide, 6000);
+}
+document.addEventListener('click', e => { if (e.target.closest && e.target.closest('[data-dbl]')) dblPop(true); });
+setInterval(() => { if (DOUBLE_RP.some(e => Math.abs(Date.now() - e.to) < 61000 || Math.abs(Date.now() - e.from) < 61000)) try { drawRank(); } catch(_){} }, 60000); // the banner comes and goes on time
+// wait until the welcome and any other popup are gone, then show it
+(function wnWait(n){ if (store.wnSeen === WN_VER || n > 40) return; const busy = greetOpen || document.getElementById('spl') || document.querySelector('.egg') || [...document.querySelectorAll('.welcome, #welcome')].some(w => !w.hidden && getComputedStyle(w).display !== 'none' && w.childElementCount > 0); // fixed popups have no offsetParent, so check display instead
+  if (busy) setTimeout(() => wnWait(n + 1), 1000); else setTimeout(() => { const still = greetOpen || document.getElementById('spl') || [...document.querySelectorAll('.welcome, #welcome')].some(w => !w.hidden && getComputedStyle(w).display !== 'none' && w.childElementCount > 0); if (!still) whatsNew(); else wnWait(n + 1); }, 2500); })(0);
+/* ===== Live relay (Supabase Realtime broadcast) =====
+   The VR panel link and 1v1s send small messages phone to phone through a channel named by a short code.
+   Nothing is saved on the server, and nothing here touches RP. */
+const RT_ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const rtCode = (n = 6) => { const a = new Uint32Array(n); crypto.getRandomValues(a); return [...a].map(x => RT_ABC[x % RT_ABC.length]).join(''); };
+const rtClean = c => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+class Relay {
+  constructor(topic){ this.topic = 'realtime:' + topic; this.h = {}; this.ref = 0; this.open = false; this.closed = false; this.q = []; this.tries = 0; }
+  on(ev, fn){ this.h[ev] = fn; return this; }
+  fire(ev, p){ try { (this.h[ev] || (() => {}))(p); } catch(e){} }
+  connect(){
+    if (this.closed) return; clearTimeout(this.retry);
+    let ws; try { ws = this.ws = new WebSocket(SB_URL.replace(/^http/, 'ws') + '/realtime/v1/websocket?apikey=' + SB_KEY + '&vsn=1.0.0'); } catch(e){ return this.later(); }
+    ws.onopen = () => {
+      this.jref = String(++this.ref);
+      this.raw({ topic:this.topic, event:'phx_join', payload:{ config:{ broadcast:{ ack:false, self:false }, presence:{ key:'' }, postgres_changes:[], private:false }, access_token:SB_KEY }, ref:this.jref, join_ref:this.jref });
+      clearInterval(this.hb); this.hb = setInterval(() => this.raw({ topic:'phoenix', event:'heartbeat', payload:{}, ref:String(++this.ref) }), 25000);
+    };
+    ws.onmessage = e => {
+      let m; try { m = JSON.parse(e.data); } catch(_){ return; }
+      if (m.topic !== this.topic) return;
+      if (m.event === 'phx_reply' && m.ref === this.jref){
+        if (m.payload && m.payload.status === 'ok'){ this.open = true; this.tries = 0; this.fire('open'); this.q.splice(0).forEach(x => this.send(x[0], x[1])); }
+        else { this.fire('error', m.payload); try { ws.close(); } catch(_){} }
+      } else if (m.event === 'broadcast' && m.payload) this.fire(m.payload.event, m.payload.payload || {});
+      else if (m.event === 'phx_error' || m.event === 'phx_close'){ try { ws.close(); } catch(_){} }
+    };
+    ws.onclose = () => { if (this.ws !== ws) return; this.open = false; clearInterval(this.hb); this.fire('down'); this.later(); };
+    ws.onerror = () => {};
+  }
+  later(){ if (this.closed) return; clearTimeout(this.retry); this.retry = setTimeout(() => this.connect(), Math.min(15000, 1500 * 2 ** this.tries++)); }
+  raw(m){ try { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(m)); } catch(e){} }
+  send(ev, p){
+    if (!this.open){ if (this.q.length < 10) this.q.push([ev, p]); return; }
+    this.raw({ topic:this.topic, event:'broadcast', payload:{ type:'broadcast', event:ev, payload:p }, ref:String(++this.ref), join_ref:this.jref });
+  }
+  wake(){ if (!this.closed && (!this.ws || this.ws.readyState > 1)){ this.tries = 0; this.connect(); } }
+  close(){ this.closed = true; this.open = false; clearInterval(this.hb); clearTimeout(this.retry); try { this.ws && this.ws.close(); } catch(e){} }
+}
+// keep the phone screen on while it's the bridge for a VR panel or in a 1v1 (iOS drops Bluetooth when the screen locks)
+const WAKE = { lock:null };
+async function wakeOn(){ try { if (navigator.wakeLock && !WAKE.lock && !document.hidden){ WAKE.lock = await navigator.wakeLock.request('screen'); WAKE.lock.addEventListener('release', () => { WAKE.lock = null; }); } } catch(e){} }
+function wakeOff(){ if (VRH.code || DUEL.on || SESH.on) return; try { WAKE.lock && WAKE.lock.release(); } catch(e){} WAKE.lock = null; }
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden){ clearTimeout(LOBBY.idle); LOBBY.idle = setTimeout(() => { if (document.hidden && LOBBY.rt && !LOBBY.q && !DUEL.on){ LOBBY.rt.close(); LOBBY.rt = null; } }, 60000); return; } // in the background a minute: let the lobby go
+  clearTimeout(LOBBY.idle); if (!LOBBY.rt && lobbyWanted()) lobbyOn();
+  if (VRH.code || DUEL.on || SESH.on) wakeOn();
+  [VRH.rt, VRP.rt, DUEL.rt, LOBBY.rt, SESH.rt].forEach(r => r && r.wake());
+});
+const vrMS = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+const vrDeg = (c, u) => u === 'C' ? Math.round(c) + '°C' : Math.round(c2f(c)) + '°F';
+
+/* ===== VR panel =====
+   A big-button control window for a headset. Two ways in:
+   - the headset or PC browser has Bluetooth (Chrome or Edge on a PC, shown in XSOverlay, OVR Toolkit, Desktop+ or the SteamVR desktop view): connect the Peak right there
+   - no Bluetooth (Quest browser): the panel shows a code, the phone types it, and the phone passes everything back and forth */
+let vrMoodCache = { at:0, list:[] };
+function vrMoods(){
+  if (Date.now() - vrMoodCache.at < 30000) return vrMoodCache.list;
+  let list = []; try { list = shufAll().slice(0, 18); } catch(e){}
+  vrMoodCache = { at: Date.now(), list }; return list;
+}
+// what the panel shows, from this phone's live state
+function vrSnap(){
+  const live = S.mode === 'live', hits = HIT.hits || [], d0 = new Date(); d0.setHours(0, 0, 0, 0);
+  const sess = S.state >= 7 && S.state <= 9, tot = Math.round(S.total || 0);
+  let el = S.elapsed || 0; if (sess && S.elapsedAt) el += (performance.now() - S.elapsedAt) / 1000;
+  return { v:1, live, name: live ? (S.name || devWord()) : '', u: store.unit === 'C' ? 'C' : 'F', t: Math.round(S.tempC || 0), st: S.state, el: Math.round(tot ? Math.min(el, tot) : el), tot,
+    bat: S.battery, chg: !!S.charging, act: S.active, px: isProxy(),
+    pr: S.profiles.map(p => ({ n: p.name, t: Math.round(p.tempC), c: p.color || '#ffffff' })),
+    lan: !!S.lantern, stl: !!S.stealth, br: Math.round(((brightFor(S.active) || [255])[0] || 0) / 2.55),
+    hit: { on: !!HIT.on, s: HIT.on ? Math.round((performance.now() - HIT.start) / 1000) : 0, last: HIT.last || 0, n: hits.length, best: hits.length ? Math.max(...hits) : 0 },
+    today: (store.sessions || []).filter(s => s.t >= d0.getTime()).length,
+    moods: vrMoods().map(m => m.name || 'Mood'), heat: store.vrHeat !== false, duel: duelSnap() };
+}
+// run a panel button on this device. remote: it came from a linked panel, not a tap here
+async function vrDo(c, v, remote){
+  if (c === 'connect'){ if (remote) return 'Connect the Peak on the phone'; startConnect(false); return ''; }
+  if (S.mode !== 'live') return remote ? `Your ${devWord()} isn’t connected to the phone` : `Connect your ${devWord()} first`;
+  const sess = S.state >= 7 && S.state <= 9;
+  if (c === 'start'){
+    if (remote && store.vrHeat === false) return 'Heating from the VR panel is off on the phone';
+    if (sess) return '';
+    BOOST.temp = 0; BOOST.time = 0; try { await ble.write('/p/app/hcs', new Uint8Array([S.active])); } catch(e){}
+    await modeCmd(7); return '';
+  }
+  if (c === 'stop'){ await modeCmd(8); return ''; }
+  if (c === 'boost'){ if (!sess) return 'Boost works during a session'; await boostCmd(); return ''; }
+  if (c === 'prof'){ const i = +v; if (!(i >= 0 && i <= 3)) return 'No such profile'; if (sess && i !== S.active) return 'Switch profiles after this session'; await selectProfile(i); return ''; }
+  if (c === 'lan'){ await setLantern(!!v); drawLightsState(); return ''; }
+  if (c === 'stl'){ await setStealth(!!v); drawLightsState(); return ''; }
+  if (c === 'mood'){ const m = vrMoods()[+v]; if (!m) return 'That mood isn’t there anymore'; await writeMoodTo(S.active, JSON.parse(JSON.stringify(m))); return ''; }
+  if (c === 'bright'){
+    const n = clamp(Math.round(+v * 2.55), 0, 255), b = [n, n, n, n];
+    (store.brightByProfile = store.brightByProfile || {})[S.active] = b; save();
+    try { await writeBright(b); save(); } catch(e){ return 'Brightness failed'; }
+    return '';
+  }
+  return 'Unknown button';
+}
+
+/* phone side: the bridge for a linked panel */
+const VRH = { rt:null, code:null, last:'', lastAt:0, timer:null, panelAt:0 };
+function vrLink(code, quiet){
+  if (!vrAllowed()) return false;
+  code = rtClean(code);
+  if (code.length !== 6){ toast('Type the 6-character code from the VR panel'); return false; }
+  vrUnlink(true);
+  VRH.code = code; VRH.panelAt = 0; store.vrLink = { code, at: Date.now() }; save();
+  VRH.rt = new Relay('ember-vr-' + code)
+    .on('vr:hi', () => { const first = !VRH.panelAt; VRH.panelAt = Date.now(); vrHostSend(true); if (first){ if (!quiet) toast('VR panel linked'); vrDrawLinkUI(); } if (Date.now() - store.vrLink.at > 6e5){ store.vrLink.at = Date.now(); save(); } })
+    .on('vr:cmd', vrHostCmd)
+    .on('vr:bye', () => { VRH.panelAt = 0; vrDrawLinkUI(); })
+    .on('open', () => { vrHostSend(true); vrDrawLinkUI(); })
+    .on('down', vrDrawLinkUI);
+  VRH.rt.connect();
+  clearInterval(VRH.timer); VRH.timer = setInterval(vrHostTick, 1000);
+  wakeOn(); vrDrawLinkUI(); drawPills(); return true;
+}
+function vrUnlink(keep){
+  if (VRH.rt){ const r = VRH.rt; r.send('vr:bye', {}); setTimeout(() => r.close(), 400); }
+  VRH.rt = null; VRH.code = null; VRH.panelAt = 0; clearInterval(VRH.timer); VRH.timer = null;
+  if (!keep){ store.vrLink = null; save(); }
+  wakeOff(); vrDrawLinkUI(); drawPills();
+}
+function vrHostTick(){
+  if (!VRH.code) return;
+  const quietFor = VRH.panelAt ? Date.now() - VRH.panelAt : 0;
+  if (quietFor > 30 * 6e4){ vrUnlink(); toast('VR panel unlinked (not seen for 30 minutes)'); return; }
+  if (quietFor < 60000) vrHostSend(false); // the panel says hi every 10s; stop sending to an empty room
+  drawPills();
+}
+function vrHostSend(force){
+  if (!VRH.rt || !VRH.rt.open) return;
+  const s = vrSnap(), j = JSON.stringify(s);
+  if (!force && j === VRH.last && Date.now() - VRH.lastAt < 5000) return; // only send what changed, plus a 5s heartbeat
+  VRH.last = j; VRH.lastAt = Date.now(); VRH.rt.send('vr:st', s);
+}
+async function vrHostCmd(m){
+  VRH.panelAt = Date.now();
+  let err = ''; try { err = await vrDo(String(m.c || ''), m.v, true); } catch(e){ err = e.message || 'Failed'; }
+  if (VRH.rt) VRH.rt.send('vr:ack', { id: m.id, err });
+  setTimeout(() => vrHostSend(true), 250);
+}
+function vrDrawLinkUI(){
+  const el = $('#vrLinkUI'); if (!el) return;
+  const t = $('#tVrHeat'); if (t) t.checked = store.vrHeat !== false;
+  if (VRH.code){
+    const st = !VRH.rt || !VRH.rt.open ? 'Connecting to the relay…' : VRH.panelAt && Date.now() - VRH.panelAt < 30000 ? '✓ Panel connected' : 'Waiting for the panel…';
+    setHTML(el, `<div class="row between" style="gap:8px"><span><b style="letter-spacing:.1em">${esc(VRH.code)}</b><br><span class="muted" style="font-size:13px">${st}</span></span><button class="btn small" id="vrUnlink">Unlink</button></div>
+      <p class="muted" style="margin:0;font-size:12px">Keep Emberline open on this phone while you use the panel. The screen stays on.</p>`);
+  } else setHTML(el, `<div class="row" style="gap:8px"><input type="text" id="vrCodeIn" maxlength="6" placeholder="Code from the panel" autocomplete="off" autocapitalize="characters" spellcheck="false" style="flex:1;min-width:0;text-transform:uppercase;letter-spacing:.1em"><button class="btn small primary" id="vrLinkGo">Link</button></div>`);
+}
+document.addEventListener('click', e => {
+  const t = e.target.closest && e.target.closest('#vrLinkGo, #vrUnlink, #vrOpenHere, #duelOpen, #seshOpen'); if (!t) return;
+  if (t.id === 'vrLinkGo') vrLink(($('#vrCodeIn') || {}).value);
+  if (t.id === 'vrUnlink') vrUnlink();
+  if (t.id === 'vrOpenHere') vrOpen();
+  if (t.id === 'duelOpen') duelSheet();
+  if (t.id === 'seshOpen') seshSheet();
+});
+document.addEventListener('change', e => { if (e.target && e.target.id === 'tVrHeat'){ store.vrHeat = e.target.checked; save(); } });
+
+/* panel side */
+const VRP = { on:false, rt:null, code:null, snap:null, snapAt:0, timer:null, hiAt:0, sig:'', msig:'', pend:{}, demo:false, brHold:0, n:0 };
+function vrOpen(opts = {}){
+  VRP.on = true; VRP.demo = !!opts.demo; document.body.classList.add('vr-on');
+  vrBuild();
+  if (!VRP.demo){
+    VRP.code = store.vrCode && rtClean(store.vrCode).length === 6 ? store.vrCode : (store.vrCode = rtCode()); save(); // same code after a reload, so the phone stays linked
+    if (!VRP.rt){
+      VRP.rt = new Relay('ember-vr-' + VRP.code)
+        .on('vr:st', m => { VRP.snap = m; VRP.snapAt = Date.now(); vrPaint(); })
+        .on('vr:ack', m => { const p = VRP.pend[m.id]; if (p){ delete VRP.pend[m.id]; p.b && p.b.classList.remove('wait'); } if (m.err) toast(m.err); })
+        .on('vr:bye', () => { VRP.snap = null; vrPaint(); })
+        .on('open', () => { VRP.rt.send('vr:hi', {}); VRP.hiAt = Date.now(); vrPaint(); })
+        .on('down', vrPaint);
+      VRP.rt.connect();
+    }
+  }
+  clearInterval(VRP.timer); VRP.timer = setInterval(vrTick, 500); vrPaint();
+}
+function vrClose(){
+  VRP.on = false; document.body.classList.remove('vr-on'); clearInterval(VRP.timer); VRP.timer = null;
+  if (VRP.rt){ const r = VRP.rt; r.send('vr:bye', {}); setTimeout(() => r.close(), 300); VRP.rt = null; }
+  VRP.snap = null; const el = $('#vrp'); if (el) el.remove();
+  if (new URLSearchParams(location.search).has('vr')){ try { history.replaceState(null, '', location.pathname); } catch(e){} }
+}
+function vrTick(){
+  if (!VRP.on) return;
+  vrParentSend();
+  if (VRP.rt && VRP.rt.open && Date.now() - VRP.hiAt > (VRP.snap ? 10000 : 3000)){ VRP.rt.send('vr:hi', {}); VRP.hiAt = Date.now(); }
+  vrPaint();
+}
+// framed by the VR simulator page: tell it what the Peak is doing, and let it press Start / Stop / Boost (only from our own sites)
+const VR_FRAMED = window.parent !== window;
+function vrParentSend(){
+  if (!VR_FRAMED || !VRP.on) return;
+  const src = vrSource(), s = src && src.s;
+  try { window.parent.postMessage({ ember:'vrstate', ok: !!src, st: s ? s.st : 0, hit: !!(s && s.hit && s.hit.on), lan: !!(s && s.lan), stl: !!(s && s.stl),
+    c: s && s.pr && s.pr[s.act] ? s.pr[s.act].c : '', name: s ? s.name || '' : '', heat: !!(s && (src.how !== 'link' || s.heat)) }, '*'); } catch(e){}
+}
+window.addEventListener('message', e => {
+  const m = e.data; if (!VRP.on || !m || m.ember !== 'vrcmd') return;
+  if (e.origin !== location.origin && e.origin !== 'https://taupespy-debug.github.io' && e.origin !== 'https://emberlineapp.github.io') return;
+  if (['start', 'stop', 'boost'].includes(m.c)) vrSend(m.c, null);
+});
+// where the panel's numbers come from right now
+function vrSource(){
+  if (VRP.demo) return { s: vrFake(), src:'Demo · made-up numbers', how:'demo' };
+  if (S.mode === 'live') return { s: vrSnap(), src:'Connected on this device', how:'here' };
+  if (VRP.snap && Date.now() - VRP.snapAt < 15000) return { s: VRP.snap, src:'Linked to your phone', how:'link' };
+  return null;
+}
+function vrFake(){
+  const t = Date.now() / 1000, ph = Math.floor(t / 20) % 3, st = [5, 7, 8][ph], el = Math.round(t % 20);
+  return { v:1, live:true, name:'Peak Pro', u:store.unit === 'C' ? 'C' : 'F', t: st === 5 ? 60 : st === 7 ? 120 + el * 6 : 260, st, el, tot: st === 8 ? 45 : st === 7 ? 25 : 0, bat:76, chg:false, act:1, px:false,
+    pr: S.profiles.map(p => ({ n:p.name, t:Math.round(p.tempC), c:p.color })), lan:false, stl:false, br:80,
+    hit:{ on: st === 8 && el % 10 < 4, s: el % 10, last:4.2, n:3, best:7.8 }, today:4, moods:['Hologram', 'Sunset', 'Aurora', 'Lava'], heat:true, duel: duelSnap() };
+}
+// the Puffco on the panel: tap it to start. Glows in the active profile's color, pulses while heating, puffs while you pull
+const VR_PEAK_SVG = `<svg viewBox="0 0 100 130" aria-hidden="true"><defs><radialGradient id="vrpkG"><stop offset="0" stop-color="var(--pk)" stop-opacity=".75"/><stop offset="1" stop-color="var(--pk)" stop-opacity="0"/></radialGradient></defs>
+  <ellipse class="pk-glow" cx="50" cy="96" rx="48" ry="34" fill="url(#vrpkG)"/>
+  <g class="pk-puff"><circle cx="46" cy="22" r="7"/><circle cx="56" cy="12" r="9"/><circle cx="48" cy="2" r="6"/></g>
+  <path d="M38 34 L42 74 L58 74 L62 34 Z" fill="rgba(200,220,255,.16)" stroke="rgba(220,235,255,.55)" stroke-width="2"/>
+  <rect x="24" y="72" width="52" height="46" rx="11" fill="#1b1a22" stroke="#3a3850" stroke-width="1.5"/>
+  <rect class="pk-led" x="28" y="98" width="44" height="5" rx="2.5" fill="var(--pk)"/></svg>`;
+function vrBuild(){
+  let el = $('#vrp'); if (el) return;
+  el = document.createElement('div'); el.id = 'vrp';
+  const bt = !!navigator.bluetooth && vrAllowed(), here = location.origin + location.pathname;
+  el.innerHTML = `<div class="vr-top"><span class="vr-dot" id="vrDot"></span><h1>Emberline <i>VR</i><span class="beta-tag">BETA</span></h1><span class="vr-src" id="vrSrc"></span><button class="vr-btn sm" data-vr="pt" id="vrPtBtn" hidden>Passthrough <span class="beta-tag">BETA</span></button><button class="vr-btn sm" data-vr="duel">1v1</button><button class="vr-btn sm" data-vr="exit">Exit</button></div>
+    <div class="vr-card vr-wait" id="vrWait">
+      <span class="vr-lbl">Link your phone</span>
+      <p>On your phone, open Emberline, go to <b>Settings → VR panel</b> and type this code:</p>
+      <div class="vr-code" id="vrCode">······</div>
+      <p class="vr-muted" id="vrRelay">Connecting…</p>
+      ${bt ? `<span class="vr-lbl" style="margin-top:8px">Or connect here</span><p>This browser has Bluetooth, so your ${esc(devWord())} can connect straight to this device.</p><button class="vr-btn go" data-vr="connect">Connect ${esc(devWord())}</button>` : ''}
+      <p class="vr-muted">Use it in a desktop overlay (XSOverlay, OVR Toolkit, Desktop+, the SteamVR desktop view) or your headset’s browser. Panel link: <b style="user-select:all">${esc(here)}?vr</b></p>
+    </div>
+    <div class="vr-grid" id="vrMain" hidden>
+      <div class="vr-card">
+        <span class="vr-lbl" id="vrDev"></span>
+        <div class="vr-head"><button class="vr-peak" data-vr="tap" id="vrPeak" aria-label="Start your ${esc(devWord())}">${VR_PEAK_SVG}</button>
+          <div style="display:grid;gap:6px;min-width:0"><div class="vr-temp" id="vrTemp"></div><div class="vr-state" id="vrState"></div><span class="vr-muted" id="vrTapHint"></span></div></div>
+        <div class="vr-bar"><i id="vrBar"></i></div>
+        <div class="vr-row"><button class="vr-btn go" data-vr="start">Start</button><button class="vr-btn" data-vr="boost">Boost</button><button class="vr-btn" data-vr="stop">Stop</button></div>
+        <div class="vr-row" id="vrProfs"></div>
+      </div>
+      <div class="vr-card">
+        <span class="vr-lbl">This session</span>
+        <div class="vr-hit" id="vrHit"></div>
+        <div class="vr-stats" id="vrStats"></div>
+        <div id="vrDuel"></div>
+      </div>
+      <div class="vr-card">
+        <span class="vr-lbl">Lights</span>
+        <div class="vr-row"><button class="vr-btn" data-vr="lan" id="vrLan">Lantern</button><button class="vr-btn" data-vr="stl" id="vrStl">Stealth</button></div>
+        <label class="vr-muted" style="display:grid;gap:4px">Brightness <input type="range" class="vr-range" id="vrBr" min="0" max="100" step="5"></label>
+        <span class="vr-lbl">Moods on the active profile</span>
+        <div class="vr-moods" id="vrMoods"></div>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+  ptSupported().then(ok => { PT.sup = ok; vrPaint(); });
+  el.addEventListener('click', e => { const b = e.target.closest('[data-vr]'); if (b) vrPress(b); });
+  el.querySelector('#vrBr').addEventListener('input', () => { VRP.brHold = Date.now() + 4000; });
+  el.querySelector('#vrBr').addEventListener('change', e => { VRP.brHold = Date.now() + 4000; vrSend('bright', +e.target.value); });
+}
+function vrPress(b){
+  const k = b.dataset.vr, src = vrSource();
+  if (k === 'exit') return vrClose();
+  if (k === 'duel') return duelSheet();
+  if (k === 'pt') return ptIntro();
+  if (k === 'connect'){ if (!vrAllowed()) return; return vrDo('connect'); }
+  if (!src) return toast('Link your phone or connect first');
+  const s = src.s;
+  if (k === 'tap'){ // the Puffco picture: start it, or boost while it heats or is Ready
+    if (s.st === 7 || s.st === 8) return vrSend('boost', null, b);
+    if (s.st >= 9) return;
+    return vrSend('start', null, b);
+  }
+  if (k === 'lan') return vrSend('lan', !s.lan, b);
+  if (k === 'stl') return vrSend('stl', !s.stl, b);
+  vrSend(k, b.dataset.v != null ? +b.dataset.v : null, b);
+}
+// a panel button: run it here, or send it to the linked phone
+async function vrSend(c, v, b){
+  buzz(10);
+  if (VRP.demo){ toast('Demo panel: buttons don’t do anything'); return; }
+  if (S.mode === 'live'){ const err = await vrDo(c, v).catch(e => e.message); if (err) toast(err); vrPaint(); return; }
+  if (!VRP.rt || !VRP.rt.open || !VRP.snap){ toast('Not linked to your phone'); return; }
+  const id = rtCode(5); VRP.pend[id] = { b, at: Date.now() }; if (b) b.classList.add('wait');
+  VRP.rt.send('vr:cmd', { id, c, v });
+  setTimeout(() => { const p = VRP.pend[id]; if (!p) return; delete VRP.pend[id]; p.b && p.b.classList.remove('wait'); toast('The phone didn’t answer. Is Emberline open on it?'); }, 6000);
+}
+function vrPaint(){
+  if (!VRP.on) return; const root = $('#vrp'); if (!root) return;
+  const src = vrSource(), dot = $('#vrDot'), set = (id, v) => { const e = root.querySelector('#' + id); if (e && e.textContent !== String(v)) e.textContent = v; };
+  $('#vrWait').hidden = !!src; $('#vrMain').hidden = !src;
+  { const b = $('#vrPtBtn'); if (b) b.hidden = !(PT.sup && (vrAllowed() || (src && src.how === 'link'))); }
+  { const b = root.querySelector('[data-vr="duel"]'); if (b) b.hidden = !duelAllowed(); } // 1v1 has its own beta list // beta: only once a beta phone links (or a beta account is here)
+  set('vrSrc', src ? src.src : 'Not connected');
+  dot.className = 'vr-dot' + (src ? ' ok' : VRP.rt && VRP.rt.open ? ' wait' : '');
+  if (!src){
+    set('vrCode', VRP.code || '······');
+    set('vrRelay', VRP.rt && VRP.rt.open ? 'Waiting for your phone…' : 'Connecting to the relay…');
+    return;
+  }
+  const s = src.s, sess = s.st >= 7 && s.st <= 9;
+  let el = s.el || 0; if (src.how === 'link' && sess) el = Math.min(s.tot || 1e9, el + (Date.now() - VRP.snapAt) / 1000);
+  set('vrDev', (s.name || devWord()) + (s.bat != null ? ` · ${s.bat}%${s.chg ? ' charging' : ''}` : ''));
+  set('vrTemp', vrDeg(s.t, s.u));
+  set('vrState', (STATE_NAMES[s.st] || '—') + (sess && s.tot ? ` · ${vrMS(el)} / ${vrMS(s.tot)}` : ''));
+  $('#vrBar').style.width = (sess && s.tot ? Math.min(100, el / s.tot * 100) : 0) + '%';
+  { const pk = $('#vrPeak'), c = (s.pr[s.act] || {}).c || '#b04bff';
+    pk.style.setProperty('--pk', s.stl ? '#333' : c); pk.classList.toggle('heat', s.st === 7); pk.classList.toggle('ready', s.st === 8); pk.classList.toggle('hit', !!s.hit.on); pk.classList.toggle('lan', !!s.lan);
+    set('vrTapHint', s.st === 7 || s.st === 8 ? 'Tap the Puffco to boost' : s.st >= 9 ? '' : src.how === 'link' && !s.heat ? '' : 'Tap the Puffco to start'); }
+  root.querySelector('[data-vr="stop"]').disabled = !sess; root.querySelector('[data-vr="boost"]').disabled = !sess;
+  const sb = root.querySelector('[data-vr="start"]'); sb.disabled = sess || (src.how === 'link' && !s.heat); sb.textContent = sess ? 'Heating' : src.how === 'link' && !s.heat ? 'Start is off' : 'Start';
+  const psig = JSON.stringify([s.pr, s.act, sess, s.u]);
+  if (psig !== VRP.sig){ VRP.sig = psig;
+    $('#vrProfs').innerHTML = s.pr.map((p, i) => `<button class="vr-btn vr-prof${i === s.act ? ' cur' : ''}" data-vr="prof" data-v="${i}"${sess && i !== s.act ? ' disabled' : ''}><span><i class="vr-sw" style="background:${esc(p.c)}"></i>${esc(p.n || 'P' + (i + 1))}</span><small>${vrDeg(p.t, s.u)}</small></button>`).join(''); }
+  set('vrHit', s.hit.on ? `Hitting ${s.hit.s}s` : s.st === 8 ? 'Ready. Take a hit' : s.st === 7 ? 'Heating up…' : '');
+  const stats = [['Hits', s.hit.n], ['Last hit', s.hit.last ? s.hit.last + 's' : '—'], ['Longest', s.hit.best ? s.hit.best + 's' : '—'], ['Sessions today', s.today]];
+  const ss = JSON.stringify(stats); if (ss !== VRP.ssig){ VRP.ssig = ss; $('#vrStats').innerHTML = stats.map(([k, v]) => `<div><b>${esc(String(v))}</b><span class="vr-muted">${k}</span></div>`).join(''); }
+  $('#vrLan').classList.toggle('on', !!s.lan); $('#vrLan').textContent = 'Lantern ' + (s.lan ? 'on' : 'off');
+  $('#vrStl').classList.toggle('on', !!s.stl); $('#vrStl').textContent = 'Stealth ' + (s.stl ? 'on' : 'off');
+  const br = $('#vrBr'); if (Date.now() > VRP.brHold && document.activeElement !== br) br.value = s.br;
+  const msig = JSON.stringify(s.moods); if (msig !== VRP.msig){ VRP.msig = msig;
+    $('#vrMoods').innerHTML = (s.moods || []).length ? s.moods.map((n, i) => `<button class="vr-btn" data-vr="mood" data-v="${i}">${esc(n)}</button>`).join('') : '<span class="vr-muted">No moods yet</span>'; }
+  const d = s.duel, dEl = $('#vrDuel');
+  const dh = !d ? '' : `<div class="vr-duel"><span class="vr-lbl">1v1 vs ${esc(d.op || '…')}</span>${d.ph === 'live' ? `<div class="vr-vs"><div><b>${d.mh}</b><span class="vr-muted">You</span></div><div><b>${d.oh}</b><span class="vr-muted">${esc(d.op || 'Them')}</span></div></div><div class="vr-muted">${d.timed ? `<b>${vrMS(d.left)}</b> left · points for every second you pull` : `Hit ${d.min}s+ within <b>${vrMS(d.left)}</b> to stay in`}${d.cool ? ' · cooling, clock paused' : ''}</div>` : `<div class="vr-muted">${esc(d.txt || '')}</div>`}</div>`;
+  if (dEl.innerHTML !== dh) dEl.innerHTML = dh;
+}
+
+/* ===== Passthrough (beta, mixed reality in the Quest browser) =====
+   You see your real room. Point the controller at your real Puffco and pull the trigger to mark it; a glowing marker sits on it
+   with the temp and state. Then point at it and pull the trigger to start it (or boost while it heats / is Ready).
+   Grip: mark it again. B or Y: leave. three.js only loads when you go in. Uses the same link or connection as the VR panel */
+const PT = { on:false };
+async function ptSupported(){ try { return !!(navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')); } catch(e){ return false; } }
+function loadThree(){
+  return window.THREE ? Promise.resolve() : new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+    s.onload = res; s.onerror = () => rej(new Error('Couldn’t load the 3D part. Check your connection')); document.head.appendChild(s); });
+}
+// the intro card on the panel before you go in
+function ptIntro(){
+  const root = $('#vrp'); if (!root) return ptStart();
+  root.querySelectorAll('.vr-modal').forEach(e => e.remove());
+  const linked = !!vrSource(), el = document.createElement('div'); el.className = 'vr-modal';
+  el.innerHTML = `<div class="vr-card vr-mcard"><div class="vr-mhead"><span class="vr-lbl">Passthrough</span><span class="beta-tag">BETA</span></div>
+    <h2>Control your real Puffco</h2>
+    <ol class="vr-steps"><li><b>Mark it.</b> Point the controller at your Puffco and pull the trigger. A glowing marker sits on it.</li>
+      <li><b>Point and pull.</b> Aim at the marker and pull the trigger to start it. While it heats or is Ready, that boosts it.</li>
+      <li><b>Grip</b> marks it again. <b>B or Y</b> takes you back here.</li></ol>
+    ${linked ? '' : `<p class="vr-warn">Link your phone first (or connect here), so the marker can start your ${esc(devWord())}.</p>`}
+    <div class="vr-row"><button class="vr-btn" data-pt="no">Not now</button><button class="vr-btn go" data-pt="go"${linked ? '' : ' disabled'}>Start passthrough</button></div>
+    <p class="vr-muted" style="margin:0">Beta: tell us in the Discord if the marker drifts or a pull doesn’t register.</p></div>`;
+  root.appendChild(el);
+  el.addEventListener('click', e => { const b = e.target.closest('[data-pt]'); if (e.target === el || (b && b.dataset.pt === 'no')) return el.remove(); if (b && b.dataset.pt === 'go'){ el.remove(); ptStart(); } });
+}
+async function ptStart(){
+  if (PT.on) return;
+  if (!(await ptSupported())) return toast('Passthrough needs a headset browser with mixed reality, like the Quest browser');
+  try { await loadThree(); } catch(e){ return toast(e.message); }
+  let session; try { session = await navigator.xr.requestSession('immersive-ar', { requiredFeatures:['local-floor'], optionalFeatures:['hit-test'] }); }
+  catch(e){ return toast('Passthrough didn’t start: ' + (e.message || e)); }
+  PT.on = true; PT.marking = true; PT.hover = false; PT.burst = 0;
+  const T = THREE, renderer = new T.WebGLRenderer({ antialias:true, alpha:true });
+  renderer.setPixelRatio(1); renderer.xr.enabled = true; renderer.xr.setReferenceSpaceType('local-floor');
+  renderer.domElement.style.cssText = 'position:fixed;inset:0;display:none'; document.body.appendChild(renderer.domElement);
+  try { await renderer.xr.setSession(session); }
+  catch(e){ PT.on = false; renderer.domElement.remove(); try { await session.end(); } catch(_){} return toast('Passthrough didn’t start: ' + (e.message || e)); }
+  const scene = new T.Scene(), camera = new T.PerspectiveCamera(70, 1, .01, 30); scene.add(camera);
+  const basic = (color, o) => new T.MeshBasicMaterial(Object.assign({ color, transparent:true, depthWrite:false }, o || {}));
+  // the dot on surfaces while you mark it
+  const reticle = new T.Group(); reticle.matrixAutoUpdate = false; reticle.visible = false; scene.add(reticle);
+  reticle.add(new T.Mesh(new T.RingGeometry(.04, .052, 40).rotateX(-Math.PI / 2), basic(0xffffff)));
+  reticle.add(new T.Mesh(new T.CircleGeometry(.008, 16).rotateX(-Math.PI / 2), basic(0xffffff)));
+  // the marker on your Puffco: a ring on the table, a spinning dashed halo, a soft glow and the label above
+  const marker = new T.Group(); marker.visible = false; scene.add(marker);
+  const ringMat = basic(0xb04bff), orbMat = basic(0xb04bff, { opacity:.16 }), haloMat = basic(0xffffff, { opacity:.55 }), burstMat = basic(0xffffff, { opacity:0 });
+  const ring = new T.Mesh(new T.TorusGeometry(.075, .005, 12, 64), ringMat); ring.rotation.x = Math.PI / 2; marker.add(ring);
+  const halo = new T.Group(); halo.position.y = .004; marker.add(halo);
+  for (let i = 0; i < 8; i++) halo.add(new T.Mesh(new T.RingGeometry(.095, .102, 12, 1, i * Math.PI / 4, Math.PI / 7).rotateX(-Math.PI / 2), haloMat));
+  const orb = new T.Mesh(new T.SphereGeometry(.1, 28, 18), orbMat); orb.position.y = .08; marker.add(orb);
+  const burst = new T.Mesh(new T.TorusGeometry(.09, .004, 8, 64), burstMat); burst.rotation.x = Math.PI / 2; burst.position.y = .01; marker.add(burst);
+  const mkLabel = (w, h) => { const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const tex = new T.CanvasTexture(cv); const sp = new T.Sprite(new T.SpriteMaterial({ map:tex, depthTest:false, transparent:true })); sp.renderOrder = 9; return { cv, tex, sp, key:'' }; };
+  const label = mkLabel(720, 220); label.sp.scale.set(.36, .11, 1); label.sp.position.y = .3; marker.add(label.sp);
+  const hint = mkLabel(1000, 200); hint.sp.scale.set(.5, .1, 1); hint.sp.position.set(0, -.14, -.75); camera.add(hint.sp);
+  // a rounded card: a colored dot, a big line, a small line, and a BETA tag when asked
+  const draw = (L, big, small, dot, beta) => {
+    const key = [big, small, dot, beta].join('|'); if (key === L.key) return; L.key = key;
+    const c = L.cv.getContext('2d'), w = L.cv.width, h = L.cv.height; c.clearRect(0, 0, w, h);
+    c.fillStyle = 'rgba(12,10,20,.86)'; c.beginPath(); c.roundRect(6, 6, w - 12, h - 12, h * .32); c.fill();
+    c.strokeStyle = dot || 'rgba(255,255,255,.3)'; c.lineWidth = 5; c.stroke();
+    let x = h * .42; if (dot){ c.fillStyle = dot; c.beginPath(); c.arc(x, h * .4, h * .09, 0, 7); c.fill(); x += h * .22; }
+    c.textAlign = 'left'; c.fillStyle = '#fff'; c.font = `800 ${Math.round(h * .3)}px system-ui,sans-serif`; c.fillText(big, x, h * .5);
+    if (small){ c.fillStyle = '#c9c3dc'; c.font = `600 ${Math.round(h * .19)}px system-ui,sans-serif`; c.fillText(small, x, h * .8); }
+    if (beta){ const bw = h * .62; c.fillStyle = '#ffd23f'; c.beginPath(); c.roundRect(w - bw - h * .3, h * .16, bw, h * .24, h * .07); c.fill(); c.fillStyle = '#111'; c.textAlign = 'center'; c.font = `900 ${Math.round(h * .15)}px system-ui,sans-serif`; c.fillText('BETA', w - bw / 2 - h * .3, h * .33); }
+    L.tex.needsUpdate = true; };
+  // controllers (or hands): a laser from each, trigger / pinch = select, grip = mark again, B or Y = leave
+  const ray = new T.Raycaster(), tmp = new T.Matrix4();
+  const ctrls = [0, 1].map(i => {
+    const c = renderer.xr.getController(i);
+    const lineMat = new T.LineBasicMaterial({ color:0xff5ec8, transparent:true, opacity:.85 });
+    const line = new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(0, 0, 0), new T.Vector3(0, 0, -1)]), lineMat); line.scale.z = 2.5; c.add(line); c.userData.lineMat = lineMat;
+    c.addEventListener('connected', e => { c.userData.src = e.data; }); c.addEventListener('disconnected', () => { c.userData.src = null; });
+    c.addEventListener('select', () => ptSelect(c)); c.addEventListener('squeeze', () => { PT.marking = true; marker.visible = false; buzzCtrl(c, .3, 40); });
+    scene.add(c); return c;
+  });
+  const buzzCtrl = (c, v, ms) => { try { const h = c.userData.src && c.userData.src.gamepad && c.userData.src.gamepad.hapticActuators; if (h && h[0]) h[0].pulse(v, ms); } catch(e){} };
+  const aimAt = c => { tmp.identity().extractRotation(c.matrixWorld); ray.ray.origin.setFromMatrixPosition(c.matrixWorld); ray.ray.direction.set(0, 0, -1).applyMatrix4(tmp); return ray.intersectObject(orb, false).length > 0; };
+  function ptSelect(c){
+    if (PT.marking){
+      if (reticle.visible) marker.position.setFromMatrixPosition(reticle.matrix);
+      else { aimAt(c); marker.position.copy(ray.ray.origin).addScaledVector(ray.ray.direction, .6); } // no surface found: just over half a meter out
+      marker.visible = true; PT.marking = false; PT.burst = performance.now(); buzzCtrl(c, .6, 60); return;
+    }
+    if (!aimAt(c)) return;
+    const src = vrSource(); if (!src){ PT.note = ['Link your phone first', 'In the panel, or Settings → VR panel on your phone']; PT.noteAt = Date.now(); return; }
+    const st = src.s.st;
+    if (st === 7 || st === 8){ vrSend('boost', null); PT.note = ['Boost!', '']; }
+    else if (st < 9){ if (src.how === 'link' && !src.s.heat){ PT.note = ['Start is off on your phone', 'Settings → Let the VR panel start heating']; PT.noteAt = Date.now(); return; } vrSend('start', null); PT.note = ['Starting…', '']; }
+    else return;
+    PT.noteAt = Date.now(); PT.burst = performance.now(); buzzCtrl(c, .8, 80);
+  }
+  // surface finding from the controller's pointer
+  let hitSrc = null;
+  const wantHit = () => { if (hitSrc || !session.requestHitTestSource) return; const s = [...session.inputSources].find(x => x.targetRayMode === 'tracked-pointer'); if (s) session.requestHitTestSource({ space: s.targetRaySpace }).then(h => { hitSrc = h; }).catch(() => {}); };
+  session.addEventListener('inputsourceschange', wantHit); wantHit();
+  let wasHover = false;
+  renderer.setAnimationLoop((t, frame) => {
+    if (frame && PT.marking && hitSrc){ const hits = frame.getHitTestResults(hitSrc), ref = renderer.xr.getReferenceSpace(); const pose = hits.length && hits[0].getPose(ref);
+      reticle.visible = !!pose; if (pose) reticle.matrix.fromArray(pose.transform.matrix); } else reticle.visible = false;
+    // B or Y leaves
+    if (ctrls.some(c => { const g = c.userData.src && c.userData.src.gamepad; return g && g.buttons[5] && g.buttons[5].pressed; })){ session.end(); return; }
+    PT.hover = marker.visible && ctrls.some(aimAt);
+    if (PT.hover && !wasHover) ctrls.forEach(c => aimAt(c) && buzzCtrl(c, .15, 15)); wasHover = PT.hover;
+    const src = vrSource(), s = src && src.s, hex = s && s.pr && s.pr[s.act] ? s.pr[s.act].c : '#b04bff', col = new T.Color(s && s.stl ? '#666666' : hex);
+    ringMat.color.copy(col); orbMat.color.copy(col); ctrls.forEach(c => c.userData.lineMat.color.set(PT.hover ? 0xffffff : 0xff5ec8));
+    const heat = s && s.st === 7, ready = s && s.st === 8, hit = s && s.hit && s.hit.on;
+    orbMat.opacity = PT.hover ? .34 : hit ? .3 + .08 * Math.sin(t / 120) : ready ? .26 : heat ? .1 + .1 * (Math.sin(t / 260) * .5 + .5) : .13;
+    ring.scale.setScalar(PT.hover ? 1.12 : 1); halo.rotation.y = t / (heat ? 500 : 1600); haloMat.opacity = PT.hover ? .9 : .5;
+    const bt = (performance.now() - PT.burst) / 600; if (PT.burst && bt < 1){ burst.scale.setScalar(1 + bt * 1.6); burstMat.opacity = 1 - bt; } else burstMat.opacity = 0;
+    hint.sp.visible = PT.marking;
+    if (PT.marking) draw(hint, 'Point at your Puffco and pull the trigger', reticle.visible ? 'That spot works. Pull to mark it' : 'Aim at the table or shelf it sits on', '#ff5ec8', true);
+    if (marker.visible){
+      const note = PT.note && Date.now() - PT.noteAt < 1800 ? PT.note : null;
+      if (note) draw(label, note[0], note[1], '#ffffff');
+      else if (!s) draw(label, 'Link your phone first', 'In the panel, or Settings → VR panel', '#ffb020');
+      else { const sess = s.st >= 7 && s.st <= 9, el = Math.round(s.el || 0);
+        draw(label, vrDeg(s.t, s.u) + '  ·  ' + (hit ? 'Hitting ' + s.hit.s + 's' : STATE_NAMES[s.st] || ''),
+          PT.hover ? (s.st === 7 || s.st === 8 ? 'Pull the trigger to boost' : sess ? 'Cooling down' : 'Pull the trigger to start') : sess && s.tot ? vrMS(el) + ' of ' + vrMS(s.tot) : (s.name || 'Puffco') + (s.bat != null ? ' · ' + s.bat + '%' : ''), hex); }
+    }
+    renderer.render(scene, camera);
+  });
+  session.addEventListener('end', () => { renderer.setAnimationLoop(null); try { renderer.dispose(); } catch(e){} renderer.domElement.remove(); PT.on = false; });
+}
+/* ===== Demo match (for videos) =====
+   A scripted 1v1 against a made-up player that shows every animation in about a minute: match found, heat-up, FIGHT,
+   hits with +points, live hit timers, blinker flames on both sides, lead swaps, the red final seconds, VICTORY with confetti
+   and the stats. It never touches your Puffco, your record or your match history */
+const DEMO_SCRIPT = [ // seconds after FIGHT
+  { who:'me', at:2, len:4.5 }, { who:'op', at:4, len:3.6 }, { who:'op', at:9.5, len:9.2 }, { who:'me', at:12.5, len:11.6 },
+  { who:'op', at:24, len:4.1 }, { who:'me', at:28, len:5.2 }, { who:'op', at:33, len:3.3 }, { who:'me', at:37.5, len:5.4 } ];
+function duelDemo(){
+  queueLeave(); duelSheet({ queue:false });
+  duelStart('host', 'BOT', { min:1, win:300, cap:45, prof: DUEL_PUBLIC, bet:25 }, true);
+  Object.assign(DUEL, { demo:true, auto:true, demoSteps: DEMO_SCRIPT.map(x => Object.assign({}, x)) });
+  DUEL.op = { id:'bot', n:'Zay.Clouds', c:'#ff3b8a', p:['#ff3b8a', '#ffb020'], h:0, b:0, tot:0, bl:0, out:0, left:300 };
+  HIT.hits = HIT.hits || []; HIT.ends = HIT.ends || [];
+  duelDraw(); setTimeout(() => { if (DUEL.demo) duelGo(); }, 1800);
+  clearInterval(DUEL.demoTimer); DUEL.demoTimer = setInterval(demoStep, 100); // smooth hit timers for the camera
+}
+function demoStep(){
+  const D = DUEL; if (!D.on || !D.demo){ return; }
+  if (D.ph === 'live'){
+    const el = (Date.now() - D.start) / 1000, o = D.op;
+    D.demoSteps.forEach(x => {
+      if (!x.on && !x.done && el >= x.at){ x.on = true; if (x.who === 'me'){ HIT.on = true; HIT.start = performance.now(); buzz(15); } }
+      if (x.on && el >= x.at + x.len){ x.on = false; x.done = true;
+        if (x.who === 'me'){ HIT.on = false; HIT.last = x.len; HIT.hits.push(x.len); HIT.ends.push(Date.now()); duelTick(); }
+        else { o.h++; o.b = Math.max(o.b, x.len); o.tot += x.len; duelPop(false, Math.round(x.len * DUEL_PPS)); if (x.len >= 8){ o.bl++; duelBlaze(false); } }
+      }
+    });
+  }
+  if (D.ph === 'live' || D.ph === 'count') duelDraw();
+}
+/* ===== 1v1 =====
+   Two players, each on their own Peak. A hit of the set length or longer resets your clock. If your clock runs out
+   you're out, and the last one still going wins. At the time cap, more counting hits wins.
+   Long runs heat things up, so: a time cap, and your clock pauses (up to 2 min) while your Peak's battery is hot.
+   Test build: no RP, nothing goes to the leaderboard. */
+const DUEL_OPTS = { min:[1, 2, 3, 5], win:[180, 240, 300], cap:[120, 300, 600, 1200, 0] }; // cap 0: no time cap
+// the 1v1 profile everyone plays on. Public matches: 505°F, 120s, Bold, Boost +1°F / +15s. Friend games pick their own
+const DUEL_PUBLIC = { tempF:505, time:120, vapor:0.5, boostF:1, boostT:15 };
+const DUEL_RP_REAL = true; // 1v1 buy-ins and bets move your ranked RP this month (win +bet, lose -bet). Up to 100 RP: the server refuses bigger drops
+const DUEL_BET_MAX = 25; // friend games: 25 RP max
+// your 1v1 RP this month, for this account (added to your ranked RP)
+function duelNet(){ const m = lbMonth(), id = acctId() || 'local', b = (store.duelRp || {})[m]; return (b && +b[id]) || 0; }
+const DUEL_DAY_MAX = 150; // most RP you can profit from 1v1s in one day (a loss lowers today's total, so you can win it back)
+const dayKey = () => new Date().toDateString();
+function duelDayNet(){ const d = store.duelDay; return d && d.d === dayKey() && d.id === (acctId() || 'local') ? +d.net || 0 : 0; }
+function duelDayAdd(n){ store.duelDay = { d: dayKey(), id: acctId() || 'local', net: duelDayNet() + n }; }
+const duelDayLeft = () => Math.max(0, DUEL_DAY_MAX - duelDayNet());
+// popup: today's 1v1 limit is hit. With go: asked before a match, "Play anyway" carries on (once a day)
+function duelCapPop(go){
+  if (store.duelCapSeen === dayKey() || $('#dcOk')) return go && go(); // once a day
+  store.duelCapSeen = dayKey(); save();
+  const el = document.createElement('div'); el.className = 'egg'; el.style.zIndex = 240; // above the 1v1 screen
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Daily 1v1 limit" style="gap:12px">
+    <span class="label">1v1</span>
+    <h2 style="margin:0">Daily limit reached</h2>
+    <p class="muted" style="margin:0;font-size:14px">You can win up to <b style="color:#ffd23f">${DUEL_DAY_MAX} RP a day</b> from 1v1s, and you hit it today. Wins won’t add RP until tomorrow, but losses still cost RP. You can still play for fun and for your record.</p>
+    <button class="btn primary" id="dcOk" style="width:100%">${go ? 'Play anyway' : 'Got it'}</button>${go ? '<button class="btn" id="dcNo" style="width:100%">Not now</button>' : ''}</div>`;
+  document.body.appendChild(el); applyHaptics();
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const opened = Date.now(), shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.querySelector('#dcOk').addEventListener('click', () => { if (Date.now() - opened < 400) return; shut(); if (go) go(); });
+  const no = el.querySelector('#dcNo'); if (no) no.addEventListener('click', () => { if (Date.now() - opened < 400) return; shut(); });
+}
+function duelRpAdd(n){ const m = lbMonth(), id = acctId() || 'local'; store.duelRp = store.duelRp || {}; Object.keys(store.duelRp).forEach(k => { if (k !== m) delete store.duelRp[k]; }); const b = store.duelRp[m] = store.duelRp[m] || {}; b[id] = (+b[id] || 0) + n; save(); }
+/* betas on live, each with its own list (Emberline usernames, any case, or player ids). The test build has everything */
+const VR_BETA = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco', 'bkmoonrock', 'mara', 'whoscert']; // VR panel + Passthrough: Rich, infused.taco, BKmoonrock, Mara, whoscert
+const DUEL_BETA = ['a1ca5a326c89dd177960d792e64d0e82', 'infused.taco', 'bkmoonrock', 'mara', 'whoscert']; // 1v1s: Rich, infused.taco, BKmoonrock, Mara, whoscert
+function onList(list){ const me = LB.me || lbStore().meCache; if (!me) return false; const n = String(me.username || '').toLowerCase(); return list.some(u => u === me.id || (n && u.toLowerCase() === n)); }
+const duelAllowed = () => true; // 1v1s are open to everyone (still labeled BETA). DUEL_BETA is kept for reference
+const vrAllowed = () => IS_TEST || isRich() || onList(VR_BETA) || isPremium(); // Premium: early access
+function duelGate(){ [['#duelOpen', 'flex', duelAllowed()], ['#vrCard', 'grid', vrAllowed()]].forEach(([q, d, ok]) => { const e = $(q); if (e) e.style.display = ok ? d : 'none'; }); }
+const DISCORD_URL = 'https://discord.gg/JSHyWbxrUV';
+const QUEUE_BUYIN = 10; // every matchmaking 1v1 costs 10 RP to enter, winner takes both. Test build: shown, never sent to the leaderboard
+const DUEL_BETS = [0, 5, 10, 25]; // the only bets for friend games (no typed amounts)
+const myRpNow = () => { try { return myRank().rp || 0; } catch(e){ return 0; } };
+const betOk = v => Math.max(0, Math.min(DUEL_RP_REAL ? DUEL_BET_MAX : 1e6, Math.floor(+v || 0)));
+const duelBet = () => { const v = betOk(store.duelBet); return DUEL_BETS.filter(b => b <= v).pop() || 0; }; // friend games only. An old typed amount snaps down to a pick
+const betTxt = b => b ? b + ' RP bet' : 'No bet';
+const DUEL_VAPORS = [0, 0.5, 1]; // Smooth, Bold, Intense (the Proxy has no Extreme, so a 1v1 never uses it)
+const DUEL_COLORS = ['#ff3b4a', '#ff8a2b', '#ffd23f', '#3ddc84', '#2bd9ff', '#2d7cf0', '#9900cc', '#ff5ec8', '#ffffff'];
+const duelMoodRef = () => store.duelMood && store.duelMood.kind ? store.duelMood : null; // a mood picked for your 1v1 light (or null: a solid color)
+const duelColor = () => { const m = duelMoodRef(); if (m){ try { return moodSolid(m); } catch(e){} } return DUEL_COLORS.includes(store.duelColor) ? store.duelColor : '#9900cc'; };
+// your 1v1 colors: the picked mood's colors (bright ones, up to 4), or just the solid color
+function duelPal(){
+  const m = duelMoodRef(); let cs = [];
+  if (m){ try { cs = moodColors(m).filter((c, k, a) => a.indexOf(c) === k && Math.max(...hexBytes(c)) > 40).slice(0, 4); } catch(e){} }
+  return cs.length ? cs : [duelColor()];
+}
+const okPal = a => Array.isArray(a) && a.length ? a.slice(0, 4).map(okColor) : null;
+const palGrad = (cs, dir) => cs.length > 1 ? `linear-gradient(${dir || '135deg'},${cs.join(',')})` : cs[0];
+let duelMoodList = null;
+function duelMoods(){ if (!duelMoodList){ try { duelMoodList = shufAll(); } catch(e){ duelMoodList = []; } } return duelMoodList; } // everything in your mood picker
+const okColor = c => /^#[0-9a-f]{6}$/i.test(String(c || '')) ? c : '#888888';
+const capAtOf = D => D.rules.cap ? D.start + D.rules.cap * 1000 : Infinity;
+const capTxt = c => c ? c / 60 + ' min cap' : 'no time cap';
+function duelProfSan(p){ p = p || {}; return { tempF: clamp(Math.round(+p.tempF || 505), 400, 620), time: clamp(Math.round(+p.time || 120), 15, 120), vapor: DUEL_VAPORS.includes(+p.vapor) ? +p.vapor : 0.5, boostF: clamp(Math.round(+p.boostF || 0), 0, 30), boostT: clamp(Math.round(+p.boostT || 0), 0, 60) }; }
+// rules that came from the other phone: keep them in range
+function duelSan(r){ r = r || {}; return { min: clamp(+r.min || 3, 1, 10), win: clamp(+r.win || 240, 30, 900), cap: clamp(+r.cap || 0, 0, 3600), prof: duelProfSan(r.prof), bet: betOk(r.bet) }; }
+const profTxt = p => `${store.unit === 'C' ? Math.round((p.tempF - 32) * 5 / 9) + '°C' : p.tempF + '°F'} · ${p.time}s · ${vaporName(p.vapor)} · Boost ${fmtDelta(p.boostF)} / +${p.boostT}s`;
+const DUEL_HOT_C = 48, DUEL_COOL_MAX = 120;
+const DUEL = { on:false };
+const duelName = () => ((LB.me || lbStore().meCache || {}).username || store.name || 'Player').slice(0, 20);
+function duelRules(){ const r = store.duelRules || {}; return { min: DUEL_OPTS.min.includes(r.min) ? r.min : 1, win: DUEL_OPTS.win.includes(r.win) ? r.win : 240, cap: DUEL_OPTS.cap.includes(r.cap) ? r.cap : 120, prof: duelProfSan(r.prof || DUEL_PUBLIC), bet: duelBet() }; }
+function duelStart(role, code, rules, bot){
+  queueLeave(); duelEnd(true);
+  Object.assign(DUEL, { on:true, made: Date.now(), id: rtCode(8), role, code, rules, bot: !!bot, ph:'lobby', start:0, sentAt:0, seenAt:0, res:null, rt:null,
+    me:{ h:0, b:0, at:0, out:0, outWall:0, cool:0, seen:new Set() }, op:null, finalAt:0 });
+  if (bot){ DUEL.op = { id:'bot', n:'Ember Bot', h:0, b:0, out:0, left:rules.win }; DUEL.seenAt = Date.now(); }
+  else {
+    DUEL.rt = new Relay('ember-duel-' + code)
+      .on('d:hi', duelOnHi).on('d:rules', duelOnRules).on('d:go', duelOnGo).on('d:st', duelOnSt).on('d:live', m => { if (DUEL.role === 'guest' && duelSeeOp(m)) duelLive(); })
+      .on('d:quit', m => { if (DUEL.op && m.id === DUEL.op.id && !DUEL.res && (DUEL.ph === 'live' || DUEL.ph === 'count')){ DUEL.op.quit = true; duelFinish('win', `${DUEL.op.n} gave up`, null); } })
+      .on('d:bye', m => { if (DUEL.op && m.id === DUEL.op.id){ DUEL.op.gone = true; duelDraw(); } })
+      .on('open', () => { duelSend('d:hi', { n: duelName(), role, c: duelColor(), p: duelPal(), a: duelAv() }); duelDraw(); })
+      .on('v:on', vcOnOn).on('v:off', vcOnOff).on('v:sig', vcOnSig) // voice chat (test build)
+      .on('down', duelDraw);
+    DUEL.rt.connect();
+  }
+  clearInterval(DUEL.timer); DUEL.timer = setInterval(duelTick, 1000);
+  wakeOn(); duelDraw(); drawPills();
+}
+/* ---- 1v1 voice chat (test build). WebRTC, phone to phone: no server hears it. The 1v1 relay only carries the setup (one offer, one answer).
+   Both players tap Voice chat; the host calls once both are on. No TURN server, so a few phone networks won't connect ---- */
+const VC = { on:false, opOn:false, mic:null, pc:null, muted:false, state:'', audio:null };
+const VC_ICE = [{ urls:['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+const vcOk = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.RTCPeerConnection);
+function vcAudio(){ if (!VC.audio){ const a = VC.audio = document.createElement('audio'); a.autoplay = true; a.playsInline = true; a.setAttribute('playsinline', ''); document.body.appendChild(a); } return VC.audio; }
+async function vcMic(){
+  return navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:true } });
+}
+const vcErr = e => e && e.name === 'NotAllowedError' ? 'Mic blocked. Allow the microphone for this browser in iPhone Settings' : 'No mic: ' + ((e && (e.message || e.name)) || e);
+async function vcStart(){
+  if (!vcOk()) return toast('This browser can’t do voice chat');
+  try { vcAudio().play().catch(() => {}); } catch(e){} // inside the tap, so iPhone lets it play later
+  try { VC.mic = await vcMic(); } catch(e){ return toast(vcErr(e)); }
+  if (!DUEL.on){ VC.mic.getTracks().forEach(t => t.stop()); VC.mic = null; return; }
+  VC.on = true; VC.muted = false; VC.state = 'wait'; duelSend('v:on', {}); vcMaybeCall(); duelDraw();
+}
+function vcMaybeCall(){ if (VC.on && VC.opOn && !VC.pc && DUEL.role === 'host') vcPeer(true); }
+// wait for the network addresses, then send the whole description in one message
+function vcGathered(pc){ return new Promise(res => { if (pc.iceGatheringState === 'complete') return res(); const t = setTimeout(res, 2500); pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete'){ clearTimeout(t); res(); } }); }); }
+function vcPeer(offer){
+  const pc = VC.pc = new RTCPeerConnection({ iceServers: VC_ICE });
+  VC.mic.getTracks().forEach(t => pc.addTrack(t, VC.mic));
+  pc.ontrack = e => { const a = vcAudio(); a.srcObject = e.streams[0] || new MediaStream([e.track]); a.play().catch(() => { VC.state = 'tap'; duelDraw(); }); };
+  pc.onconnectionstatechange = () => { if (pc !== VC.pc) return; const st = pc.connectionState;
+    if (st === 'connected'){ if (VC.state !== 'tap') VC.state = 'live'; buzz(20); }
+    else if (st === 'failed'){ VC.state = 'failed'; toast('Voice couldn’t connect. Some phone networks block it, try Wi-Fi'); }
+    else if (st === 'disconnected') VC.state = 'wait';
+    duelDraw(); };
+  if (offer) (async () => { try { await pc.setLocalDescription(await pc.createOffer()); await vcGathered(pc); if (pc === VC.pc) duelSend('v:sig', { sdp: pc.localDescription.toJSON() }); } catch(e){ VC.state = 'failed'; duelDraw(); } })();
+}
+async function vcOnSig(m){
+  if (!DUEL.op || m.id !== DUEL.op.id || !VC.on || !m.sdp || !m.sdp.type) return;
+  try {
+    if (m.sdp.type === 'offer'){ if (VC.pc){ VC.pc.close(); VC.pc = null; } vcPeer(false); const pc = VC.pc;
+      await pc.setRemoteDescription(m.sdp); await pc.setLocalDescription(await pc.createAnswer()); await vcGathered(pc); if (pc === VC.pc) duelSend('v:sig', { sdp: pc.localDescription.toJSON() }); }
+    else if (m.sdp.type === 'answer' && VC.pc) await VC.pc.setRemoteDescription(m.sdp);
+  } catch(e){ VC.state = 'failed'; duelDraw(); }
+}
+function vcOnOn(m){ if (!DUEL.op || m.id !== DUEL.op.id) return; const was = VC.opOn; VC.opOn = true; if (VC.on && !was) duelSend('v:on', {}); vcMaybeCall(); duelDraw(); } // answer once, so a late joiner knows we're on
+function vcOnOff(m){ if (!DUEL.op || m.id !== DUEL.op.id) return; VC.opOn = false; if (VC.pc){ VC.pc.close(); VC.pc = null; } if (VC.on) VC.state = 'wait'; duelDraw(); }
+function vcOff(send){
+  if (send && VC.on) duelSend('v:off', {});
+  if (VC.pc){ VC.pc.close(); VC.pc = null; } if (VC.mic){ VC.mic.getTracks().forEach(t => t.stop()); VC.mic = null; }
+  if (VC.audio) VC.audio.srcObject = null;
+  VC.on = false; VC.state = ''; VC.muted = false; if (!send) VC.opOn = false;
+}
+function vcMute(){ VC.muted = !VC.muted; if (VC.mic) VC.mic.getAudioTracks().forEach(t => t.enabled = !VC.muted); duelDraw(); }
+function vcRow(){
+  const D = DUEL; if (!IS_TEST || !D.op || D.bot || D.demo || !D.rt || D.op.gone) return '';
+  const n = esc(D.op.n || 'them');
+  if (!VC.on) return `<div class="vc-row"><button class="btn small${VC.opOn ? ' primary' : ''}" data-d="vc" style="flex:1">🎙 ${VC.opOn ? `${n} wants voice · Join` : 'Voice chat'}</button></div>`;
+  const txt = VC.state === 'live' ? `🔊 Talking with ${n}` : VC.state === 'failed' ? 'Voice couldn’t connect' : VC.state === 'tap' ? `Tap Hear to hear ${n}` : VC.opOn ? 'Connecting…' : `Voice on · waiting for ${n} to join`;
+  return `<div class="vc-row"><span class="vc-st">${txt}${VC.muted ? ' · muted' : ''}</span>${VC.state === 'tap' ? '<button class="btn small primary" data-d="vcplay">Hear</button>' : ''}<button class="btn small" data-d="vcmute">${VC.muted ? 'Unmute' : 'Mute'}</button><button class="btn small" data-d="vcoff">End</button></div>`;
+}
+// test tools: can this browser use the mic? (Path might not let it)
+async function vcMicCheck(){
+  const out = [];
+  out.push('getUserMedia: ' + (navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? 'yes' : 'NO'), 'WebRTC: ' + (window.RTCPeerConnection ? 'yes' : 'NO'));
+  if (!vcOk()) return alertBox('Mic check', out.join('<br>') + '<br><br>This browser can’t do voice chat.');
+  let mic; try { mic = await vcMic(); } catch(e){ return alertBox('Mic check', out.join('<br>') + '<br><br><b>' + esc(vcErr(e)) + '</b>'); }
+  const ctx = new (window.AudioContext || window.webkitAudioContext)(), an = ctx.createAnalyser(); ctx.createMediaStreamSource(mic).connect(an); an.fftSize = 512;
+  const buf = new Uint8Array(an.fftSize); let peak = 0; const t0 = Date.now();
+  toast('Talk for 4 seconds…');
+  await new Promise(res => { const tick = () => { an.getByteTimeDomainData(buf); for (const v of buf) peak = Math.max(peak, Math.abs(v - 128)); if (Date.now() - t0 < 4000) requestAnimationFrame(tick); else res(); }; tick(); });
+  mic.getTracks().forEach(t => t.stop()); try { ctx.close(); } catch(e){}
+  alertBox('Mic check', out.join('<br>') + `<br>Mic: works<br>Loudest: ${Math.round(peak / 128 * 100)}%<br><br>${peak > 6 ? 'Heard you. Voice chat should work here.' : 'The mic opened but heard almost nothing. Check it isn’t muted.'}`);
+}
+function alertBox(title, html, copyText){ // long text scrolls inside, and Close / Copy always stay on screen
+  const el = document.createElement('div'); el.className = 'egg'; el.style.zIndex = 240;
+  el.innerHTML = `<div class="egg-card" role="dialog" style="gap:10px;max-height:84vh;display:grid;grid-template-rows:auto minmax(0,1fr) auto"><div class="row between"><h2 style="margin:0;font-size:20px">${esc(title)}</h2><button class="btn small" data-ab="x">Close</button></div>
+    <div class="muted" style="margin:0;font-size:12.5px;text-align:left;overflow:auto;-webkit-overflow-scrolling:touch;word-break:break-word;font-family:ui-monospace,Menlo,monospace">${html}</div>
+    <div class="row" style="gap:8px">${copyText != null ? '<button class="btn" data-ab="c" style="flex:1">Copy</button>' : ''}<button class="btn primary" data-ab="x" style="flex:1">OK</button></div></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.addEventListener('click', async e => { const b = e.target.closest('[data-ab]'); if (e.target === el || (b && b.dataset.ab === 'x')) return shut();
+    if (b && b.dataset.ab === 'c'){ try { await navigator.clipboard.writeText(typeof copyText === 'function' ? copyText() : copyText); toast('Copied'); } catch(_){ toast('Couldn’t copy'); } } });
+  return el;
+}
+function duelEnd(quiet){
+  try { vcOff(true); } catch(e){}
+  if (DUEL.demo){ clearInterval(DUEL.demoTimer); HIT.on = false; }
+  if (DUEL.inviting && !DUEL.op && LOBBY.rt) LOBBY.rt.send('inv:x', { id: lobbyId(), to: DUEL.inviting.to, code: DUEL.code }); // tell the friend the invite is off
+  if (DUEL.rt){ const r = DUEL.rt; if (DUEL.ph !== 'done') r.send('d:bye', { id: DUEL.id }); setTimeout(() => r.close(), 400); }
+  clearInterval(DUEL.timer); Object.keys(DUEL).forEach(k => delete DUEL[k]); DUEL.on = false;
+  wakeOff(); drawPills(); duelFrame(); if (!quiet) duelDraw();
+}
+function duelSend(ev, p){ if (DUEL.rt) DUEL.rt.send(ev, Object.assign({ id: DUEL.id }, p)); }
+function duelSeeOp(m){
+  if (!m || !m.id || m.id === DUEL.id) return false;
+  if (DUEL.op && DUEL.op.id !== m.id) return false; // someone else typed the same code: ignore them
+  if (!DUEL.op) DUEL.op = { id: m.id, n: String(m.n || 'Player').slice(0, 20), h:0, b:0, out:0, left: DUEL.rules ? DUEL.rules.win : 0 };
+  if (m.n) DUEL.op.n = String(m.n).slice(0, 20);
+  if (m.c) DUEL.op.c = okColor(m.c);
+  if (okPal(m.p)) DUEL.op.p = okPal(m.p);
+  if (m.a && typeof m.a === 'string' && m.a.startsWith(SB_URL + '/storage/')) DUEL.op.a = m.a.slice(0, 400);
+  DUEL.seenAt = Date.now(); DUEL.op.gone = false; return true;
+}
+function duelOnHi(m){
+  const had = !!DUEL.op; if (!duelSeeOp(m)) return;
+  if (DUEL.role === 'host') duelSend('d:rules', { n: duelName(), c: duelColor(), p: duelPal(), a: duelAv(), r: DUEL.rules, ph: DUEL.ph });
+  else if (!had) duelSend('d:hi', { n: duelName(), role: DUEL.role, c: duelColor(), p: duelPal(), a: duelAv() });
+  if (!had){ buzz(20); toast(`${DUEL.op.n} joined the 1v1`); if ((DUEL.auto || DUEL.inviting) && DUEL.role === 'host' && DUEL.ph === 'lobby') setTimeout(duelGo, 800); }
+  duelDraw();
+}
+function duelOnRules(m){
+  if (DUEL.role !== 'guest' || !duelSeeOp(m)) return;
+  if (DUEL.ph === 'lobby' && m.r) DUEL.rules = duelSan(m.r);
+  duelDraw();
+}
+function duelOnGo(m){
+  if (DUEL.role !== 'guest' || !duelSeeOp(m) || DUEL.ph !== 'lobby') return;
+  if (m.r) DUEL.rules = duelSan(m.r);
+  duelCount();
+}
+function duelOnSt(m){
+  if (!duelSeeOp(m)) return;
+  const o = DUEL.op; if ((+m.h || 0) > (o.h || 0) && DUEL.ph === 'live') duelPop(false, Math.round(((+m.tot || 0) - (o.tot || 0)) * DUEL_PPS));
+  o.h = Math.max(0, +m.h || 0); o.tot = Math.max(0, +m.tot || 0);
+  if ((+m.bl || 0) > (o.bl || 0)){ o.bl = +m.bl; if (DUEL.ph === 'live') setTimeout(() => duelBlaze(false), 60); } o.b = Math.max(0, +m.b || 0); o.left = +m.left || 0; o.cool = !!m.cool;
+  if (+m.out > 0 && !o.out) o.out = +m.out;
+  o.rdy = !!m.rdy; o.t = +m.t || 0;
+  if (m.ph === 'done' && m.r && !DUEL.res) o.res = m.r;
+}
+/* the countdown is the preheat: both Peaks start heating right away, and the match goes live once both are Ready
+   (the host calls it, so both phones start the clock together). 90s at most, so a Peak that won't heat can't hold it up */
+const DUEL_HEAT_MAX = 90000;
+function duelCount(){
+  const D = DUEL; D.ph = 'count'; D.countAt = Date.now(); D.start = 0; buzz(20); duelDraw();
+  duelAutoStart();
+}
+const duelReady = () => S.mode !== 'live' || S.state === 8; // not connected: nothing to wait for
+function duelLive(at){
+  const D = DUEL; if (D.ph !== 'count') return;
+  D.ph = 'live'; D.start = at || Date.now(); D.me.at = D.start; buzz([40, 60, 40]); duelSplash('FIGHT!', duelTimed(D.rules) ? 'Every second counts' : 'Hit ' + D.rules.min + 's+ to stay in'); D.fxLead = undefined; D.fxFinal = false; D.fxStreak = 0; D.fxBehind = 0; dfx('fight');
+  if (D.bot){ D.op.next = D.start + (5 + Math.random() * 20) * 1000; D.op.outAt = D.start + (D.rules.cap ? D.rules.cap * 1000 * (.35 + Math.random() * .9) : D.rules.win * 1000 * (1.5 + Math.random() * 3)); }
+  duelDraw();
+}
+function duelGo(){
+  if (DUEL.role !== 'host' || DUEL.ph !== 'lobby' || !DUEL.op) return;
+  if (!DUEL.bot) duelSend('d:go', { n: duelName(), c: duelColor(), p: duelPal(), r: DUEL.rules });
+  duelCount();
+}
+function duelStats(){ const m = DUEL.me; return { tot: Math.round((m.tot || 0) * 10) / 10, bl: m.bl || 0, h: m.h, b: m.b, out: m.out, cool: m.cool > 0 && duelHot(), left: DUEL.ph === 'live' ? Math.round(duelLeft()) : 0, rdy: duelReady(), t: Math.round(c2f(S.tempC || 0)) }; }
+const duelHot = () => S.mode === 'live' && S.batTemp >= DUEL_HOT_C;
+const duelLeft = () => DUEL.rules.win - (Date.now() - DUEL.me.at) / 1000;
+function duelTick(){
+  const D = DUEL; if (!D.on) return;
+  const now = Date.now(), r = D.rules;
+  if (D.ph === 'count' && D.demo){ if (now - D.countAt > 5500) duelLive(); }
+  else if (D.ph === 'count'){
+    if (D.role === 'host' && ((duelReady() && (D.bot || (D.op && D.op.rdy))) || now - D.countAt > DUEL_HEAT_MAX)){ if (!D.bot) duelSend('d:live', {}); duelLive(); }
+    else if (D.role === 'guest' && now - D.countAt > DUEL_HEAT_MAX + 15000) duelLive(); // never heard from the host
+    if (D.ph === 'count' && now - (D.sentAt || 0) >= 1000 && !D.bot){ D.sentAt = now; duelSend('d:st', Object.assign({ ph:'count' }, duelStats())); } // ready news goes out fast
+  }
+  if (D.ph === 'live'){
+    try { dfxTick(); } catch(e){}
+    const capAt = capAtOf(D), ends = HIT.ends || [], hits = HIT.hits || [];
+    for (let j = 1; j <= Math.min(ends.length, hits.length); j++){ // hits that ended since the start, each one once (matched from the end: a reload can put back hits without end times)
+      const t = ends[ends.length - j], secs = hits[hits.length - j]; if (!t || t < D.start || t > capAt || D.me.seen.has(t)) continue;
+      const stopAt = Math.min(D.me.out || Infinity, (D.op && D.op.out) || Infinity); if (t > D.start + stopAt) continue; // the match ended when the first clock ran out
+      D.me.seen.add(t);
+      if (secs >= r.min && !D.bot && S.mode === 'live' && !duelProfOk()){ D.me.bad = (D.me.bad || 0) + 1; toast('That hit didn’t count: use the 1v1 profile (P1)'); continue; }
+      if (secs >= r.min){ D.me.h++; D.me.b = Math.max(D.me.b, secs); D.me.tot = (D.me.tot || 0) + secs; if (!D.me.out) D.me.at = Math.max(D.me.at, t); buzz(15); duelPop(true, Math.round(secs * DUEL_PPS)); dfxHit(secs);
+        if (secs >= duelBlinkAt()){ D.me.bl = (D.me.bl || 0) + 1; setTimeout(() => duelBlaze(true), 60); } }
+    }
+    if (!D.me.out){
+      if (HIT.on) D.me.at = Math.max(D.me.at, now - (r.win - 5) * 1000); // mid-pull: you can't run out while pulling
+      if (duelHot() && D.me.cool < DUEL_COOL_MAX){ D.me.cool++; D.me.at += 1000; } // hot battery: the clock waits
+      if (duelLeft() <= 0 && now < capAt){ D.me.out = now - D.start; D.me.outWall = now; buzz([80, 80, 80]); duelSend('d:st', Object.assign({ ph:D.ph }, duelStats())); D.sentAt = now; }
+    }
+    if (D.bot) duelBot(now);
+    if (!D.bot && D.op && now - D.seenAt > 90000) D.op.gone = true;
+    duelDecide(now);
+  }
+  if (!D.bot && D.rt && D.ph !== 'lobby' && now - D.sentAt >= 2000 && (D.ph !== 'done' || now - D.finalAt < 8000)){ D.sentAt = now; duelSend('d:st', Object.assign({ ph:D.ph, r: D.res && D.res.r }, duelStats())); }
+  if (D.ph === 'lobby' && !D.op && !D.bot){
+    if (D.auto && now - D.made > 15000){ duelEnd(true); toast('That match fell through. Back in the queue'); duelSheet({ queue:true }); return; }
+    if (D.inviting && now - D.inviting.at > 45000){ const n = D.inviting.n; duelEnd(true); toast(`No answer from ${n}. They need Emberline open`); duelSheet({ queue:false }); return; }
+  }
+  if (D.ph === 'lobby' && D.rt && D.rt.open && !D.op && now - D.sentAt > 5000){ D.sentAt = now; duelSend('d:hi', { n: duelName(), role: D.role }); }
+  duelDraw(); drawPills(); duelFrame();
+}
+/* the arena: a clock ring around each player, their hits, VS in the middle. Built fresh every second (no running animations
+   except the low-clock beat and the pulse while you're pulling) */
+const duelAv = () => { const me = LB.me || lbStore().meCache; return me && me.avatar_url ? String(me.avatar_url) : ''; };
+function duelArena(){
+  const D = DUEL, r = D.rules, me = D.me, op = D.op || {}, c1 = duelColor(), c2 = okColor(op.c);
+  const p1 = duelPal(), p2 = op.p || [c2];
+  const grad = (id, cs) => `<defs><linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1">${(cs.length > 1 ? cs : [cs[0], cs[0]]).map((c, i, a) => `<stop offset="${(i / (a.length - 1) * 100).toFixed(0)}%" stop-color="${c}"/>`).join('')}</linearGradient></defs>`;
+  const player = (name, av, you, pc) => { const pal = you ? p1 : p2, gid = you ? 'dvgA' : 'dvgB';
+    return `<div class="dv-p" data-side="${you ? 'me' : 'op'}" style="--pc:${pc};--pc2:${pal[1] || pc}">
+      <div class="dv-flame" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><b>BLINKER</b></div>
+      <div class="dv-ring"><svg viewBox="0 0 96 96">${grad(gid, pal)}<circle class="bg" cx="48" cy="48" r="42"/><circle class="fg" cx="48" cy="48" r="42" data-grad="url(#${gid})" stroke-dasharray="${DV_C.toFixed(1)}" stroke-dashoffset="0"/></svg>
+        <div class="dv-av" style="background:${palGrad(pal)}">${av && av.startsWith(SB_URL + '/storage/') ? lbAvatar(av, name, 74) : esc((name || '?').slice(0, 1).toUpperCase())}</div></div>
+      <span class="dv-n">${esc(name)}</span><span class="dv-h">0</span><span class="dv-sub"></span><span class="dv-clock"></span><span class="dv-lead">LEADING</span></div>`;
+  };
+  const embers = Array.from({ length: 12 }, (_, i) => `<i style="left:${(i * 8.3 + 3).toFixed(1)}%;animation-delay:-${(i * .73 % 5).toFixed(2)}s;animation-duration:${(4 + (i * 1.7 % 3)).toFixed(1)}s;background:${i % 2 ? c2 : c1}"></i>`).join('');
+  return `<div class="dv-arena" data-key="${esc(duelArenaKey())}" style="--c1:${c1};--c2:${c2};--c1b:${p1[1] || c1};--c2b:${p2[1] || c2}"><div class="dv-embers" aria-hidden="true">${embers}</div><span class="dv-tag">● LIVE</span>
+    ${player('You', duelAv(), true, c1)}<span class="dv-vs" style="background:linear-gradient(135deg,${p1.slice(0, 2).join(',')},${p2.slice(0, 2).join(',')})">VS</span>${player(op.n || '…', op.a, false, c2)}</div>`;
+}
+const DV_C = 2 * Math.PI * 42;
+// what the arena is built from; when this changes it's rebuilt, otherwise only the numbers update (so animations keep running)
+const duelArenaKey = () => { const op = DUEL.op || {}; return JSON.stringify([duelPal(), op.n, op.a, op.p, op.c]); };
+const duelBlinkAt = () => champBlink() || 8; // a blinker: 8s, or 11s in Champion and Legend
+function duelArenaUpdate(ar){
+  const D = DUEL, r = D.rules, me = D.me, op = D.op || {}, sc = duelScore(me, op), anyOut = me.out || op.out;
+  const tag = ar.querySelector('.dv-tag'); if (tag) tag.hidden = !!anyOut;
+  const timed = duelTimed(r), mLeft = timed ? Math.max(0, (capAtOf(D) - Date.now()) / 1000) : 0;
+  [['me', me.h, me.b, duelLeft(), me.out, me.cool > 0 && duelHot(), true, me], ['op', op.h || 0, op.b || 0, op.left || 0, op.out, op.cool, false, op]].forEach(([side, hits, b, left, out, cool, you, o]) => {
+    const el = ar.querySelector(`.dv-p[data-side="${side}"]`); if (!el) return;
+    if (timed) left = mLeft; const h = duelPts(o);
+    const f = out ? 0 : Math.max(0, Math.min(1, left / (timed ? r.cap : r.win))), low = !out && left < (timed ? 15 : 30), hitting = you && HIT.on && !out;
+    el.classList.toggle('low', low); el.classList.toggle('out', !!out); el.classList.toggle('hitting', !!hitting);
+    el.classList.toggle('lead', !anyOut && (you ? sc.a > sc.b : sc.b > sc.a));
+    const fg = el.querySelector('.fg'); fg.setAttribute('stroke-dashoffset', (DV_C * (1 - f)).toFixed(1)); fg.style.stroke = low ? '' : fg.dataset.grad;
+    const hEl = el.querySelector('.dv-h'); if (hEl.textContent !== String(h)){ if (+hEl.textContent < h){ hEl.classList.remove('pop'); void hEl.offsetWidth; hEl.classList.add('pop'); } hEl.textContent = h; }
+    el.querySelector('.dv-sub').textContent = hits + (hits === 1 ? ' hit' : ' hits') + ' · best ' + (b ? b + 's' : '—');
+    el.querySelector('.dv-clock').textContent = out ? 'OUT' : hitting ? (Math.round((performance.now() - HIT.start) / 100) / 10).toFixed(1) + 's' : vrMS(left) + (cool ? ' ❄' : '');
+  });
+}
+/* ---- 1v1 Puffco effects (test build): the light on your Puffco reacts to the match.
+   Peak Pro gets animated looks (one write each). Proxy and the original Peak only take solid colors, so they get quick color steps.
+   While heating it paints the live heat light (/p/app/thc/colr) and puts your 1v1 light back after. Not heating: the preview channel, cleared after. ---- */
+const DFX = { gen:0, cur:null, k:'', until:0, t:0, ft:0, pend:0, last:{}, ch:'', pxN:0 };
+const dfxOpC = () => okColor(DUEL.op && DUEL.op.c) || '#ff3b8a';
+// each effect is a short show: a list of steps (a mood look on Peak Pro, color steps on Proxy and the original Peak)
+const DFX_RB = ['#ff0040', '#ff9900', '#ffee00', '#00ff66', '#00ccff', '#cc00ff']; // rainbow
+const DFX_T = { strobe:'emberline-fx-strobe', wave:'emberline-fx-wave', heart:'emberline-fx-heartbeat', comet:'emberline-fx-comet', police:'emberline-fx-police', breathe:'emberline-fx-breathe',
+  spin:'pikaled2-spin-mood-light', disco:'pikaled2-disco-mood-light', fade:'pikaled2-fade-mood-light', split:'pikaled2-split-gradient-mood-light', slide:'pikaled2-vertical-slideshow-mood-light', confetti:'migration-confetti-mood-light', lava:'migration-lava-lamp-mood-light' };
+const dfxPh = (tag, cols, t, ms, more) => Object.assign({ tag, cols, t, ms }, more || {});
+const DFX_FX = {
+  fight:    { n:'Fight!',           why:'The clock starts',                    pri:5, seq:[dfxPh(DFX_T.strobe, ['#ffffff'], 1, 700), dfxPh(DFX_T.disco, () => [duelColor(), '#ffffff', dfxOpC()], 1, 1300)] },
+  fire:     { n:'On fire',          why:'You hit a blinker',                   pri:6, seq:[dfxPh(DFX_T.strobe, ['#fff4d0'], 1, 600), dfxPh(DFX_T.lava, ['#4d0000', '#ff2200', '#ff7a00', '#ffd000'], .95, 3400, { density:8 }), dfxPh(DFX_T.confetti, ['#ff2200', '#ff9900', '#ffee00', '#ffffff'], .95, 2600, { density:12 })] },
+  bighit:   { n:'Big hit',          why:'A hit of 5s or longer',               pri:2, gap:4000, seq:[dfxPh(DFX_T.confetti, () => [duelColor(), '#ffffff', '#ffd23f'], .95, 1800, { density:12 })] },
+  streak:   { n:'Hot streak',       why:'3 hits of 5s+ in a row',              pri:3, seq:[dfxPh(DFX_T.comet, ['#00e5ff', '#ffffff'], .95, 1600), dfxPh(DFX_T.spin, ['#00e5ff', '#7a00ff', '#ff00d4', '#ffffff'], .95, 2600)] },
+  lead:     { n:'Took the lead',    why:'You pass them on points',             pri:2, gap:6000, seq:[dfxPh(DFX_T.strobe, ['#ffd23f'], 1, 500), dfxPh(DFX_T.spin, ['#ffd23f', '#ffffff', '#ffb020'], .9, 1900)] },
+  comeback: { n:'Comeback',         why:'Take the lead after being 50+ behind', pri:4, seq:[dfxPh(DFX_T.strobe, ['#ffffff'], 1, 500), dfxPh(DFX_T.spin, DFX_RB, .95, 2600), dfxPh(DFX_T.confetti, ['#ffd23f', '#ffffff', '#00ff66'], .9, 1600, { density:12 })] },
+  burn:     { n:'Under fire',       why:'They hit a blinker',                  pri:4, seq:[dfxPh(DFX_T.police, () => [dfxOpC(), '#ff0000'], .9, 3000)] },
+  lost:     { n:'Lost the lead',    why:'They pass you on points',             pri:2, gap:6000, seq:[dfxPh(DFX_T.heart, ['#ff1a1a'], .75, 2500, { frames: c => [['#ff1a1a', 300], ['#300000', 300]] })] },
+  final:    { n:'Final 15 seconds', why:'Heartbeat in your color to the end',  pri:1, seq:[dfxPh(DFX_T.heart, () => [duelColor()], .95, () => DUEL.on && DUEL.rules ? Math.max(1500, Math.min(15000, capAtOf(DUEL) - Date.now())) : 6000, { frames: c => [[c[0], 300], ['#000000', 300]] })] },
+  win:      { n:'Victory',          why:'You won',                             pri:9, seq:[dfxPh(DFX_T.strobe, ['#ffffff'], 1, 800), dfxPh(DFX_T.confetti, DFX_RB, .9, 3000, { density:12 }), dfxPh(DFX_T.spin, ['#ffd23f', '#ffffff', '#ffb020', '#ffffff'], .85, 3000), dfxPh(DFX_T.disco, () => [duelColor(), '#ffd23f', '#ffffff'], .8, 3000), dfxPh(DFX_T.fade, () => ['#ffd23f', duelColor()], .55, 3000)] },
+  flawless: { n:'Flawless victory', why:'You won and they scored 0',           pri:9, seq:[dfxPh(DFX_T.strobe, ['#ffffff'], 1, 800), dfxPh(DFX_T.spin, DFX_RB, 1, 3000), dfxPh(DFX_T.confetti, DFX_RB, .95, 3000, { density:12 }), dfxPh(DFX_T.slide, ['#ffd23f', '#ffffff', '#00e5ff', '#ff00d4'], .9, 3000), dfxPh(DFX_T.spin, ['#ffd23f', '#ffffff'], .85, 3000)] },
+  lose:     { n:'Defeat',           why:'You lost or gave up',                 pri:9, seq:[dfxPh(DFX_T.breathe, ['#ff1a1a'], .35, 6000, { frames: c => [['#ff1a1a', 700], ['#400000', 700]] })] },
+  draw:     { n:'Draw',             why:'Nobody wins',                         pri:9, seq:[dfxPh(DFX_T.split, () => [duelColor(), dfxOpC()], .5, 4000)] }
+};
+// color steps for devices that only take solid colors: smooth fades between the colors, hard flashes for a strobe
+function dfxFrames(p, cols){
+  if (p.frames) return p.frames(cols);
+  if (p.tag === DFX_T.strobe) return [[cols[0], 250], ['#000000', 250]];
+  if (cols.length < 2) return [[cols[0], 350], [mixL('#000000', cols[0], .25), 350]];
+  const fast = p.tag === DFX_T.confetti || p.tag === DFX_T.disco || p.tag === DFX_T.police, out = [];
+  cols.forEach((c, i) => { out.push([c, fast ? 250 : 300]); if (!fast) out.push([mixL(c, cols[(i + 1) % cols.length], .5), 260]); });
+  return out;
+}
+const dfxOn = () => store.dfx !== false && S.mode === 'live';
+const dfxAnim = () => !isProxy() && S.api !== 2; // Peak Pro (and new Peak firmware): animated moods
+const dfxHeating = () => S.state >= 7 && S.state <= 9;
+async function dfxProxy(path, blob){ // the Proxy: find the write that works once, then reuse it without reading back
+  if (!DFX.pxN){ DFX.pxN = await proxyColr(path, blob); return; }
+  const tries = [() => ble.write(path, blob, 0, 4), () => ble.writeBlob(path, blob), () => ble.write(path, blob, 0, 1), () => ble.write(path, blob, 0, 0)];
+  return tries[DFX.pxN - 1]();
+}
+async function dfxWrite(ch, look){ // look: { blob } (animated, Peak Pro) or { hex }
+  if (ch === 'pv') return previewWrite(look.blob || look.hex);
+  if (isProxy()) return dfxProxy('/p/app/thc/colr', proxyBlob(look.hex));
+  if (S.api === 2) return ble.write('/p/app/thc/colr', rgbt(look.hex));
+  return ble.writeBlob('/p/app/thc/colr', look.blob || solidPayload(look.hex));
+}
+function dfxQ(fn, must){ if (DFX.pend > 1 && !must) return; DFX.pend++; ledJob(() => fn().catch(() => {})).finally(() => DFX.pend--); } // drop a step rather than pile up Bluetooth writes
+function dfx(k, force){
+  const fx = DFX_FX[k]; if (!fx || !dfxOn() || (!force && !DUEL.on)) return;
+  const now = Date.now();
+  if (!force && DFX.cur && DFX.cur.pri > fx.pri && now < DFX.until) return; // something bigger is showing
+  if (!force && now - (DFX.last[k] || 0) < (fx.gap || 0)) return;
+  DFX.last[k] = now;
+  const gen = ++DFX.gen, val = v => typeof v === 'function' ? v() : v;
+  const seq = fx.seq.map(p => Object.assign({}, p, { cols: val(p.cols), ms: val(p.ms) }));
+  const ch = dfxHeating() && !store.dfxPv ? 'thc' : 'pv';
+  if (DFX.ch && DFX.ch !== ch && DFX.cur) dfxRestore(DFX.ch); // switched channel mid-effect: tidy the old one
+  DFX.cur = fx; DFX.k = k; DFX.until = now + seq.reduce((a, p) => a + p.ms, 0); DFX.ch = ch; clearTimeout(DFX.t); clearTimeout(DFX.ft);
+  let pi = 0;
+  const step = () => {
+    if (gen !== DFX.gen) return; const p = seq[pi++]; if (!p) return dfxEnd(gen);
+    clearTimeout(DFX.ft); const mine = pi;
+    if (dfxAnim()){
+      let blob = null; try { blob = moodPayload({ kind:'tpl', tag: p.tag, name: fx.n, meta: Object.assign({ userColors: p.cols, tempoFrac: p.t, dynamicInhale: 0 }, p.density ? { density: p.density } : {}) }); } catch(e){}
+      dfxQ(() => dfxWrite(ch, blob ? { blob } : { hex: p.cols[0] }), true); // a new step always goes out
+    } else {
+      const fr = dfxFrames(p, p.cols); let i = 0;
+      const tick = () => { if (gen !== DFX.gen || pi !== mine) return; const [hex, f] = fr[i++ % fr.length]; dfxQ(() => dfxWrite(ch, { hex })); DFX.ft = setTimeout(tick, Math.max(250, f)); };
+      tick();
+    }
+    DFX.t = setTimeout(step, p.ms);
+  };
+  step();
+  try { const l = $('#dfxNow'); if (l) l.textContent = fx.n; } catch(e){}
+}
+function dfxEnd(gen){
+  if (gen !== DFX.gen) return;
+  clearTimeout(DFX.ft); const ch = DFX.ch, was = DFX.k; DFX.cur = null; DFX.k = '';
+  const D = DUEL; if (was !== 'final' && D.on && D.ph === 'live' && D.fxFinal && capAtOf(D) - Date.now() > 1500) return dfx('final'); // back to the heartbeat
+  dfxRestore(ch); DFX.ch = '';
+  try { const l = $('#dfxNow'); if (l) l.textContent = ''; } catch(e){}
+}
+function dfxRestore(ch){
+  if (S.mode !== 'live') return;
+  if (ch === 'pv') return void ledJob(() => previewClear().catch(() => {}));
+  const m = duelMoodRef(); let blob = null;
+  if (dfxAnim()){ try { blob = m ? moodPayload(m) : null; } catch(e){} }
+  dfxQ(() => dfxWrite('thc', blob ? { blob } : { hex: duelColor() })); // your 1v1 light again
+}
+function dfxStop(){ if (!DFX.cur) return; DFX.gen++; clearTimeout(DFX.t); clearTimeout(DFX.ft); const ch = DFX.ch; DFX.cur = null; DFX.k = ''; DFX.ch = ''; dfxRestore(ch); }
+// lead changes and the last 15 seconds, checked every second while live
+function dfxTick(){
+  const D = DUEL; if (D.ph !== 'live' || !dfxOn()) return;
+  const sc = duelScore(D.me, D.op || {}), lead = sc.a > sc.b ? 1 : sc.a < sc.b ? -1 : 0;
+  D.fxBehind = Math.max(D.fxBehind || 0, sc.b - sc.a); // the furthest behind you've been
+  if (D.fxLead !== undefined && lead !== D.fxLead && lead){ if (lead > 0 && D.fxBehind >= 50){ D.fxBehind = 0; dfx('comeback'); } else dfx(lead > 0 ? 'lead' : 'lost'); }
+  D.fxLead = lead;
+  if (duelTimed(D.rules) && !D.fxFinal && capAtOf(D) - Date.now() <= 15000){ D.fxFinal = true; dfx('final'); }
+}
+function dfxHit(secs){ const D = DUEL; D.fxStreak = secs >= 5 ? (D.fxStreak || 0) + 1 : 0; if (D.fxStreak === 3) dfx('streak'); else if (secs >= 5 && secs < duelBlinkAt()) dfx('bighit'); } // blinkers get their own fire
+// test tools: play every effect, one after another
+function dfxTryAll(){
+  if (S.mode !== 'live') return toast(`Connect your ${devWord()} first`);
+  if (store.dfx === false) return toast('Turn Puffco effects on first');
+  const ks = Object.keys(DFX_FX); let i = 0;
+  const next = () => { if (i >= ks.length){ dfxStop(); return toast('Done'); } const k = ks[i++], fx = DFX_FX[k]; toast(`${fx.n}: ${fx.why}`); dfx(k, true); setTimeout(next, 4200); };
+  next();
+}
+// a blinker: flames behind that player's name for a few seconds
+function duelBlaze(you){
+  const el = document.querySelector(`.egg.duel .dv-p[data-side="${you ? 'me' : 'op'}"]`); if (!el) return;
+  el.classList.remove('blaze'); void el.offsetWidth; el.classList.add('blaze');
+  clearTimeout(el._bz); el._bz = setTimeout(() => el.classList.remove('blaze'), 4200);
+  if (you) buzz([30, 30, 30, 30, 80]);
+  dfx(you ? 'fire' : 'burn');
+}
+// big FIGHT / VICTORY splash and the "+1" when a hit counts
+function duelSplash(txt, sub, pc){
+  document.querySelectorAll('.dv-splash').forEach(e => e.remove());
+  const el = document.createElement('div'); el.className = 'dv-splash'; el.style.setProperty('--pc', pc || duelColor());
+  el.innerHTML = `<div><b>${esc(txt)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`; document.body.appendChild(el); setTimeout(() => el.remove(), 1700);
+}
+function duelPop(you, n){
+  const ar = $('.egg.duel .dv-arena'); if (!ar) return;
+  const el = document.createElement('span'); el.className = 'dv-pop'; el.textContent = '+' + (n || 1); el.style.setProperty('--pc', you ? duelColor() : okColor(DUEL.op && DUEL.op.c));
+  el.style[you ? 'left' : 'right'] = '18%'; ar.parentElement.style.position = 'relative'; ar.parentElement.appendChild(el); setTimeout(() => el.remove(), 950);
+}
+// a thin glow around the screen in your color while a match is on (red and beating when your clock is low)
+function duelFrame(){
+  let f = $('#dvFrame'); const on = DUEL.on && (DUEL.ph === 'live' || DUEL.ph === 'count');
+  if (!on){ if (f) f.remove(); return; }
+  if (!f){ f = document.createElement('div'); f.id = 'dvFrame'; document.body.appendChild(f); }
+  f.style.setProperty('--pc', duelColor()); f.style.setProperty('--pg', palGrad(duelPal().concat(duelPal()[0]), '135deg')); f.classList.toggle('low', DUEL.ph === 'live' && !DUEL.me.out && duelLeft() < 30);
+}
+// the match was accepted: start the Peak heating on the 1v1 profile
+async function duelAutoStart(){
+  if (DUEL.demo) return;
+  if (S.mode !== 'live'){ toast(`Connect your ${devWord()}. Your clock is running`); return; }
+  if (S.state >= 7 && S.state <= 9) return; // already heating
+  try {
+    if (!DUEL.bot && !duelProfOk()) await duelLoadProf(DUEL.rules.prof, true);
+    const i = DUEL.bot ? S.active : 0; BOOST.temp = 0; BOOST.time = 0;
+    try { await ble.write('/p/app/hcs', new Uint8Array([i])); } catch(e){}
+    await modeCmd(7);
+  } catch(e){ toast('Couldn’t start heating. Press the button on your ' + devWord()); }
+}
+function duelBot(now){
+  const o = DUEL.op; if (o.out || DUEL.demo) return;
+  if (now >= o.outAt){ o.out = now - DUEL.start; return; }
+  if (now >= o.next){ const s = Math.round((DUEL.rules.min + Math.random() * 7) * 10) / 10; o.h++; o.b = Math.max(o.b, s); o.tot = (o.tot || 0) + s; duelPop(false, Math.round(s * DUEL_PPS)); if (s >= 8){ o.bl = (o.bl || 0) + 1; setTimeout(() => duelBlaze(false), 60); } o.last = now; o.next = now + (6 + Math.random() * 14) * 1000; }
+  o.left = Math.round(DUEL.rules.win - (now - (o.last || DUEL.start)) / 1000);
+}
+/* scoring: three things, so endurance and big hits both matter. Ties on a line give nobody the points.
+   Last one going +3 · most hits +2 · longest hit +2. Most points wins; equal points is a draw */
+/* scoring: 10 points for every second of every counted hit, so a 4.2s hit is worth 42. Most points wins.
+   Equal points: the longest single hit decides; still equal, a draw */
+const DUEL_PPS = 10;
+const DUEL_PTS_TXT = `${DUEL_PPS} points for every second of every hit · most points wins`;
+const duelPts = o => Math.round(((o && o.tot) || 0) * DUEL_PPS);
+function duelScore(me, op){
+  const a = duelPts(me), b = duelPts(op), tie = a !== b ? 0 : (me.b || 0) === (op.b || 0) ? 0 : (me.b || 0) > (op.b || 0) ? 1 : -1;
+  return { a, b, tie };
+}
+// a match where the time runs out before anyone's clock can (public 2-minute matches): rings count down the match
+const duelTimed = r => !!(r && r.cap && r.cap <= r.win);
+const matchLen = c => c % 60 ? c + ' sec' : c / 60 + ' min'; // "2 min", "45 sec"
+const rulesTxt = r => duelTimed(r) ? `${matchLen(r.cap)} match · every second of every hit scores` : `Hits ${r.min}s+ · ${r.win / 60} min clock · ${capTxt(r.cap)}`;
+function duelDecide(now){
+  const D = DUEL, me = D.me, op = D.op; if (!op || D.res) return;
+  const capAt = capAtOf(D);
+  let end = '', forfeit = false;
+  if (op.gone && !me.out){ forfeit = true; end = `${op.n} left the 1v1`; }
+  else if (me.out && op.out) end = 'Both clocks ran out';
+  else if (op.out) end = `${op.n} ran out of time`;
+  else if (me.out){ if (now - me.outWall > 6000) end = 'Your clock ran out'; } // give their last numbers time to land
+  else if (now >= capAt + (D.demo ? 200 : 4000)) end = 'Time’s up'; // 4s for the last numbers to arrive
+  if (!end) return;
+  const sc = duelScore(me, op), res = forfeit ? 'win' : sc.a !== sc.b ? (sc.a > sc.b ? 'win' : 'lose') : sc.tie ? (sc.tie > 0 ? 'win' : 'lose') : 'draw';
+  duelFinish(res, forfeit ? end : `${end} · ${sc.a} to ${sc.b}`, forfeit ? null : sc);
+}
+// the match is over (decided, or someone gave up): record it, keep it in the history, show the result
+function duelFinish(res, why, sc, quit){
+  const D = DUEL, now = Date.now(); if (D.res) return;
+  D.res = { r: res, why, sc, quit: !!quit }; D.ph = 'done'; D.finalAt = now; D.endAt = now;
+  try { dfx(res === 'win' ? (sc && sc.a > 0 && sc.b === 0 ? 'flawless' : 'win') : res === 'lose' ? 'lose' : 'draw'); } catch(e){}
+  if (D.demo){ buzz([60, 40, 60, 40, 120]); duelSplash(res === 'win' ? 'VICTORY' : 'DEFEAT', sc ? sc.a + ' – ' + sc.b : '', res === 'win' ? '#ffd23f' : '#ff3b4a'); if (res === 'win') setTimeout(duelConfetti, 250); duelDraw(); return; } // demo: show it, save nothing
+  const rec = store.duelRec = store.duelRec || { w:0, l:0, d:0 }; rec[res === 'win' ? 'w' : res === 'lose' ? 'l' : 'd']++;
+  if (!D.bot){ const pub = duelPub(); pub[res === 'win' ? 'w' : res === 'lose' ? 'l' : 'd']++; if (!DUEL_RP_REAL || !D.rules.bet || res === 'draw') setTimeout(() => { try { lbPush(true); } catch(e){} }, 400); } // your profile's 1v1 record (a paid match pushes below)
+  if (D.rules.bet && res !== 'draw') rec.rp = (rec.rp || 0) + (res === 'win' ? D.rules.bet : -D.rules.bet);
+  // real RP: not for practice, and not for a win because the other player just left (they never pay, so nobody gets paid)
+  const leftOnly = res === 'win' && D.op && D.op.gone && !D.op.quit;
+  if (DUEL_RP_REAL && !D.bot && D.rules.bet && res !== 'draw' && !leftOnly){ D.res.real = true; D.res.paid = res === 'win' ? Math.min(D.rules.bet, duelDayLeft()) : Math.min(D.rules.bet, myRpNow()); D.res.capped = res === 'win' && D.res.paid < D.rules.bet; const n = res === 'win' ? D.res.paid : -D.res.paid; D.res.rpFrom = myRpNow(); if (n){ duelDayAdd(n); duelRpAdd(n); } D.res.rpTo = myRpNow(); if (D.res.capped) setTimeout(() => duelCapPop(), 1800); setTimeout(() => { try { drawRank(); lbPush(true).then(() => { lbLoad(true); drawRank(); }).catch(() => {}); } catch(e){} }, 400); } // send it now and reload the board so the new RP shows everywhere
+  const op = D.op || {}, pick = o => ({ h: o.h || 0, b: o.b || 0, bl: o.bl || 0, tot: Math.round((o.tot || 0) * 10) / 10, out: o.out || 0 });
+  (store.duelHist = store.duelHist || []).unshift({ t: D.start || D.made || now, end: now, op: op.n || 'Player', bot: !!D.bot, r: res, why, quit: !!quit, opQuit: !!op.quit,
+    sc: sc ? [sc.a, sc.b] : null, bet: D.rules.bet || 0, me: pick(D.me), them: pick(op), rules: { min: D.rules.min, win: D.rules.win, cap: D.rules.cap } });
+  store.duelHist = store.duelHist.slice(0, 50); save();
+  buzz(res === 'win' ? [60, 40, 60, 40, 120] : [150]);
+  duelSplash(res === 'win' ? 'VICTORY' : quit ? 'YOU GAVE UP' : res === 'lose' ? 'DEFEAT' : 'DRAW', sc ? sc.a + ' – ' + sc.b : '', res === 'win' ? '#ffd23f' : res === 'lose' ? '#ff3b4a' : '#9a9ab0');
+  if (res === 'win') setTimeout(duelConfetti, 250);
+  duelSend('d:st', Object.assign({ ph:'done', r: res }, duelStats())); D.sentAt = now;
+  if (!$('.egg.duel')) duelSheet(); else duelDraw();
+  try { drawDuelHist(); } catch(e){}
+}
+// gold confetti for a win (one burst, then it's gone)
+function duelConfetti(){
+  const el = document.createElement('div'); el.className = 'dv-confetti'; const cs = ['#ffd23f', '#fff1a8', '#ffb020', duelColor(), '#ffffff'];
+  el.innerHTML = Array.from({ length: 46 }, (_, i) => `<i style="left:${(Math.random() * 100).toFixed(1)}%;background:${cs[i % cs.length]};animation-delay:${(Math.random() * .5).toFixed(2)}s;animation-duration:${(2 + Math.random() * 1.4).toFixed(2)}s;--r:${Math.round(Math.random() * 720 - 360)}deg;--x:${Math.round(Math.random() * 120 - 60)}px"></i>`).join('');
+  document.body.appendChild(el); setTimeout(() => el.remove(), 4200);
+}
+// you vs them, line by line; the better number on each line lights up
+function duelStatTable(me, them, opName, dur){
+  const cmp = (a, b) => a === b ? 0 : a > b ? 1 : -1, s = v => v ? (Math.round(v * 10) / 10) + 's' : '—';
+  const lasted = o => vrMS((o.out ? o.out : dur) / 1000);
+  const row = (k, a, b, w) => `<tr><th>${k}</th><td class="${w > 0 ? 'up' : ''}">${a}</td><td class="${w < 0 ? 'up' : ''}">${b}</td></tr>`;
+  return `<table class="dstat"><thead><tr><th></th><th>You</th><th>${esc(opName || 'Them')}</th></tr></thead><tbody>
+    ${row('Points', duelPts(me), duelPts(them), cmp(duelPts(me), duelPts(them)))}${row('Counted hits', me.h, them.h, cmp(me.h, them.h))}${row('Longest hit', s(me.b), s(them.b), cmp(me.b, them.b))}
+    ${row('Total hit time', s(me.tot), s(them.tot), cmp(me.tot, them.tot))}${row('Blinkers', me.bl || 0, them.bl || 0, cmp(me.bl || 0, them.bl || 0))}
+    ${row('Lasted', lasted(me), lasted(them), cmp(me.out || 1e12, them.out || 1e12))}</tbody></table>`;
+}
+// Stats: your 1v1 match history
+function drawDuelHist(){
+  const el = $('#duelHist'); if (!el) return; if (!duelAllowed()){ el.style.display = 'none'; return; } el.style.display = '';
+  const list = store.duelHist || [], rec = store.duelRec || { w:0, l:0, d:0 };
+  const when = t => { const d = new Date(t); return d.toLocaleDateString([], { month:'short', day:'numeric' }) + ' · ' + d.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' }); };
+  const item = m => `<details class="dh-row ${m.r}"><summary><span class="dh-res">${m.r === 'win' ? 'W' : m.r === 'lose' ? 'L' : 'D'}</span>
+      <span class="dh-mid"><b>vs ${esc(m.op)}${m.bot ? ' <small class="dh-tag">practice</small>' : ''}</b><small>${when(m.t)} · ${esc(m.quit ? 'You gave up' : m.opQuit ? m.op + ' gave up' : (m.why || '').split(' · ')[0])}</small></span>
+      <span class="dh-sc">${m.sc ? m.sc[0] + '–' + m.sc[1] : ''}${m.bet && m.r !== 'draw' ? `<small class="${m.r}">${m.r === 'win' ? '+' : '−'}${m.bet} RP</small>` : ''}</span></summary>
+      ${duelStatTable(m.me, m.them, m.op, (m.end || m.t) - m.t)}<p class="dnote">Match ${vrMS(((m.end || m.t) - m.t) / 1000)} · hits ${m.rules.min}s+ · ${duelTimed(m.rules) ? matchLen(m.rules.cap) + ' match' : m.rules.win / 60 + ' min clock · ' + capTxt(m.rules.cap)}</p></details>`;
+  setHTML(el, `<div class="row between" style="gap:8px"><span class="label">1v1 match history <span class="beta-tag">BETA</span></span><span class="muted" style="font-size:13px;white-space:nowrap">${rec.w} W · ${rec.l} L${rec.d ? ' · ' + rec.d + ' D' : ''}</span></div>
+    ${list.length ? `<div class="dh-list">${list.slice(0, 30).map(item).join('')}</div>` : '<p class="muted" style="margin:0;font-size:14px">No matches yet. Tap 1V1 in Social to play someone.</p>'}`);
+}
+
+// what the VR panel shows about a 1v1
+function duelSnap(){
+  const D = DUEL; if (!D.on) return null;
+  const txt = D.ph === 'lobby' ? (D.op ? 'In the lobby' : 'Waiting for someone to join · code ' + D.code) : D.ph === 'count' ? 'Heating up. Starts when both are Ready'
+    : D.ph === 'done' && D.res ? (D.res.r === 'win' ? 'You won! ' : D.res.r === 'lose' ? 'You lost. ' : 'Draw. ') + D.res.why : '';
+  const timed = duelTimed(D.rules);
+  return { ph: D.ph, op: D.op ? D.op.n : '', mh: duelPts(D.me), oh: duelPts(D.op), timed, left: D.ph === 'live' && !D.me.out ? Math.round(timed ? Math.max(0, (capAtOf(D) - Date.now()) / 1000) : duelLeft()) : 0, min: D.rules.min, cool: D.me.cool > 0 && duelHot(), txt };
+}
+// floating pills: a 1v1 or a VR link is running
+function drawPills(){
+  let el = $('#fpills');
+  const items = [];
+  if (DUEL.on && !$('.egg.duel')){ const D = DUEL, lv = D.ph === 'live', low = lv && !D.me.out && duelLeft() < 30;
+    items.push(`<button class="fpill duel${low ? ' low' : ''}" data-pill="duel" style="background:linear-gradient(90deg,${duelPal().slice(0, 2).join(',')},#1a1622 45%,#1a1622 55%,${((D.op && D.op.p) || [okColor(D.op && D.op.c)]).slice(0, 2).reverse().join(',')})">${lv ? `<i>${duelPts(D.me)}</i><em>VS</em><i>${duelPts(D.op)}</i><span>${D.me.out ? 'out' : vrMS(duelTimed(D.rules) ? Math.max(0, (capAtOf(D) - Date.now()) / 1000) : duelLeft())}</span>` : D.ph === 'done' ? '1v1 · Done' : D.ph === 'count' ? '1v1 · Heating up' : '1v1 · Lobby'}</button>`); }
+  if (SESH.on && !$('.egg.sesh')) items.push(`<button class="fpill" data-pill="sesh" style="background:linear-gradient(90deg,#0fa37f,#2bd9ff)">Sesh · ${({ lobby:'Lobby', heat:'Heating up', count:'Get ready', sesh:'Hit it 🔥', done:'Done' })[SESH.ph] || ''} · ${seshParts().length}</button>`);
+  if (VRH.code) items.push(`<button class="fpill" data-pill="vr">VR ${VRH.panelAt && Date.now() - VRH.panelAt < 30000 ? 'linked' : 'waiting'}</button>`);
+  if (!items.length){ if (el) el.remove(); return; }
+  if (!el){ el = document.createElement('div'); el.id = 'fpills'; document.body.appendChild(el);
+    el.addEventListener('click', e => { const b = e.target.closest('[data-pill]'); if (!b) return; if (b.dataset.pill === 'duel') duelSheet(); else if (b.dataset.pill === 'sesh') seshSheet(); else { show('set'); setTimeout(() => { const c = $('#vrCard'); c && c.scrollIntoView({ block:'center' }); }, 300); } }); }
+  const h = items.join(''); if (el.innerHTML !== h) el.innerHTML = h;
+}
+// the friend-game settings you picked last time
+function duelCustom(){ const r = duelRules(); r.prof = duelProfSan(r.prof); return r; }
+function duelInput(e){
+  const t = e.target;
+  if (!t.dataset || !t.dataset.dp) return;
+  try { syncRange(t); } catch(_){}
+  const c = duelCustom(); c.prof[t.dataset.dp] = +t.value; c.prof = duelProfSan(c.prof); store.duelRules = c; save();
+  const p = c.prof, set = (id, v) => { const x = $('#' + id); if (x) x.textContent = v; };
+  set('dvT', store.unit === 'C' ? Math.round((p.tempF - 32) * 5 / 9) + '°C' : p.tempF + '°F'); set('dvD', p.time + 's'); set('dvBF', fmtDelta(p.boostF)); set('dvBT', '+' + p.boostT + 's');
+}
+/* the 1v1 profile goes into Profile 1. Your real Profile 1 is saved first (settings and light) for this device and comes back after */
+const duelBack = () => { const b = (store.duelBackups || {})[hhKey()]; return b && (!b.series || b.series === (S.series || 'peach')) ? b : null; };
+function duelProfOk(){ const pr = DUEL.rules && DUEL.rules.prof, p = S.profiles[0]; if (!pr) return true; return S.active === 0 && p && Math.abs(c2f(p.tempC) - pr.tempF) <= 2 && Math.abs((p.time || 0) - pr.time) <= 1; }
+async function duelLoadProf(pr, force){
+  if (S.mode !== 'live' || !pr) return;
+  if (!force && duelProfOk()) return;
+  const p = S.profiles[0]; store.duelBackups = store.duelBackups || {};
+  if (!duelBack()){ // first 1v1 since your last restore: save the real one
+    const back = { series: S.series || 'peach', name:p.name, tempC:p.tempC, time:p.time, boostF:p.boostF, boostT:p.boostT, vapor:p.vapor, color:p.color, mood:p.mood || null, pal:p.pal };
+    try { const r = await ble.readAll('/u/app/hc/0/colr'); if (r && r.length) back.colr = toHex(r); } catch(e){}
+    store.duelBackups[hhKey()] = back; save();
+  }
+  const mood = duelMoodRef();
+  Object.assign(p, { name:'1v1', tempC:f2c(pr.tempF), time:pr.time, vapor:pr.vapor, boostF:pr.boostF, boostT:pr.boostT, mood:null, color: duelColor(), lightDirty: !mood });
+  S.active = 0; hcsHold = Date.now() + 2500;
+  try { await saveProfile(0); } catch(e){}
+  if (mood){ try { await writeMoodTo(0, JSON.parse(JSON.stringify(mood))); } catch(e){ p.lightDirty = true; try { await saveProfile(0); } catch(_){} } } // a mood from your picker, else its main color
+  render(); if (view === 'prof') drawProfiles();
+}
+async function duelRestoreProf(n = 0){
+  const b = duelBack(); if (!b || S.mode !== 'live') return;
+  if (S.state >= 7 && S.state <= 9){ if (!n) toast('Your Profile 1 comes back after this session'); if (n < 100) setTimeout(() => duelRestoreProf(n + 1), 3000); return; } // not mid-session
+  const p = S.profiles[0]; Object.assign(p, { name:b.name, tempC:b.tempC, time:b.time, boostF:b.boostF, boostT:b.boostT, vapor:b.vapor, color:b.color, mood:b.mood, pal:b.pal, lightDirty:false });
+  try { await saveProfile(0); } catch(e){}
+  if (b.colr){ const blob = new Uint8Array(b.colr.match(/../g).map(x => parseInt(x, 16)));
+    try { if (isProxy()) await proxyColr('/u/app/hc/0/colr', blob); else if (S.api === 2) await ble.write('/u/app/hc/0/colr', blob); else await ble.writeBlob('/u/app/hc/0/colr', blob);
+      if (S.active === 0 && S.api !== 2){ try { isProxy() ? await proxyColr('/p/app/thc/colr', blob) : await ble.writeBlob('/p/app/thc/colr', blob); } catch(e){} } } catch(e){ toast('Settings are back, but the light couldn’t be restored'); } }
+  else { p.lightDirty = true; try { await saveProfile(0); } catch(e){} }
+  delete store.duelBackups[hhKey()]; save(); render(); if (view === 'prof') drawProfiles(); toast('Your Profile 1 is back');
+}
+function duelSheet(opts = {}){
+  if (!duelAllowed()) return;
+  let el = $('.egg.duel');
+  if (!el){
+    el = document.createElement('div'); el.className = 'egg duel';
+    el.innerHTML = '<div class="egg-card" role="dialog" aria-label="1v1" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto"></div>';
+    document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+    duelMoodList = null; // pick up moods made since last time
+    el.addEventListener('click', duelClick); el.addEventListener('input', duelInput); el.addEventListener('change', duelInput);
+  }
+  if (!DUEL.on && opts.queue === true) queueJoin(); // only when asked; normally you pick Random or Friend first
+  el.dataset.dph = ''; duelDraw(); drawPills();
+}
+function duelHide(){ const el = $('.egg.duel'); if (!el) return; el.classList.remove('on'); setTimeout(() => { el.remove(); drawPills(); }, 260); }
+function duelPick(k, label, unit){ const v = duelRules()[k]; return `<label style="display:grid;gap:4px;font-size:13px"><span class="muted">${label}</span><select data-dr="${k}">${DUEL_OPTS[k].map(o => `<option value="${o}"${o === v ? ' selected' : ''}>${unit(o)}</option>`).join('')}</select></label>`; }
+function duelDraw(){
+  const el = $('.egg.duel'); if (!el) return; const card = el.firstElementChild, D = DUEL;
+  if (!(D.on && D.ph === 'done')) el.classList.remove('res-win', 'res-lose', 'res-draw');
+  const ph = D.on ? D.ph : 'menu';
+  if (ph === 'menu'){
+    if (el.dataset.dph === 'menu') return; // don't wipe what they're typing
+    card._h = null;
+    const rec = store.duelRec || { w:0, l:0, d:0 };
+    const cu = duelCustom(), cp = cu.prof, deg = f => store.unit === 'C' ? Math.round((f - 32) * 5 / 9) + '°C' : f + '°F';
+    const myRp = myRpNow(), betBtns = DUEL_BETS.map(v => `<button class="dchip${v === duelBet() ? ' on' : ''}" data-d="bet" data-v="${v}">${v ? v : 'None'}</button>`).join('');
+    card.innerHTML = `<span class="label" style="text-align:center">1v1 <span class="beta-tag">BETA</span></span><h2 style="margin:0;text-align:center">Every second counts</h2>
+      <div class="dmode"><button class="dmode-b" data-d="mode" data-m="r"><b>Random match</b><small>Matchmaking with anyone</small></button><button class="dmode-b" data-d="mode" data-m="f"><b>Play a friend</b><small>Custom game, you pick the settings</small></button></div>
+      <details class="dhow"><summary>How 1v1 works</summary><div class="dhow-b">
+        <div><b>1. Pick a mode</b><span>Random match finds someone near your rank (${QUEUE_BUYIN} RP buy-in). Play a friend lets you invite someone you follow who follows you back, pick the settings and bet 0 to ${DUEL_BET_MAX} RP.</span></div>
+        <div><b>2. Accept and heat up</b><span>Your Profile 1 is swapped for the 1v1 profile and your ${esc(devWord())} starts heating. The preheat is the countdown.</span></div>
+        <div><b>3. Go</b><span>When both Puffcos are Ready the 2-minute clock starts. Take the longest hits you can. Your light shows the color you picked.</span></div>
+        <div><b>4. Giving up</b><span>Tap Give up twice. It stops your ${esc(devWord())} and the other player wins.</span></div>
+        <div><b>5. RP</b><span>The winner takes the buy-in or bet from the loser, straight onto this month’s ranked RP and the leaderboard. You can win up to ${DUEL_DAY_MAX} RP a day. Practice and draws don’t change RP, and if someone just leaves, nobody pays.</span></div>
+        <div><b>6. After</b><span>Profile 1 is put back. Every match is saved in Stats under Match history.</span></div></div></details>
+      <details class="dhow"><summary>How points work</summary><div class="dhow-b">
+        <div><b>+10 points per second</b><span>Every hit of 1 second or longer scores 10 points for each second you pull. A 4.2s hit is +42, a 9s blinker is +90.</span></div>
+        <div><b>2-minute match</b><span>The clock starts when both Puffcos are Ready and runs for one 2-minute session. Hits after time’s up don’t count.</span></div>
+        <div><b>Most points wins</b><span>Tied on points? The longest single hit wins. Still tied, it’s a draw.</span></div>
+        <div><b>Blinkers</b><span>8s+ (11s+ in Champion and Legend). No bonus, they just score big and set your side on fire.</span></div>
+        <div><b>Fair play</b><span>Both players get the same profile: 505°F, 120s, Bold, Boost +1°F / +15s. Hits only count on it (P1).</span></div></div></details>
+      <a class="ddisc" href="${DISCORD_URL}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.3 5.3A17 17 0 0 0 15.1 4l-.5 1a15.7 15.7 0 0 0-5.2 0l-.5-1a17 17 0 0 0-4.2 1.3C2 9.2 1.3 13 1.6 16.7a17 17 0 0 0 5.2 2.6l1.1-1.8c-.6-.2-1.2-.5-1.8-.9l.4-.3a12 12 0 0 0 11 0l.4.3c-.6.4-1.2.7-1.8.9l1.1 1.8a17 17 0 0 0 5.2-2.6c.4-4.3-.7-8-3.1-11.4ZM8.7 14.5c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Zm6.6 0c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Z"/></svg><span><b>Looking for players?</b><small>Join the Emberline Discord and find someone to 1v1</small></span><em>Join</em></a>
+      <div id="dSecR" class="dpanel" hidden><span class="label">Random match</span>
+        <div class="dpub muted">Everyone plays the same profile: <b style="color:var(--fg)">${esc(profTxt(DUEL_PUBLIC))}</b>A 2-minute match, one session each. ${DUEL_PTS_TXT}.<br><b style="color:#ffd23f">${QUEUE_BUYIN} RP buy-in</b> · winner takes it from the loser (you have ${myRp} RP)${DUEL_RP_REAL ? '' : '. For now your RP doesn’t change'}</div>
+        <div id="dqBox" class="dq-box"></div></div>
+      <div id="dSecF" style="display:grid;gap:12px" hidden>
+        <div class="dpanel"><span class="label">Game settings</span><p class="dnote">You set these for both of you. Your friend sees them before accepting.</p>
+          <div class="dset"><div class="dset-h"><span>Temperature</span><b id="dvT">${deg(cp.tempF)}</b></div><input type="range" data-dp="tempF" min="400" max="620" step="5" value="${cp.tempF}"></div>
+          <div class="dset"><div class="dset-h"><span>Duration</span><b id="dvD">${cp.time}s</b></div><input type="range" data-dp="time" min="15" max="120" step="5" value="${cp.time}"></div>
+          <div class="dset"><span>Vapor</span><div class="dchips">${DUEL_VAPORS.map(v => `<button class="dchip${v === cp.vapor ? ' on' : ''}" data-d="vap" data-v="${v}">${vaporName(v)}</button>`).join('')}</div></div>
+          <div class="dset"><div class="dset-h"><span>Boost temperature</span><b id="dvBF">${fmtDelta(cp.boostF)}</b></div><input type="range" data-dp="boostF" min="0" max="30" step="1" value="${cp.boostF}"></div>
+          <div class="dset"><div class="dset-h"><span>Boost time</span><b id="dvBT">+${cp.boostT}s</b></div><input type="range" data-dp="boostT" min="0" max="60" step="5" value="${cp.boostT}"></div>
+          <div class="dsel">${duelPick('min', 'Min hit', v => v + 's')}${duelPick('win', 'Clock', v => v / 60 + ' min')}${duelPick('cap', 'Time cap', v => v ? v / 60 + ' min' : 'None')}</div>
+          <p class="dnote">Min hit: how long a hit has to be to reset your clock. Clock: how long you have between hits.</p></div>
+        <div class="dpanel"><div class="dset-h"><span class="label">Bet RP</span><span class="muted" style="font-size:13px">You have ${myRp} RP</span></div>
+          <div class="dchips dbet">${betBtns}</div>
+          <p class="dnote">Winner takes it from the loser. ${DUEL_RP_REAL ? 'You can’t bet more RP than you have.' : 'For now it’s shown only, your RP doesn’t change.'}</p></div>
+        <div class="dpanel"><span class="label">Invite a friend</span><div id="dFr" class="dfr-list"></div></div></div>
+      <div class="dpanel"><div class="dset-h"><span class="label">Your light</span><span class="muted" style="font-size:13px" id="dLightName">${duelMoodRef() ? esc(duelMoodRef().name || 'Mood') : 'Solid color'}</span></div>
+        <div class="dcol-row">${DUEL_COLORS.map(c => `<button class="dcol${!duelMoodRef() && c === duelColor() ? ' on' : ''}" data-d="col" data-c="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join('')}<button class="btn small" data-d="moods" style="margin-left:auto">Moods</button></div>
+        <div class="dmood-grid" id="dMoods" hidden></div>
+        <span class="muted" style="font-size:12px">Your ${esc(devWord())} shows it during a 1v1, and its main color marks your side of the score.</span>
+        <div class="dset-h" style="gap:10px;align-items:center"><span style="font-size:14px;flex:1;min-width:0"><b>Puffco effects</b> <span class="beta-tag">TEST</span><br><span class="muted" style="font-size:12px">Your light reacts: on fire for blinkers, gold when you take the lead, a heartbeat in the last 15s</span></span><button class="btn small${store.dfx !== false ? ' primary' : ''}" data-d="dfx" style="flex:none;min-width:64px">${store.dfx !== false ? 'On' : 'Off'}</button></div></div>
+      <p class="dnote">Points: ${DUEL_PTS_TXT}. Your clock pauses (up to 2 min) if your ${esc(devWord())}’s battery gets hot. Your Profile 1 is saved and swapped for the 1v1 profile, then put back when you’re done.</p>
+      <p class="dnote">Record: ${rec.w} W · ${rec.l} L${rec.d ? ' · ' + rec.d + ' D' : ''}${rec.rp ? ` · bets ${rec.rp > 0 ? '+' : ''}${rec.rp} RP` : ''}${DUEL_RP_REAL ? `. Today ${duelDayNet() > 0 ? '+' : ''}${duelDayNet()} of ${DUEL_DAY_MAX} RP you can win a day` : ' (not real yet)'}. Consume responsibly, take breaks.</p>
+      <button class="btn small" data-d="bot">Practice vs a bot</button>
+      ${isRich() || IS_TEST ? '<button class="btn small" data-d="demo">Demo match for videos</button>' : ''}
+      ${duelBack() ? '<button class="btn small" data-d="restore">Put my Profile 1 back</button>' : ''}
+      <button class="btn" data-d="close" style="width:100%">Close</button>`;
+    card.querySelectorAll('input[type=range]').forEach(syncRange);
+    if (LOBBY.q){ $('#dSecR').hidden = false; const mb = card.querySelector('[data-m="r"]'); if (mb) mb.classList.add('on'); } // already queued: show it
+    el.dataset.dph = 'menu'; duelMenuPaint(); return;
+  }
+  el.dataset.dph = ph;
+  const op = D.op, r = D.rules, me = D.me, side = (name, h, b, left, out, cool, you) => `<div class="duel-side${you ? ' you' : ''}" style="--pc:${you ? duelColor() : okColor(op && op.c)}"><b class="duel-n">${esc(name)}</b><span class="duel-h">${h}</span><span class="muted" style="font-size:12px">hits · best ${b ? b + 's' : '—'}</span>
+    ${D.ph === 'live' ? `<div class="duel-clock${out ? ' out' : left < 30 ? ' low' : ''}"><i style="width:${out ? 0 : Math.max(0, Math.min(100, left / r.win * 100))}%"></i></div><span style="font-size:13px">${out ? 'Out at ' + vrMS(out / 1000) : vrMS(left) + (cool ? ' · cooling' : '')}</span>` : ''}</div>`;
+  let body = '';
+  if (ph === 'lobby'){
+    const url = location.origin + location.pathname + '?duel=' + D.code;
+    body = D.bot && !D.demo ? `<p style="margin:0;font-size:14px">Practice against Ember Bot. It hits at random and runs out at a random time.</p>`
+      : D.inviting && !op ? `<div class="dq-spin"></div><p style="margin:0;text-align:center">Waiting for <b>${esc(D.inviting.n)}</b> to accept…</p>`
+      : D.auto ? `<p style="margin:0;text-align:center">${op ? 'Match found: <b>' + esc(op.n) + '</b>. Starting…' : 'Match found. Connecting…'}</p>`
+      : `<span class="muted" style="font-size:13px;text-align:center">${D.role === 'host' ? 'Send your friend this code' : 'Joined'}</span><div class="duel-code">${esc(D.code)}</div>
+        <p class="muted" style="margin:0;font-size:13px;text-align:center">${!D.rt || !D.rt.open ? 'Connecting…' : op ? '✓ ' + esc(op.n) + ' is here' : D.role === 'host' ? 'Waiting for your friend…' : 'Looking for the host…'}</p>`;
+    body += `<p class="muted" style="margin:0;font-size:13px;text-align:center">${rulesTxt(r)}<br>${r.prof ? profTxt(r.prof) : ''}${r.bet ? '<br><b style="color:#ffd23f">' + r.bet + ' RP bet</b>' : ''}</p>
+      ${D.auto ? '' : D.role === 'host' ? `<button class="btn primary" data-d="go" style="width:100%"${op ? '' : ' disabled'}>Start</button>` : `<p style="margin:0;text-align:center;font-size:14px">${op ? 'Waiting for ' + esc(op.n) + ' to start' : ''}</p>`}`;
+    void url;
+  } else if (ph === 'count'){
+    const st = (rdy, t, live) => !live ? 'Not connected' : rdy ? '✓ Ready' : 'Heating' + (t > 100 ? ' · ' + (store.unit === 'C' ? Math.round((t - 32) * 5 / 9) + '°C' : t + '°F') : '…');
+    body = `<div class="duel-big" style="font-size:34px">Heating up</div>
+      ${(() => { const dt = (Date.now() - (D.countAt || Date.now())) / 1000, fake = s => Math.round(Math.min(505, 90 + 415 * dt / s)); // demo: both heat up on screen
+        const mine = D.demo ? st(dt >= 5.5, fake(5.5), true) : st(duelReady(), Math.round(c2f(S.tempC || 0)), S.mode === 'live');
+        const theirs = D.demo ? st(dt >= 3.5, fake(3.5), true) : D.bot ? '✓ Ready' : op && op.rdy ? '✓ Ready' : st(false, op ? op.t : 0, true);
+        return `<div class="duel-vs"><div class="duel-side you" style="--pc:${duelColor()}"><b class="duel-n">You</b><span>${mine}</span></div>
+        <div class="duel-side" style="--pc:${okColor(op && op.c)}"><b class="duel-n">${esc(op ? op.n : '…')}</b><span>${theirs}</span></div></div>`; })()}
+      <p style="margin:0;text-align:center">The match starts when both ${esc(devWord())}s are Ready. Hits before that don’t count.</p>`;
+  } else if (ph === 'live'){
+    const capLeft = (capAtOf(D) - Date.now()) / 1000;
+    body = '<!--arena-->' + `
+      <p class="muted" style="margin:0;font-size:13px;text-align:center">${duelTimed(r) ? DUEL_PTS_TXT : 'Hits ' + r.min + 's+ reset your clock<br>' + DUEL_PTS_TXT}</p>
+      ${S.mode === 'live' && !D.bot && !duelProfOk() ? `<p style="margin:0;color:#ff9d4d;font-size:13px;text-align:center">Switch to P1 (the 1v1 profile) or your hits won’t count. <button class="btn small" data-d="reload">Load it again</button></p>` : ''}
+      ${me.out ? '<p style="margin:0;text-align:center"><b>You’re out.</b> Waiting for the result…</p>' : ''}
+      ${S.mode !== 'live' && !D.bot ? `<p style="margin:0;color:#ff9d4d;font-size:13px;text-align:center">Your ${esc(devWord())} isn’t connected. Your clock is still running.</p>` : ''}
+      ${op && op.gone ? '<p class="muted" style="margin:0;font-size:13px;text-align:center">Lost contact with ' + esc(op.n) + '…</p>' : ''}
+      ${IS_TEST && D.bot ? '<div class="row" style="gap:8px"><button class="btn small" data-d="fakehit" style="flex:1">Fake a 4s hit (test)</button><button class="btn small" data-d="fakebl" style="flex:1">Fake a 9s blinker (test)</button></div>' : ''}`;
+  } else if (ph === 'done'){
+    const res = D.res || { r:'draw', why:'' }, them = op || {}, dur = D.endAt && D.start ? D.endAt - D.start : 0;
+    const big = res.r === 'win' ? 'You won' : res.quit ? 'You gave up' : res.r === 'lose' ? 'You lost' : 'Draw';
+    body = `<div class="dres ${res.r}"><div class="dres-big">${big}</div><p>${esc(res.why)}</p></div>
+      ${r.bet && res.r !== 'draw' ? `<p class="duel-bet ${res.r}">${res.real || D.demo ? (res.r === 'win' ? '+' : '−') + (res.real ? res.paid : r.bet) + ' RP' : '<small>No RP this time' + (D.bot ? ' (practice)' : ' (they left)') + '</small>'}${res.capped ? `<small>Daily 1v1 limit: ${DUEL_DAY_MAX} RP a day</small>` : res.real ? `<small>Your ranked RP: ${res.rpFrom} → ${res.rpTo}</small>` : ''}</p>` : r.bet ? '<p style="margin:0;text-align:center" class="muted">Draw: nobody pays</p>' : ''}
+      ${duelStatTable(me, them, them.n, dur)}
+      ${res.sc ? `<div class="dsc"><div class="dsc-t" style="border:0;padding:0"><span>Points</span><b>${res.sc.a} – ${res.sc.b}</b></div><span class="dnote">${DUEL_PPS} points per second of every counted hit${res.sc.a === res.sc.b && res.sc.tie ? ' · tied, so the longest hit decided it' : ''}</span></div>` : ''}
+      <p class="dnote" style="text-align:center">Match ${dur ? vrMS(dur / 1000) : '0:00'} · hits ${r.min}s+ · ${duelTimed(r) ? matchLen(r.cap) + ' match' : r.win / 60 + ' min clock · ' + capTxt(r.cap)} · ${D.demo ? 'demo match, not saved' : 'saved to Stats → 1v1 match history'}</p>`;
+  }
+  el.classList.toggle('res-win', ph === 'done' && !!D.res && D.res.r === 'win'); el.classList.toggle('res-lose', ph === 'done' && !!D.res && D.res.r === 'lose'); el.classList.toggle('res-draw', ph === 'done' && !!D.res && D.res.r === 'draw');
+  const foot = vcRow() + (ph === 'done' ? `<button class="btn primary" data-d="end" style="width:100%">Clear</button>`
+    : `<div class="row" style="gap:8px"><button class="btn" data-d="min" style="flex:1">Minimize</button><button class="btn${D.quitAt && Date.now() - D.quitAt < 4000 ? ' danger' : ''}" data-d="leave" style="flex:1">${ph !== 'live' && ph !== 'count' ? 'Leave' : D.quitAt && Date.now() - D.quitAt < 4000 ? 'Tap again to give up' : 'Give up'}</button></div>`);
+  // the buttons sit in their own box and only redraw when they change, so a tap never lands on a button that just got replaced
+  if (!card.querySelector(':scope > .d-body')){ card.innerHTML = '<span class="label" style="text-align:center"></span><div class="d-body"></div><div class="d-foot"></div>'; }
+  setHTML(card.firstElementChild, '1v1' + (D.bot && !D.demo ? ' · practice' : '') + ' <span class="beta-tag">BETA</span>');
+  const bEl = card.querySelector('.d-body');
+  if (body.startsWith('<!--arena-->')){ // live: the arena stays put and only its numbers change, the rest redraws
+    let ar = bEl.querySelector(':scope > .dv-arena');
+    if (!ar || ar.dataset.key !== duelArenaKey()){ bEl.innerHTML = duelArena() + '<div class="dv-rest" style="display:grid;gap:12px"></div>'; bEl._h = null; ar = bEl.querySelector('.dv-arena'); }
+    duelArenaUpdate(ar); setHTML(bEl.querySelector('.dv-rest'), body.slice(12));
+  } else setHTML(bEl, body);
+  setHTML(card.querySelector('.d-foot'), foot);
+}
+function duelClick(e){
+  const el = $('.egg.duel'); if (e.target === el){ if (DUEL.on && DUEL.ph === 'done') return; queueLeave(); return duelHide(); } // the result stays until you tap Clear
+  const b = e.target.closest('[data-d]'); if (!b) return; const k = b.dataset.d;
+  const rules = () => { const r = duelCustom(); el.querySelectorAll('[data-dr]').forEach(s => r[s.dataset.dr] = +s.value); store.duelRules = r; save(); return duelRules(); };
+  if (k === 'close'){ queueLeave(); return duelHide(); }
+  if (k === 'vc') return vcStart();
+  if (k === 'vcmute') return vcMute();
+  if (k === 'vcoff'){ vcOff(true); return duelDraw(); }
+  if (k === 'vcplay'){ vcAudio().play().then(() => { VC.state = 'live'; duelDraw(); }).catch(() => toast('Still blocked. Turn your volume up and tap again')); return; }
+  if (k === 'dfx'){ store.dfx = store.dfx === false; save(); b.classList.toggle('primary', store.dfx !== false); b.textContent = store.dfx !== false ? 'On' : 'Off'; if (store.dfx === false) dfxStop(); return; }
+  if (k === 'q') return queueJoin();
+  if (k === 'demo') return duelDemo();
+  if (k === 'bot'){ duelStart('host', 'BOT', Object.assign({}, QUEUE_RULES, { bet:0 }), true); return; }
+  if (k === 'mode'){ const m = b.dataset.m; queueLeave(); el.querySelectorAll('.dmode-b').forEach(x => x.classList.toggle('on', x === b)); $('#dSecR').hidden = m !== 'r'; $('#dSecF').hidden = m !== 'f'; el.querySelectorAll('input[type=range]').forEach(syncRange); if (m === 'f') lobbyPing(true); duelMenuPaint(); return; }
+  if (k === 'bet'){ store.duelBet = +b.dataset.v; save(); el.querySelectorAll('[data-d="bet"]').forEach(x => x.classList.toggle('on', x === b)); return; }
+  if (k === 'qx') return queueLeave();
+  if (k === 'inv'){ rules(); return duelInvite(b.dataset.id, b.dataset.n); }
+  if (k === 'col'){ store.duelColor = b.dataset.c; store.duelMood = null; save(); el.querySelectorAll('.dcol').forEach(x => x.classList.toggle('on', x === b)); el.querySelectorAll('.dmood').forEach(x => x.classList.remove('on')); const n = $('#dLightName'); if (n) n.textContent = 'Solid color'; return; }
+  if (k === 'moods'){ const g = $('#dMoods'); if (!g) return; g.hidden = !g.hidden; b.textContent = g.hidden ? 'Moods' : 'Hide moods';
+    if (!g.hidden && !g.childElementCount){ const cur = duelMoodRef(), list = duelMoods();
+      g.innerHTML = list.length ? list.map((m, i) => `<button class="dmood${cur && sameMood(cur, m) ? ' on' : ''}" data-d="mood" data-i="${i}"><i style="${swatchStyle(m)};animation:none"></i><span>${esc(m.name || 'Mood')}</span></button>`).join('') : '<p class="muted" style="margin:0;font-size:13px">No moods yet. Make some in Lights.</p>'; }
+    return; }
+  if (k === 'mood'){ const m = duelMoods()[+b.dataset.i]; if (!m) return; store.duelMood = JSON.parse(JSON.stringify(m)); save();
+    el.querySelectorAll('.dmood').forEach(x => x.classList.toggle('on', x === b)); el.querySelectorAll('.dcol').forEach(x => x.classList.remove('on'));
+    const n = $('#dLightName'); if (n) n.textContent = m.name || 'Mood';
+    if (DUEL.on && DUEL.rules && DUEL.rules.prof && S.mode === 'live') duelLoadProf(DUEL.rules.prof, true); else previewMood(m, 3000); // show it on the Peak
+    return; }
+  if (k === 'vap'){ const c = duelCustom(); c.prof.vapor = +b.dataset.v; store.duelRules = c; save(); el.querySelectorAll('[data-d="vap"]').forEach(x => x.classList.toggle('on', x === b)); return; }
+  if (k === 'reload') return duelLoadProf(DUEL.rules.prof, true);
+  if (k === 'restore') return duelRestoreProf().then(() => { el.dataset.dph = ''; duelDraw(); });
+  if (k === 'go') return duelGo();
+  if (k === 'min') return duelHide();
+  if (k === 'leave'){
+    if ((DUEL.ph === 'live' || DUEL.ph === 'count') && !(DUEL.quitAt && Date.now() - DUEL.quitAt < 4000)){ // tap twice: Path can block confirm() popups
+      DUEL.quitAt = Date.now(); toast('Tap Give up again to quit. It counts as a loss' + (DUEL.rules.bet ? ' and the ' + DUEL.rules.bet + ' RP bet' : '')); duelDraw(); setTimeout(duelDraw, 4100); return; }
+    if (S.mode === 'live' && S.state >= 7 && S.state <= 9) modeCmd(8); // stop the Peak
+    if (DUEL.ph === 'live' || DUEL.ph === 'count'){ duelSend('d:quit', {}); duelFinish('lose', 'It counts as a loss' + (DUEL.rules.bet ? ' and the bet' : ''), null, true); return; } // both screens show it
+    duelEnd(); duelRestoreProf(); return; }
+  if (k === 'end'){ duelEnd(); duelRestoreProf(); duelSheet({ queue:false }); return; }
+  if (k === 'fakehit'){ HIT.hits.push(4); (HIT.ends = HIT.ends || []).push(Date.now()); toast('Fake 4s hit'); duelTick(); }
+  if (k === 'fakebl'){ HIT.hits.push(9); (HIT.ends = HIT.ends || []).push(Date.now()); toast('Fake 9s blinker'); duelTick(); }
+}
+/* ===== 1v1 lobby: the matchmaking queue, friend invites and who's online =====
+   Everyone with Emberline open sits in one lobby channel. Queued players say "here" every 3s. When two see each
+   other, the one with the lower id offers a match (a fresh duel code), the other says ok, and both join that duel. */
+const LOBBY = { rt:null, q:null, online:new Map(), inv:null, timer:null, pingAt:0 };
+const QUEUE_RULES = { min:1, win:300, cap:120, prof: DUEL_PUBLIC }; // public matches: 2 minutes (one 120s session), most points wins
+function lobbyId(){ const me = LB.me || lbStore().meCache; if (me && me.id) return String(me.id); if (!store.guestId){ store.guestId = 'g' + rtCode(10); save(); } return store.guestId; }
+const lobbyMe = m => m && String(m.to) === lobbyId();
+const qId = () => lobbyId() + '~' + (store.qTag || (store.qTag = rtCode(4), save(), store.qTag)); // queue id: account + this device
+const qMe = m => m && String(m.to) === qId();
+function lobbyOn(){
+  if (LOBBY.rt){ LOBBY.rt.wake(); return; }
+  LOBBY.rt = new Relay('ember-duel-lobby')
+    .on('q:here', lobbyQHere)
+    .on('q:left', m => { if (LOBBY.q) LOBBY.q.seen.delete(String(m.id)); })
+    .on('q:match', lobbyQMatch).on('q:ok', lobbyQOk)
+    .on('q:no', m => { const q = LOBBY.q; if (qMe(m) && q && q.pend && q.pend.to === String(m.id)){ q.skip.set(q.pend.to, Date.now() + 15000); q.pend = null; } })
+    .on('inv', lobbyInv)
+    .on('inv:no', m => { if (lobbyMe(m) && SESH.on && m.code === SESH.code){ const n = ((SOC.followingRows || []).find(r => String(r.id) === String(m.id)) || {}).username || 'Your friend'; toast(m.busy ? `${n} is busy right now` : `${n} said not now`); return; } if (lobbyMe(m) && DUEL.on && DUEL.inviting && m.code === DUEL.code){ const n = DUEL.inviting.n; duelEnd(true); toast(m.busy ? `${n} is busy right now` : `${n} said not now`); duelSheet({ queue:false }); } })
+    .on('inv:x', m => { if (lobbyMe(m) && LOBBY.inv && LOBBY.inv.code === m.code) duelInvClose(); })
+    .on('on:ping', m => { if (!m.id || String(m.id) === lobbyId()) return; setTimeout(() => LOBBY.rt && LOBBY.rt.send('on:pong', { id: lobbyId(), to: m.id, busy: !!DUEL.on || SESH.on }), Math.random() * 1500); })
+    .on('on:pong', m => { if (lobbyMe(m)){ LOBBY.online.set(String(m.id), { at: Date.now(), busy: !!m.busy }); duelMenuPaint(); seshFriends(); } })
+    .on('open', () => { if (LOBBY.q) lobbySendQ(); lobbyPing(true); duelMenuPaint(); })
+    .on('down', duelMenuPaint);
+  LOBBY.rt.connect();
+}
+function lobbyTimer(){ if (!LOBBY.timer) LOBBY.timer = setInterval(lobbyTick, 1000); }
+function lobbyPing(force){ if (!LOBBY.rt || !LOBBY.rt.open || !$('.egg.duel')) return; if (!force && Date.now() - LOBBY.pingAt < 20000) return; LOBBY.pingAt = Date.now(); LOBBY.rt.send('on:ping', { id: lobbyId() }); }
+function queueJoin(){
+  if (DUEL.on || LOBBY.q) return;
+  if (DUEL_RP_REAL && myRpNow() < QUEUE_BUYIN){ toast(`Matchmaking costs ${QUEUE_BUYIN} RP to enter. You have ${myRpNow()}`); return; }
+  if (DUEL_RP_REAL && !duelDayLeft() && store.duelCapSeen !== dayKey()) return duelCapPop(queueJoin);
+  lobbyOn(); LOBBY.q = { at: Date.now(), seen: new Map(), skip: new Map(), pend: null, sentAt: 0, bet: QUEUE_BUYIN };
+  lobbySendQ(); lobbyTimer(); wakeOn(); duelMenuPaint();
+}
+function queueLeave(){ if (!LOBBY.q) return; if (LOBBY.rt) LOBBY.rt.send('q:left', { id: qId() }); LOBBY.q = null; wakeOff(); duelMenuPaint(); }
+/* rank matching: your rank first, then one rank either side after 15s, two after 30s, anyone after 45s.
+   Two players match when either one's search has widened far enough to reach the other */
+function myTierIdx(){ try { const n = myRank().tier.n, i = RANK_TIERS.findIndex(t => t.n === n); return i < 0 ? 0 : i; } catch(e){ return 0; } }
+const qSpread = secs => secs < 15 ? 0 : secs < 30 ? 1 : secs < 45 ? 2 : 9;
+const qWait = () => LOBBY.q ? (Date.now() - LOBBY.q.at) / 1000 : 0;
+function lobbySendQ(){ if (!LOBBY.q || !LOBBY.rt) return; LOBBY.q.sentAt = Date.now(); LOBBY.rt.send('q:here', { id: qId(), n: duelName(), bet: LOBBY.q.bet, t: myTierIdx(), w: Math.round(qWait()) }); }
+function lobbyQHere(m){
+  if (!m.id || String(m.id) === qId()) return;
+  LOBBY.online.set(String(m.id).split('~')[0], { at: Date.now(), busy:false });
+  if (LOBBY.q && (+m.bet || 0) === LOBBY.q.bet) LOBBY.q.seen.set(String(m.id), { n: String(m.n || 'Player').slice(0, 20), at: Date.now(), t: clamp(+m.t || 0, 0, 9), w: Math.max(0, +m.w || 0) }); // only people betting the same
+}
+function lobbyQMatch(m){
+  if (!qMe(m)) return;
+  if (!LOBBY.q || DUEL.on || (+m.bet || 0) !== LOBBY.q.bet || (m.t != null && Math.abs(+m.t - myTierIdx()) > Math.max(+m.sp || 0, qSpread(qWait())))){ LOBBY.rt.send('q:no', { id: qId(), to: m.id }); return; }
+  const code = rtClean(m.code); if (code.length !== 6) return;
+  LOBBY.rt.send('q:ok', { id: qId(), to: m.id, code });
+  const bet = LOBBY.q.bet; queueLeave(); duelStart('guest', code, Object.assign({}, QUEUE_RULES, { bet })); DUEL.auto = true;
+  buzz([30, 40, 30]); toast(`Match found: ${String(m.n || 'Player').slice(0, 20)}`); duelSheet();
+}
+function lobbyQOk(m){
+  const q = LOBBY.q; if (!qMe(m) || !q || !q.pend || q.pend.code !== m.code || q.pend.to !== String(m.id)) return;
+  const n = (q.seen.get(q.pend.to) || {}).n || 'Player';
+  const bet = q.bet; queueLeave(); duelStart('host', m.code, Object.assign({}, QUEUE_RULES, { bet })); DUEL.auto = true;
+  buzz([30, 40, 30]); toast(`Match found: ${n}`); duelSheet();
+}
+function lobbyTick(){
+  const now = Date.now(), q = LOBBY.q;
+  if (q){
+    if (now - q.sentAt > 3000) lobbySendQ();
+    q.seen.forEach((v, k) => { if (now - v.at > 8000) q.seen.delete(k); });
+    if (q.pend && now - q.pend.at > 6000){ q.skip.set(q.pend.to, now + 15000); q.pend = null; } // no answer: try someone else
+    if (!q.pend && LOBBY.rt && LOBBY.rt.open){
+      const me = qId(), myT = myTierIdx(), mySp = qSpread(qWait());
+      const fits = v => Math.abs(v.t - myT) <= Math.max(mySp, qSpread(v.w + (now - v.at) / 1000)); // close enough in rank for one of us
+      const ids = [...q.seen.keys()].filter(k => !(q.skip.get(k) > now) && fits(q.seen.get(k))).sort();
+      if (ids.length && me < ids[0]){ q.pend = { to: ids[0], code: rtCode(), at: now }; LOBBY.rt.send('q:match', { id: me, to: ids[0], n: duelName(), code: q.pend.code, bet: q.bet, t: myT, sp: mySp }); }
+    }
+  }
+  if (LOBBY.inv && now - LOBBY.inv.at > 40000) duelInvClose();
+  lobbyPing(false);
+  duelMenuPaint();
+  if (!q && !LOBBY.inv && !$('.egg.duel')){ clearInterval(LOBBY.timer); LOBBY.timer = null; }
+}
+// the parts of the 1v1 menu that change: the queue box and the friends list
+function duelMenuPaint(){
+  const box = $('#dqBox'), fr = $('#dFr'); if (!box && !fr) return;
+  const now = Date.now(), q = LOBBY.q, up = LOBBY.rt && LOBBY.rt.open;
+  if (box) setHTML(box, q ? `<div class="dq-spin"></div><b>${up ? 'Finding a match…' : 'Connecting…'}</b><span style="font-size:13px">${(() => { const sp = qSpread((now - q.at) / 1000), t = myTierIdx(), nm = i => (RANK_TIERS[i] || {}).n;
+      if (sp >= 9) return 'Looking for anyone'; const lo = Math.max(0, t - sp), hi = Math.min(RANK_TIERS.length - 1, t + sp);
+      const next = sp === 0 ? 15 : sp === 1 ? 30 : 45, left = Math.max(0, Math.ceil(next - (now - q.at) / 1000));
+      return `Looking for <b style="color:${(RANK_TIERS[t] || {}).c}">${lo === hi ? nm(t) : nm(lo) + '–' + nm(hi)}</b> players · wider in ${left}s`; })()}</span><span class="muted" style="font-size:13px">${vrMS((now - q.at) / 1000)} · ${q.seen.size ? q.seen.size + ' other' + (q.seen.size === 1 ? '' : 's') + ' in the queue' : 'nobody else in the queue yet'}</span>
+      ${now - q.at > 20000 && !q.seen.size ? `<span class="muted" style="font-size:12px">Quiet right now. Find players in the Discord, or keep waiting.</span><a class="btn small ddisc-s" href="${DISCORD_URL}" target="_blank" rel="noopener">Find players on Discord</a>` : ''}<button class="btn small" data-d="qx">Cancel</button>`
+    : `<button class="btn primary" data-d="q" style="width:100%">Find a match · ${QUEUE_BUYIN} RP buy-in</button>`);
+  if (fr){
+    const me = LB.me || lbStore().meCache;
+    if (!me || !me.username){ setHTML(fr, '<p class="muted" style="margin:0;font-size:13px">Make a ranked profile in Social to challenge friends.</p>'); return; }
+    if (!SOC.loaded){ if (!duelMenuPaint.loading){ duelMenuPaint.loading = true; socLoad().catch(() => {}).finally(() => { duelMenuPaint.loading = false; duelMenuPaint(); }); } setHTML(fr, '<p class="muted" style="margin:0;font-size:13px">Loading your friends…</p>'); return; }
+    const fs = SOC.followerSet || new Set(), on = id => { const o = LOBBY.online.get(String(id)); return o && now - o.at < 60000 ? o : null; };
+    const rows = (SOC.followingRows || []).filter(r => !r.banned && r.id !== me.id && fs.has(r.id)) // friends: you follow each other
+      .sort((a, b) => (!!on(b.id) - !!on(a.id)) || String(a.username).localeCompare(String(b.username)));
+    setHTML(fr, rows.length ? rows.slice(0, 30).map(r => { const o = on(r.id);
+      return `<div class="dfr-row">${lbAvatar(r.avatar_url, r.username, 36)}<span class="dfr-name"><b>${esc(r.username)}</b><small><i class="dfr-dot${o ? o.busy ? ' busy' : ' on' : ''}"></i>${o ? o.busy ? 'In a 1v1' : 'Online' : 'Offline'}</small></span><button class="btn small${o && !o.busy ? ' primary' : ''}" data-d="inv" data-id="${esc(String(r.id))}" data-n="${esc(r.username)}">Invite</button></div>`; }).join('')
+      : '<p class="muted" style="margin:0;font-size:13px">No friends yet. Friends are people you follow who follow you back.</p>');
+  }
+}
+function duelInvite(id, name){
+  const me = LB.me || lbStore().meCache; if (!me || !me.id) return toast('Make a ranked profile in Social to challenge friends');
+  if (DUEL_RP_REAL && duelBet() > myRpNow()) return toast(`You only have ${myRpNow()} RP to bet`);
+  if (DUEL_RP_REAL && duelBet() && !duelDayLeft() && store.duelCapSeen !== dayKey()) return duelCapPop(() => duelInvite(id, name));
+  queueLeave(); lobbyOn(); lobbyTimer();
+  const code = rtCode(); duelStart('host', code, duelRules());
+  DUEL.inviting = { to: String(id), n: String(name || 'your friend').slice(0, 20), at: Date.now() };
+  LOBBY.rt.send('inv', { id: lobbyId(), to: String(id), n: duelName(), c: duelColor(), code, r: DUEL.rules });
+  if (lbUsesPuffco()) lbCall({ action:'invite', target: String(id), code, bet: DUEL.rules.bet || 0, rules: DUEL.rules }).then(r => { if (r && r.pushed && DUEL.inviting) DUEL.inviting.pushed = true; }).catch(() => {}); // inbox + phone alert
+  duelDraw();
+}
+/* ---- notifications (test build): an inbox for 1v1 invites and new followers, and phone alerts through the Emberline Alerts app ---- */
+const ALERTS_URL = 'https://taupespy-debug.github.io/test/alerts.html';
+const NOTE = { list:[], unread:0, at:0, phones:0, busy:false };
+async function notesLoad(force){
+  if (!lbUsesPuffco() || !lbStore().joined || NOTE.busy) return;
+  if (!force && Date.now() - NOTE.at < 60000) return; // every request is a Supabase log line
+  NOTE.busy = true; NOTE.at = Date.now();
+  try { const r = await lbCall({ action:'notes' }); NOTE.list = r.notes || []; NOTE.unread = r.unread || 0; NOTE.phones = r.phones || 0; } catch(e){}
+  NOTE.busy = false; notesBell(); notesFresh();
+}
+function notesBell(){
+  const h = document.querySelector('#v-social .largetitle'); if (!h) return;
+  let b = $('#noteBell'); if (!b){ h.insertAdjacentHTML('beforeend', '<button id="noteBell" class="note-bell" aria-label="Notifications">🔔<i></i></button>'); b = $('#noteBell'); b.onclick = notesOpen; }
+  const i = b.querySelector('i'); i.textContent = NOTE.unread > 9 ? '9+' : NOTE.unread || ''; i.hidden = !NOTE.unread;
+}
+const noteAgo = t => { const m = Math.round((Date.now() - new Date(t).getTime()) / 60000); return m < 1 ? 'just now' : m < 60 ? m + 'm ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : Math.round(m / 1440) + 'd ago'; };
+const noteLive = n => n.kind === 'invite' && Date.now() - new Date(n.created_at).getTime() < 15 * 60000; // the friend may still be waiting
+// an invite that came in while the app was closed: offer it right away when you open the app
+function notesFresh(){
+  const n = NOTE.list.find(x => noteLive(x) && !x.read && !(store.noteSeen || {})[x.id]); if (!n || DUEL.on || LOBBY.inv || document.querySelector('.egg')) return;
+  store.noteSeen = Object.assign({}, store.noteSeen, { [n.id]: 1 }); save(); notesOpen();
+}
+function notesOpen(){
+  document.querySelectorAll('.egg.notes').forEach(e => e.remove());
+  const el = document.createElement('div'); el.className = 'egg notes'; el.style.zIndex = 230;
+  const row = n => { const who = esc(n.from_name || 'Someone');
+    if (n.kind === 'invite' && seshNote(n)) return `<div class="note-row${n.read ? '' : ' new'}"><b>🔥 ${who} started a group sesh</b><small>${noteAgo(n.created_at)}</small>${noteLive(n) ? `<div class="row"><button class="btn small primary" data-nj="${n.id}">Join</button></div>` : ''}</div>`;
+    if (n.kind === 'invite') return `<div class="note-row${n.read ? '' : ' new'}"><b>🔥 ${who} wants to 1v1</b><small>${noteAgo(n.created_at)}${n.data && n.data.bet ? ' · bet ' + (+n.data.bet) + ' RP' : ''}</small>
+      <div class="row" style="gap:6px">${noteLive(n) ? `<button class="btn small primary" data-nj="${n.id}">Join</button>` : ''}<button class="btn small" data-nb="${esc(n.from_id || '')}" data-nn="${who}">Invite back</button></div></div>`;
+    return `<div class="note-row${n.read ? '' : ' new'}"><b>👋 ${who} followed you</b><small>${noteAgo(n.created_at)}</small><div class="row"><button class="btn small" data-np="${esc(n.from_id || '')}">View profile</button></div></div>`; };
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Notifications" style="text-align:left;justify-items:stretch;gap:10px;max-height:86vh;overflow:auto">
+    <div class="row between"><h2 style="margin:0">Notifications</h2><button class="btn small ghost" data-nx>Close</button></div>
+    ${NOTE.list.length ? NOTE.list.map(row).join('') : '<p class="muted" style="margin:0">Nothing yet. 1v1 invites and new followers show up here.</p>'}
+    <p class="muted" style="margin:0;font-size:13px">${NOTE.phones ? `🔔 Phone alerts are on (${NOTE.phones} phone${NOTE.phones > 1 ? 's' : ''})` : 'Get these on your lock screen: Settings > Phone alerts'}</p></div>`;
+  document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.addEventListener('click', e => {
+    if (e.target === el || e.target.closest('[data-nx]')) return shut();
+    const j = e.target.closest('[data-nj]'), bk = e.target.closest('[data-nb]'), pr = e.target.closest('[data-np]');
+    if (j){ const n = NOTE.list.find(x => String(x.id) === j.dataset.nj); if (!n || !n.data || !n.data.code) return; shut(); if (seshNote(n)){ seshStart(rtClean(n.data.code)); seshSheet(); return; } queueLeave(); duelStart('guest', rtClean(n.data.code), duelSan(n.data.rules || {})); duelSheet(); return; }
+    if (bk && bk.dataset.nb){ shut(); duelSheet({ queue:false }); setTimeout(() => duelInvite(bk.dataset.nb, bk.dataset.nn), 300); return; }
+    if (pr && pr.dataset.np){ shut(); sbRows(`/rest/v1/players?select=${SOC_COLS}&id=eq.${pr.dataset.np}`).then(r => { if (r && r[0]) openPlayer(r[0]); }).catch(() => {}); }
+  });
+  if (NOTE.unread){ NOTE.unread = 0; notesBell(); lbCall({ action:'notes', read:true }).then(() => { NOTE.list.forEach(n => n.read = true); }).catch(() => {}); }
+}
+// one tap, right in Emberline: works when the browser (Path) does standard notifications. The helper app is only the backup
+function b64u(x){ const p = '='.repeat((4 - x.length % 4) % 4), b = atob((x + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); } // a function, so it's ready even if something above breaks while loading
+async function pushInApp(){
+  if (typeof Notification !== 'function') throw new Error('This browser has no notifications');
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error(perm === 'denied' ? 'Notifications are blocked for this site. Allow them in Path, then try again' : 'Notifications weren’t allowed');
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)){ try { new Notification('Emberline', { body:'Notifications work while Path is open' }); } catch(e){} throw new Error('Path shows notifications only while it’s open here (no push)'); }
+  const reg = await navigator.serviceWorker.register('alerts-sw.js'); await navigator.serviceWorker.ready;
+  const { key } = await sbJSON('/functions/v1/player', { method:'POST', body: JSON.stringify({ action:'push_key' }) });
+  const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey: b64u(key) }));
+  const r = await lbCall({ action:'push_sub', sub: sub.toJSON() }); NOTE.phones = Math.max(1, NOTE.phones);
+  return r;
+}
+/* Path (iPhone) has real web push on window.pushManager, no service worker needed. iPhone only asks from a tap, so
+   subscribe has to be the very first thing the tap does: the key is loaded ahead of time */
+function pushKeyLoad(){ return store.pushKey ? Promise.resolve(store.pushKey) : sbJSON('/functions/v1/player', { method:'POST', body: JSON.stringify({ action:'push_key' }) }).then(r => { if (r && r.key){ store.pushKey = r.key; save(); } return store.pushKey; }); }
+function subJSON(sub){
+  let j = null; try { j = typeof sub.toJSON === 'function' ? sub.toJSON() : null; } catch(e){}
+  if (j && j.endpoint) return j;
+  const k = n => { try { const b = sub.getKey && sub.getKey(n); return b ? btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : null; } catch(e){ return null; } };
+  return { endpoint: sub.endpoint, keys: { p256dh: k('p256dh'), auth: k('auth') } };
+}
+function pathPushOn(){ // call straight from a tap, before any await
+  if (/Path\//.test(navigator.userAgent) && !store.pathPushRisk) return Promise.reject(new Error('Path crashes when a page asks for push (tested Oct 2026), so this is off in Path')); // a real tap made Path's web view crash
+  const PM = window.pushManager;
+  if (!PM) return Promise.reject(new Error('This browser has no push. Open Emberline in Path'));
+  if (!store.pushKey){ pushKeyLoad().catch(() => {}); return Promise.reject(new Error('One sec, still loading. Tap again')); }
+  let p; try { p = PM.subscribe({ userVisibleOnly:true, applicationServerKey: b64u(store.pushKey) }); } catch(e){ return Promise.reject(e); }
+  return Promise.resolve(p).then(sub => lbCall({ action:'push_sub', sub: subJSON(sub) })).then(r => { try { NOTE.phones = Math.max(1, NOTE.phones); } catch(e){} store.pathPush = Date.now(); save(); return r; })
+    .catch(e => { throw new Error(e && e.name === 'NotAllowedError' && !/gesture/.test(e.message || '') ? 'Notifications are blocked. Allow them for Path in iPhone Settings, then try again' : (e && e.message) || String(e)); });
+}
+// Settings > Phone alerts: a 6-letter code connects the Emberline Alerts app (Safari, Home Screen) to your profile
+async function alertsSetup(){
+  if (window.pushManager) pushKeyLoad().catch(() => {}); // ready before they tap
+  if (!lbUsesPuffco() || !lbStore().joined) return toast('Make your profile in Social first');
+  const el = document.createElement('div'); el.className = 'egg'; el.style.zIndex = 240;
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Phone alerts" style="text-align:left;justify-items:stretch;gap:12px">
+    <h2 style="margin:0">Phone alerts <span class="beta-tag">TEST</span></h2>
+    <p class="muted" style="margin:0;font-size:14px">Get 1v1 invites and new followers on your lock screen, even when Emberline is closed.</p>
+    <button class="btn primary" id="alIn" data-push>Turn on notifications</button><p class="muted" id="alInMsg" style="margin:-4px 0 0;font-size:13px"></p>
+    <details class="dhow"><summary>Doesn’t work? Use the helper app</summary><div class="dhow-b" style="display:grid;gap:10px">
+    <ol style="margin:0;padding-left:20px;display:grid;gap:4px;font-size:14px"><li>Open the link below in <b>Safari</b>.</li><li>Tap Share ⬆︎ then <b>Add to Home Screen</b>.</li><li>Open <b>Ember Alerts</b> from your Home Screen and type this code:</li></ol>
+    <div class="alert-code" id="alCode">······</div><p class="muted" style="margin:-6px 0 0;font-size:12px;text-align:center">Works for 15 minutes</p>
+    <button class="btn" id="alCopy">Copy the Alerts link</button></div></details>
+    <button class="btn" id="alTest">Send me a test notification</button>
+    <button class="btn ghost" id="alOff">Turn off alerts on all my phones</button>
+    <button class="btn primary" id="alX">Done</button></div>`;
+  document.body.appendChild(el); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  const shut = () => { el.classList.remove('on'); setTimeout(() => el.remove(), 260); };
+  el.querySelector('#alX').onclick = shut;
+  el.querySelector('#alIn').onclick = () => { const m = el.querySelector('#alInMsg'), go = window.pushManager ? pathPushOn() : pushInApp(); m.textContent = 'Turning on…'; // Path: subscribe runs inside the tap
+    go.then(r => { m.innerHTML = `<span style="color:#4cd68a">On. ${r && r.sent ? 'A test notification is on its way.' : 'Saved, but the test notification didn’t send' + (r && r.err ? ': ' + esc(r.err) : '')}</span>`; })
+      .catch(e => { m.innerHTML = `<span style="color:#ff6b6b">${esc(e.message || String(e))}</span>`; }); };
+  el.querySelector('#alCopy').onclick = async () => { try { await navigator.clipboard.writeText(ALERTS_URL); toast('Link copied. Paste it in Safari'); } catch(e){ prompt('Copy this link and open it in Safari', ALERTS_URL); } };
+  el.querySelector('#alTest').onclick = async () => { try { const r = await lbCall({ action:'push_me' }); toast(r.sent ? 'Sent. Check your lock screen' : r.err ? 'Didn’t send: ' + r.err : 'No phone connected yet. Finish the steps first'); } catch(e){ toast('Couldn’t send: ' + e.message); } };
+  el.querySelector('#alOff').onclick = async () => { try { await lbCall({ action:'push_off' }); NOTE.phones = 0; toast('Phone alerts are off'); } catch(e){ toast('Couldn’t turn off: ' + e.message); } };
+  try { const r = await lbCall({ action:'push_link' }); el.querySelector('#alCode').textContent = r.code; } catch(e){ el.querySelector('#alCode').textContent = 'Error'; toast('Couldn’t get a code: ' + e.message); }
+}
+// test tools: try Path's own notification feature (navigator.notifications) step by step and show what each call gives back
+async function pathNotifTry(){ try { await pathNotifTry2(); } catch(e){ const o = window.PN_OUT || [], b = document.querySelector('#pnOut'); o.push('CRASH ' + (e && (e.name || '') + ' ' + (e.message || e)) + ' @ ' + String(e && e.stack || '').split('\n')[0].slice(0, 120)); if (b) b.textContent = o.join('\n'); } } // never stop silently
+async function pathNotifTry2(){
+  const N = navigator.notifications, out = window.PN_OUT = [], log = x => { out.push(x); const b = document.querySelector('#pnOut'); if (b) b.textContent = out.join('\n'); };
+  if (!N) return alertBox('Path notifications test', 'navigator.notifications is not here. Open this in Path.');
+  const el = alertBox('Path notifications test', '<pre id="pnOut" style="margin:0;white-space:pre-wrap">Starting…</pre>', () => out.join('\n'));
+  const show = v => { try { return typeof v === 'string' ? v : JSON.stringify(v); } catch(e){ return String(v); } };
+  const call = async (name, ...args) => { log('… ' + name + '(' + args.map(show).join(', ') + ') waiting (up to 30s)'); try { const r = await Promise.race([Promise.resolve(N[name](...args)), new Promise((_, no) => setTimeout(() => no(new Error('no answer in 30s')), 30000))]); log(name + '(' + args.map(show).join(', ') + ') -> ' + show(r)); return r; } catch(e){ log(name + ' ERROR ' + (e && e.message || e)); return null; } };
+  // see Path's raw answers too, even ones that never finish a call
+  try { const rr = window.receiveNotifMessageResponse; if (typeof rr === 'function' && !rr._tap){ const w = function(...a){ log('RAW ' + a.map(x => show(x).slice(0, 400)).join(' | ')); return rr.apply(this, a); }; w._tap = true; window.receiveNotifMessageResponse = w; log('raw replies: watching'); } } catch(e){ log('raw watch ERROR ' + e.message); }
+  log('load errors: ' + ((window.LOAD_ERR || []).join(' || ') || 'none'));
+  try { N.onEvents(ev => log('EVENT ' + show(ev))); log('onEvents: listening'); } catch(e){ log('onEvents ERROR ' + e.message); }
+  await call('isEnabled');
+  await call('getDeviceId');
+  let key = ''; try { key = (await sbJSON('/functions/v1/player', { method:'POST', body: JSON.stringify({ action:'push_key' }) })).key; } catch(e){}
+  log('push key: ' + (key ? 'got it' : 'MISSING'));
+  // Path's window.pushManager: looks like standard web push, which our server already sends
+  const PM = window.pushManager;
+  if (PM){
+    const pm = async (name, ...args) => { log('… pushManager.' + name + ' waiting (up to 30s)'); try { const r = await Promise.race([Promise.resolve(PM[name](...args)), new Promise((_, no) => setTimeout(() => no(new Error('no answer in 30s')), 30000))]); log('pushManager.' + name + ' -> ' + show(r)); return r; } catch(e){ log('pushManager.' + name + ' ERROR ' + (e && (e.name ? e.name + ': ' : '') + (e.message || e))); return null; } };
+    await pm('permissionState', { userVisibleOnly:true });
+    let sub = await pm('getSubscription');
+    log('key: ' + typeof key + ' ' + String(key).length + ' chars');
+    let kb = null; try { kb = b64u(String(key)); log('key bytes: ' + kb.length); } catch(e){ log('key bytes ERROR ' + (e.name || '') + ' ' + (e.message || e)); }
+    if (!sub && kb) sub = await pm('subscribe', { userVisibleOnly:true, applicationServerKey: kb });
+    if (!sub && kb) sub = await pm('subscribe', { userVisibleOnly:true, applicationServerKey: kb.buffer }); // as a plain buffer
+    if (!sub && key) sub = await pm('subscribe', { userVisibleOnly:true, applicationServerKey: String(key) }); // as text
+    if (!sub) sub = await pm('subscribe', { userVisibleOnly:true }); // no key at all
+    if (!sub) sub = await pm('subscribe'); // nothing
+    if (sub){
+      let j = null; try { j = typeof sub.toJSON === 'function' ? sub.toJSON() : null; } catch(e){}
+      if (!j || !j.endpoint){ const k = n => { try { const b = sub.getKey && sub.getKey(n); return b ? btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : null; } catch(e){ return null; } }; j = { endpoint: sub.endpoint, keys: { p256dh: k('p256dh'), auth: k('auth') } }; }
+      log('subscription: ' + show(j).slice(0, 600));
+      if (j && j.endpoint){
+        try { const r = await lbCall({ action:'push_sub', sub: j }); log('saved on the server. Test notification sent: ' + (r.sent ? 'YES, check your lock screen' : 'no (' + show(r) + ')')); }
+        catch(e){ log('saving it ERROR ' + (e.message || e) + (lbUsesPuffco() ? '' : ' (sign in to Social first)')); }
+      }
+    }
+  } else log('window.pushManager: not here');
+  await call('getToken'); // Path's other way: the phone's notification address
+  if (key) await call('getToken', { vapidKey: key }); // the way Firebase web asks, with our key
+  await call('status'); // asks permission. May never answer if it's already on
+  log('done. Tap Copy and send it to Claude.');
+}
+// test tools: what notification features Path gives this page
+async function pathNotifCheck(){
+  const out = [], probe = (name, o) => { if (!o){ out.push(name + ': not here'); return; } let keys = []; try { for (const k in o) keys.push(k); keys = keys.concat(Object.getOwnPropertyNames(o), Object.getOwnPropertyNames(Object.getPrototypeOf(o) || {})); } catch(e){} keys = [...new Set(keys)].filter(k => k !== 'constructor').slice(0, 30);
+    out.push(name + ': ' + typeof o + ' [' + keys.join(', ') + ']');
+    keys.forEach(k => { try { const v = o[k]; if (typeof v === 'function') out.push('  ' + k + '() = ' + String(v).replace(/\s+/g, ' ').slice(0, 220)); else if (v != null && typeof v !== 'object') out.push('  ' + k + ' = ' + String(v).slice(0, 80)); } catch(e){} }); };
+  probe('window.notifications', window.notifications); probe('navigator.notifications', navigator.notifications);
+  probe('window.pushManager', window.pushManager); probe('window.native', window.native);
+  ['receiveNotifMessageResponse', 'sendNotificationEvent'].forEach(k => { try { if (typeof window[k] === 'function') out.push(k + '() = ' + String(window[k]).replace(/\s+/g, ' ').slice(0, 300)); } catch(e){} });
+  out.push('Notification: ' + (typeof Notification === 'function' ? 'yes, permission ' + Notification.permission + ' · ' + String(Notification).replace(/\s+/g, ' ').slice(0, 120) : 'no'));
+  if (typeof Notification === 'function' && Notification.requestPermission) out.push('  requestPermission() = ' + String(Notification.requestPermission).replace(/\s+/g, ' ').slice(0, 220));
+  out.push('serviceWorker: ' + ('serviceWorker' in navigator ? 'yes' : 'no') + ', PushManager: ' + ('PushManager' in window ? 'yes' : 'no'));
+  out.push('webkit handlers: ' + Object.keys((window.webkit && window.webkit.messageHandlers) || {}).join(', '));
+  out.push('UA: ' + navigator.userAgent);
+  try { out.push('page globals with notif/push/path in the name: ' + Object.getOwnPropertyNames(window).filter(k => /notif|push|path|plug/i.test(k)).join(', ')); } catch(e){}
+  alertBox('Path notifications check', esc(out.join('\n')).replace(/\n/g, '<br>'), out.join('\n'));
+}
+setTimeout(() => notesLoad(), 6000); // when the app opens: missed invites and follows
+document.addEventListener('visibilitychange', () => { if (!document.hidden) notesLoad(); });
+/* ===== Group sesh (test build): friends anywhere heat up together =====
+   One code, up to 8 people, over the same relay as 1v1s (nothing saved on the server).
+   Anyone taps Heat together and every Puffco in the sesh starts heating on its own profile.
+   When everyone is Ready, all phones count 3-2-1 together and you hit at the same time.
+   Nothing here touches RP: hits count like any other session */
+const SESH_MAX = 8, SESH_WAIT = 75000; // a Puffco that won't get Ready holds the countdown up 75s at most
+const seshNote = n => !!(n && n.data && (n.data.sesh || (n.data.rules && n.data.rules.sesh)));
+const seshPeers = () => [...(SESH.peers || new Map()).values()].filter(p => Date.now() - p.at < 12000);
+const seshLeader = () => [SESH.id, ...seshPeers().map(p => p.id)].sort()[0] === SESH.id; // calls the countdown, so every phone gets the same one
+function seshMe(){ // what this phone tells the others
+  const live = S.mode === 'live', m = SESH.mine || [];
+  return { id: SESH.id, u: lobbyId(), n: duelName(), a: duelAv(), c: duelColor(), live, dev: live ? devWord() : '', st: live ? S.state : 0, tc: live ? Math.round(S.tempC || 0) : 0,
+    hit: !!(live && HIT.on), hs: live && HIT.on ? Math.round((performance.now() - HIT.start) / 100) / 10 : 0, h: m.length, b: m.length ? Math.max(...m) : 0, tot: Math.round(m.reduce((a, x) => a + x, 0) * 10) / 10, ph: SESH.ph };
+}
+const seshParts = () => SESH.on ? [Object.assign(seshMe(), { me:true }), ...seshPeers()] : [];
+function seshSend(ev, p){ if (SESH.rt) SESH.rt.send(ev, Object.assign({ id: SESH.id }, p)); }
+function seshStart(code, demo){
+  if (DUEL.on) return toast('Finish your 1v1 first');
+  seshEnd(true);
+  Object.assign(SESH, { on:true, demo: !!demo, code: code || rtCode(), id: rtCode(8), ph:'lobby', peers: new Map(), mine:[], lastEnd: Date.now(), sentAt:0, sentKey:'', invited: new Set(), rt:null, pingAt:0 });
+  if (demo) seshDemoAdd();
+  else {
+    SESH.rt = new Relay('ember-sesh-' + SESH.code)
+      .on('s:hi', m => { seshOnSt(m); SESH.sentAt = 0; }) // someone new: tell them about us on the next tick
+      .on('s:st', seshOnSt)
+      .on('s:heat', m => { const p = seshSee(m); if (p) seshHeat(p.n || 'A friend'); })
+      .on('s:hit', m => { if (seshSee(m)) seshCount(); })
+      .on('s:bye', m => { const p = SESH.peers.get(m.id); if (p){ SESH.peers.delete(m.id); toast(`${p.n || 'Someone'} left the sesh`); seshDraw(); } })
+      .on('open', () => { seshSend('s:hi', seshMe()); seshDraw(); })
+      .on('down', seshDraw);
+    SESH.rt.connect();
+  }
+  clearInterval(SESH.timer); SESH.timer = setInterval(seshTick, 500);
+  wakeOn(); seshDraw(); drawPills();
+}
+function seshEnd(quiet){
+  if (SESH.rt){ const r = SESH.rt; r.send('s:bye', { id: SESH.id }); setTimeout(() => r.close(), 400); }
+  clearInterval(SESH.timer); Object.keys(SESH).forEach(k => delete SESH[k]); SESH.on = false;
+  wakeOff(); drawPills(); if (!quiet) seshDraw();
+}
+function seshSee(m){
+  if (!SESH.on || !m || !m.id || m.id === SESH.id) return null;
+  let p = SESH.peers.get(m.id);
+  if (!p){ if (seshPeers().length >= SESH_MAX - 1) return null; p = { id: m.id, h:0, b:0, tot:0 }; SESH.peers.set(m.id, p); buzz(20); toast(`${String(m.n || 'Someone').slice(0, 20)} is in the sesh`); }
+  p.at = Date.now(); if (m.n) p.n = String(m.n).slice(0, 20); if (m.c) p.c = okColor(m.c); if (m.u) p.u = String(m.u).slice(0, 40);
+  if (typeof m.a === 'string' && m.a.startsWith(SB_URL + '/storage/')) p.a = m.a.slice(0, 400);
+  return p;
+}
+function seshOnSt(m){
+  const p = seshSee(m); if (!p) return; const was = p.hit;
+  p.live = !!m.live; p.dev = String(m.dev || '').slice(0, 20); p.st = +m.st || 0; p.tc = +m.tc || 0; p.hit = !!m.hit; p.hs = +m.hs || 0;
+  if (p.hit && !was) p.hitT0 = Date.now() - p.hs * 1000;
+  p.h = Math.max(0, +m.h || 0); p.b = Math.max(0, +m.b || 0); p.tot = Math.max(0, +m.tot || 0);
+  seshDraw();
+}
+// start every Puffco in the sesh (remote: the name of whoever tapped it)
+async function seshHeat(remote){
+  const X = SESH; if (!X.on || !(X.ph === 'lobby' || X.ph === 'done')) return;
+  Object.assign(X, { ph:'heat', heatAt: Date.now(), mine:[], lastEnd: Date.now(), sentAt:0 }); X.peers.forEach(p => { p.h = 0; p.b = 0; p.tot = 0; });
+  if (!remote) seshSend('s:heat', {});
+  if (X.demo) seshDemoHeat();
+  buzz(30); seshDraw(); drawPills();
+  if (S.mode !== 'live'){ toast(`Connect your ${devWord()} to heat with everyone`); return; }
+  if (S.state >= 7 && S.state <= 9) return; // already going
+  try { BOOST.temp = 0; BOOST.time = 0; try { await ble.write('/p/app/hcs', new Uint8Array([S.active])); } catch(e){} await modeCmd(7); toast(remote ? `${remote} started the heat` : 'Heating up with everyone'); }
+  catch(e){ toast('Couldn’t start heating. Press the button on your ' + devWord()); }
+}
+function seshCount(){
+  const X = SESH; if (X.ph !== 'heat') return;
+  X.ph = 'count'; X.countAt = Date.now(); seshDraw(); drawPills();
+  [3, 2, 1].forEach((n, i) => setTimeout(() => { if (SESH.ph === 'count'){ duelSplash(String(n), 'Hit together', '#3ddc84'); buzz(40); } }, i * 1000));
+  setTimeout(() => { if (SESH.ph !== 'count') return; SESH.ph = 'sesh'; SESH.hitAt = Date.now(); duelSplash('HIT IT 🔥', 'Everyone together', '#ff8a2b'); buzz([60, 40, 60]); try { dfx('fight', true); } catch(e){} seshDraw(); drawPills(); }, 3000);
+}
+function seshTick(){
+  const X = SESH; if (!X.on) return; const now = Date.now();
+  const ends = HIT.ends || [], hs = HIT.hits || [];
+  ends.forEach((t, i) => { if (t > X.lastEnd){ if (X.ph !== 'lobby' && X.ph !== 'done' && hs[i] != null) X.mine.push(hs[i]); X.lastEnd = t; } }); // my hits this round
+  if (X.demo) seshDemoTick(now);
+  X.peers.forEach((p, k) => { if (now - p.at > 30000) X.peers.delete(k); }); // gone quiet
+  const live = seshParts().filter(p => p.live);
+  if (X.ph === 'heat'){
+    const all = live.length && live.every(p => p.st === 8), late = now - X.heatAt > SESH_WAIT;
+    if (seshLeader() && (all || (late && live.some(p => p.st === 8)))){ seshSend('s:hit', {}); seshCount(); }
+    else if (now - X.heatAt > SESH_WAIT + 10000) seshCount(); // whoever should call it is gone
+  } else if (X.ph === 'sesh'){
+    const busy = live.some(p => p.st >= 7 && p.st <= 9);
+    if ((!busy && now - X.hitAt > 8000) || now - X.hitAt > 6 * 60000){ X.ph = 'done'; buzz(20); seshBonus(); }
+  }
+  const me = seshMe(), key = [me.live, me.st, me.hit, me.h, X.ph].join();
+  if (key !== X.sentKey || now - X.sentAt > (me.hit ? 1000 : 2500)){ X.sentKey = key; X.sentAt = now; seshSend('s:st', me); }
+  if ($('.egg.sesh') && !X.demo && lobbyWanted() && now - (X.pingAt || 0) > 20000){ X.pingAt = now; lobbyOn(); setTimeout(() => LOBBY.rt && LOBBY.rt.open && LOBBY.rt.send('on:ping', { id: lobbyId() }), 800); } // who's online, for the invite list
+  seshDraw(); drawPills();
+}
+// beta week: +10 RP for a sesh with at least one friend (you both took a hit), 3 a day. The test build never counts it
+const SESH_BONUS = 10, SESH_BONUS_DAY = 3, SESH_BONUS_END = new Date(2026, 10, 3).getTime(); // through Nov 2
+const seshBonusOn = () => Date.now() < SESH_BONUS_END;
+function seshBonusLeft(){ const b = store.seshBonus; return SESH_BONUS_DAY - (b && b.d === dayKey() && b.id === (acctId() || 'local') ? +b.n || 0 : 0); }
+function seshBonus(){
+  const X = SESH; X.bonus = 0;
+  if (X.demo || !seshBonusOn() || S.mode !== 'live' || !(X.mine || []).length || !seshPeers().some(p => p.live && p.h > 0) || seshBonusLeft() <= 0) return;
+  store.seshBonus = { d: dayKey(), id: acctId() || 'local', n: SESH_BONUS_DAY - seshBonusLeft() + 1 }; X.bonus = SESH_BONUS;
+  if (IS_TEST){ save(); toast(`+${SESH_BONUS} RP sesh bonus (test build: not counted)`); return; }
+  duelRpAdd(SESH_BONUS); toast(`+${SESH_BONUS} RP group sesh bonus 🔥`); try { drawRank(); } catch(e){} try { lbPush(true); } catch(e){}
+}
+// a friend's Sesh button (Social friends list, or the list in the sesh menu): start a sesh if you're not in one, then invite
+function seshInviteFrom(id, name){
+  if (DUEL.on) return toast('Finish your 1v1 first');
+  if (!SESH.on || SESH.demo) seshStart();
+  seshInvite(id, name); seshSheet(); try { socDrawFriends(); } catch(e){}
+}
+function seshInvite(id, name){
+  if (!SESH.on || SESH.demo) return; const me = LB.me || lbStore().meCache; if (!me || !me.id) return toast('Make a ranked profile in Social to invite friends');
+  lobbyOn(); lobbyTimer();
+  LOBBY.rt.send('inv', { id: lobbyId(), to: String(id), n: duelName(), c: duelColor(), code: SESH.code, r: { sesh:1 } });
+  if (lbUsesPuffco()) lbCall({ action:'invite', kind:'sesh', target: String(id), code: SESH.code, bet:0, rules: { sesh:1 } }).catch(() => {}); // inbox + phone alert
+  SESH.invited.add(String(id)); toast(`Invited ${name || 'your friend'}`); seshFriends();
+}
+function seshInvPop(m, code){
+  if (SESH.on && SESH.code === code) return;
+  if (DUEL.on || SESH.on || LOBBY.inv){ LOBBY.rt.send('inv:no', { id: lobbyId(), to: m.id, code, busy:true }); return; }
+  LOBBY.inv = { from: String(m.id), n: String(m.n || 'Someone').slice(0, 20), code, r: m.r, at: Date.now() }; lobbyTimer();
+  const el = document.createElement('div'); el.className = 'egg dinv';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="Group sesh invite" style="gap:12px"><span class="label">Group sesh</span><h2 style="margin:0">${esc(LOBBY.inv.n)} started a group sesh</h2>
+    <p>Heat up together and hit it on the same 3-2-1. You use your own heat settings.</p>
+    <div class="row" style="gap:8px;width:100%"><button class="btn" data-i="no" style="flex:1">Not now</button><button class="btn primary" data-i="ok" style="flex:1">Join</button></div></div>`;
+  document.body.appendChild(el); applyHaptics(); buzz([40, 60, 40]); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  el.addEventListener('click', e => {
+    const b = e.target.closest('[data-i]'); if (!b) return; const inv = LOBBY.inv; if (!inv) return duelInvClose();
+    if (b.dataset.i === 'no'){ LOBBY.rt.send('inv:no', { id: lobbyId(), to: inv.from, code: inv.code }); duelInvClose(); return; }
+    duelInvClose(); seshStart(inv.code); seshSheet();
+  });
+}
+/* ---- the sheet ---- */
+function seshSheet(){
+  let el = $('.egg.sesh');
+  if (!el){
+    el = document.createElement('div'); el.className = 'egg sesh';
+    el.innerHTML = '<div class="egg-card" role="dialog" aria-label="Group sesh" style="text-align:left;justify-items:stretch;gap:12px;max-height:86vh;overflow:auto"></div>';
+    document.body.appendChild(el); applyHaptics(); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+    el.addEventListener('click', seshClick);
+  }
+  el.dataset.sph = ''; if (SESH.on) SESH.pingAt = 0; seshDraw(); drawPills();
+  if (lobbyWanted()){ lobbyOn(); setTimeout(() => LOBBY.rt && LOBBY.rt.open && LOBBY.rt.send('on:ping', { id: lobbyId() }), 800); } // who's online, for the invite list
+}
+function seshHide(){ const el = $('.egg.sesh'); if (!el) return; el.classList.remove('on'); setTimeout(() => { el.remove(); drawPills(); }, 260); }
+function seshSt(p){
+  if (!p.live) return 'Puffco not connected';
+  if (p.hit) return `💨 Hitting ${(p.me ? p.hs : Math.max(0, (Date.now() - (p.hitT0 || Date.now())) / 1000)).toFixed(1)}s`;
+  const d = p.tc ? ' · ' + vrDeg(p.tc, store.unit) : '';
+  return p.st === 7 ? 'Heating' + d : p.st === 8 ? 'Ready' + d : p.st === 9 ? 'Cooling down' : 'Idle';
+}
+function seshDraw(){
+  const el = $('.egg.sesh'); if (!el) return; const card = el.firstElementChild, X = SESH;
+  if (!X.on){
+    if (el.dataset.sph === 'menu') return seshFriends(); // don't wipe the code they're typing
+    el.dataset.sph = 'menu'; card._h = null;
+    card.innerHTML = `<span class="label" style="text-align:center">Group sesh <span class="beta-tag">BETA</span></span><h2 style="margin:0;text-align:center">Dab together, anywhere</h2>
+      <p class="muted" style="margin:0;font-size:14px;text-align:center">Up to ${SESH_MAX} friends. Everyone’s Puffco heats up on one tap, then you all hit it on the same 3-2-1.</p>
+      ${seshBonusOn() ? `<p style="margin:0;font-size:13px;text-align:center;color:#ffd23f;font-weight:700">Beta week: +${SESH_BONUS} RP for every sesh with a friend (${SESH_BONUS_DAY} a day, until Nov 2)</p>` : ''}
+      <div style="display:grid;gap:8px"><span class="label">Invite friends</span><div id="sxFr" class="dfr-list"></div></div>
+      <button class="btn" data-s="new" style="width:100%">Start a sesh</button>
+      <details class="dhow"><summary>Have a code?</summary><div class="row" style="gap:8px;margin-top:8px"><input type="text" id="sxCode" placeholder="Friend’s code" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" style="flex:1;min-width:0;background:var(--fill);border:0;border-radius:14px;padding:12px 14px;color:var(--fg);font:inherit;font-size:16px;text-transform:uppercase;letter-spacing:.1em"><button class="btn" data-s="join">Join</button></div></details>
+      <details class="dhow"><summary>How it works</summary><div class="dhow-b">
+        <div><b>1. Get everyone in</b><span>Tap Invite next to a friend (here, or 🔥 Sesh in your Friends list in Social). They get a popup to join. You can also share the code. Pairs great with a FaceTime call.</span></div>
+        <div><b>2. Heat together</b><span>Anyone taps Heat together and every Puffco in the sesh starts heating. Everyone uses their own heat settings.</span></div>
+        <div><b>3. Hit it</b><span>When everyone is Ready, every phone counts 3-2-1 at the same time. Then hit it together and watch everyone’s hits live.</span></div>
+        <div><b>4. After</b><span>See who took the biggest hit, then go again. Your hits count like any other session.${seshBonusOn() ? ` During beta week, a sesh where you and at least one friend both take a hit gives +${SESH_BONUS} RP, up to ${SESH_BONUS_DAY} a day.` : ''}</span></div></div></details>
+      <button class="btn" data-s="x" style="width:100%">Close</button>`;
+    seshFriends(); return;
+  }
+  if (el.dataset.sph !== 'on'){
+    el.dataset.sph = 'on';
+    card.innerHTML = `<div class="row between"><span class="label">Group sesh${X.demo ? ' · demo' : ''} <span class="beta-tag">BETA</span></span><button class="btn small ghost" data-s="x">Hide</button></div>
+      <div id="sxTop" style="display:grid;gap:8px"></div><div id="sxGrid" class="sx-grid"></div><div id="sxAct" style="display:grid;gap:8px"></div>
+      ${X.demo ? '' : '<div style="display:grid;gap:8px"><span class="label">Invite friends</span><div id="sxFr" class="dfr-list"></div></div>'}
+      <button class="btn" data-s="leave" style="width:100%">Leave sesh</button>`;
+    seshFriends();
+  }
+  const parts = seshParts(), live = parts.filter(p => p.live), rdy = live.filter(p => p.st === 8).length, up = X.demo || (X.rt && X.rt.open);
+  const ban = !up ? '<b>Connecting…</b><small>Hang on a sec</small>'
+    : X.ph === 'lobby' ? `<b>${parts.length} in the sesh</b><small>${parts.length < 2 ? 'Invite friends or send them the code' : 'Tap Heat together when everyone’s here'}</small>`
+    : X.ph === 'heat' ? `<b>Heating up · ${rdy}/${live.length} Ready</b><small>When everyone’s Ready you all get a 3-2-1</small>`
+    : X.ph === 'count' ? '<b>Get ready…</b><small>Hit it on the count</small>'
+    : X.ph === 'sesh' ? `<b>Hit it! 🔥</b><small>${vrMS((Date.now() - X.hitAt) / 1000)} into the sesh</small>`
+    : `<b>Sesh done${X.bonus ? ` · +${X.bonus} RP` : ''}</b><small>${X.bonus ? 'Beta week bonus. ' : ''}Heat together again whenever you’re ready</small>`;
+  setHTML($('#sxTop'), `<div class="sx-code-row"><div><small class="muted">Code</small><b class="sx-code">${esc(X.code)}</b></div>${X.demo ? '' : '<button class="btn small" data-s="copy">Copy</button>'}</div><div class="sx-ban ${X.ph}">${ban}</div>`);
+  const done = X.ph === 'done', big = Math.max(0, ...parts.map(p => p.b || 0));
+  const list = done ? parts.slice().sort((a, b) => (b.tot || 0) - (a.tot || 0)) : parts;
+  setHTML($('#sxGrid'), list.map(p => `<div class="sx-p${p.hit ? ' hit' : ''}${p.me ? ' you' : ''}" style="--pc:${okColor(p.c)}">${lbAvatar(p.a, p.n, 40)}<div class="sx-pn"><b>${done && big && p.b === big ? '👑 ' : ''}${esc(p.n || 'Player')}${p.me ? ' (you)' : ''}</b><small>${done ? `${p.tot || 0}s total` : esc(seshSt(p))}</small>${X.ph === 'sesh' || done ? `<small>${p.h || 0} hit${p.h === 1 ? '' : 's'}${p.b ? ' · best ' + p.b + 's' : ''}</small>` : ''}</div></div>`).join(''));
+  setHTML($('#sxAct'), X.ph === 'lobby' || done ? `<button class="btn primary" data-s="heat" style="width:100%">🔥 ${done ? 'Heat together again' : 'Heat together'}</button><span class="muted" style="font-size:12px;text-align:center">Starts every Puffco in the sesh</span>`
+    : X.ph === 'heat' ? '<button class="btn" data-s="stop" style="width:100%">Stop my heat</button>' : '');
+  seshFriends();
+}
+function seshFriends(){
+  const fr = $('#sxFr'); if (!fr) return; const me = LB.me || lbStore().meCache, now = Date.now(), here = new Set(seshPeers().map(p => p.u));
+  if (!me || !me.username) return setHTML(fr, '<p class="muted" style="margin:0;font-size:13px">Make a ranked profile in Social to invite friends. Anyone can still join with the code.</p>');
+  if (!SOC.loaded){ if (!seshFriends.loading){ seshFriends.loading = true; socLoad().catch(() => {}).finally(() => { seshFriends.loading = false; seshFriends(); }); } return setHTML(fr, '<p class="muted" style="margin:0;font-size:13px">Loading your friends…</p>'); }
+  const fs = SOC.followerSet || new Set(), on = id => { const o = LOBBY.online.get(String(id)); return o && now - o.at < 60000 ? o : null; };
+  const rows = (SOC.followingRows || []).filter(r => !r.banned && r.id !== me.id && fs.has(r.id)).sort((a, b) => (!!on(b.id) - !!on(a.id)) || String(a.username).localeCompare(String(b.username)));
+  setHTML(fr, rows.length ? rows.slice(0, 30).map(r => { const o = on(r.id), sent = !!(SESH.on && SESH.invited && SESH.invited.has(String(r.id))), inIt = here.has(String(r.id));
+    return `<div class="dfr-row">${lbAvatar(r.avatar_url, r.username, 36)}<span class="dfr-name"><b>${esc(r.username)}</b><small><i class="dfr-dot${inIt || (o && !o.busy) ? ' on' : o ? ' busy' : ''}"></i>${inIt ? 'In the sesh' : o ? o.busy ? 'Busy' : 'Online' : 'Offline'}</small></span>${inIt ? '' : `<button class="btn small${o && !o.busy && !sent ? ' primary' : ''}" data-s="inv" data-id="${esc(String(r.id))}" data-n="${esc(r.username)}">${sent ? 'Invited' : 'Invite'}</button>`}</div>`; }).join('')
+    : '<p class="muted" style="margin:0;font-size:13px">No friends yet. Friends are people you follow who follow you back. Anyone can join with the code.</p>');
+}
+async function seshClick(e){
+  if (e.target === $('.egg.sesh')) return seshHide();
+  const b = e.target.closest('[data-s]'); if (!b) return; const k = b.dataset.s;
+  if (k === 'x') return seshHide();
+  if (k === 'new') return seshStart();
+  if (k === 'join'){ const c = rtClean(($('#sxCode') || {}).value); if (c.length !== 6) return toast('Codes are 6 letters and numbers'); return seshStart(c); }
+  if (k === 'copy'){ try { await navigator.clipboard.writeText(SESH.code); toast('Code copied'); } catch(_){ toast('Code: ' + SESH.code); } return; }
+  if (k === 'heat') return seshHeat();
+  if (k === 'stop'){ try { await modeCmd(8); } catch(_){} return; }
+  if (k === 'leave') return seshEnd();
+  if (k === 'inv') return seshInviteFrom(b.dataset.id, b.dataset.n);
+}
+/* ---- test tools: a sesh with three fake friends, to try it alone ---- */
+const SESH_FAKE = [['Kingo', '#2bd9ff', 'Peak Pro'], ['ooobabyatriple', '#ff5ec8', 'Peak Pro'], ['Tokin’ Stoner Friend', '#ffd23f', 'Proxy']];
+function seshDemoAdd(){ SESH_FAKE.forEach(([n, c, dev], i) => SESH.peers.set('zz' + i, { id:'zz' + i, n, c, a:'', live:true, dev, st:5, tc:22, h:0, b:0, tot:0, at: Date.now() })); }
+function seshDemoHeat(){ SESH.peers.forEach(p => Object.assign(p, { st:7, tc:25, rdyAt: Date.now() + 5000 + Math.random() * 9000, h:0, b:0, tot:0, hit:false, next:0, lag: Math.random() * 1800 })); }
+function seshDemoTick(now){
+  SESH.peers.forEach(p => {
+    p.at = now;
+    if (p.st === 7){ p.tc = Math.min(p.tc + 12, 268); if (now >= p.rdyAt){ p.st = 8; p.tc = 271; } }
+    if (SESH.ph !== 'sesh' || p.st !== 8) return;
+    if (p.hit){ if (now >= p.hitEnd){ const s = Math.round((p.hitEnd - p.hitT0) / 100) / 10; Object.assign(p, { hit:false, h: p.h + 1, b: Math.max(p.b, s), tot: Math.round((p.tot + s) * 10) / 10, next: now + 3000 + Math.random() * 6000 }); } }
+    else if (now >= (p.next || SESH.hitAt + p.lag)){ if (now - SESH.hitAt > 30000){ p.st = 5; p.tc = 60; } else Object.assign(p, { hit:true, hitT0: now, hitEnd: now + 2000 + Math.random() * 8000 }); }
+  });
+}
+function lobbyInv(m){
+  if (!lobbyMe(m) || !m.id || !duelAllowed()) return;
+  const code = rtClean(m.code); if (code.length !== 6) return;
+  if (m.r && m.r.sesh) return seshInvPop(m, code);
+  if (DUEL.on || SESH.on || LOBBY.inv){ LOBBY.rt.send('inv:no', { id: lobbyId(), to: m.id, code, busy:true }); return; }
+  LOBBY.inv = { from: String(m.id), n: String(m.n || 'Someone').slice(0, 20), code, r: m.r || {}, at: Date.now() }; lobbyTimer();
+  const r = LOBBY.inv.r, el = document.createElement('div'); el.className = 'egg dinv';
+  el.innerHTML = `<div class="egg-card" role="dialog" aria-label="1v1 invite" style="gap:12px"><span class="label">1v1</span><h2 style="margin:0">${esc(LOBBY.inv.n)} wants to 1v1</h2>
+    <p>${rulesTxt(duelSan(r))}</p><p><b>${esc(profTxt(duelSan(r).prof))}</b></p>${duelSan(r).bet ? `<p style="color:#ffd23f;font-weight:700">Bet: ${duelSan(r).bet} RP. Winner takes it${DUEL_RP_REAL ? '' : ' (not real RP yet)'}</p>` : ''}
+    <p style="font-size:13px">Your Profile 1 is saved and swapped for this, then comes back when you’re done.</p>
+    <div class="row" style="gap:8px;width:100%"><button class="btn" data-i="no" style="flex:1">Not now</button><button class="btn primary" data-i="ok" style="flex:1">Accept</button></div></div>`;
+  document.body.appendChild(el); applyHaptics(); buzz([40, 60, 40]); requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+  el.addEventListener('click', e => {
+    const b = e.target.closest('[data-i]'); if (!b) return; const inv = LOBBY.inv; if (!inv) return duelInvClose();
+    if (b.dataset.i === 'no'){ LOBBY.rt.send('inv:no', { id: lobbyId(), to: inv.from, code: inv.code }); duelInvClose(); return; }
+    duelInvClose(); queueLeave();
+    duelStart('guest', inv.code, duelSan(inv.r)); duelSheet();
+  });
+}
+function duelInvClose(){ LOBBY.inv = null; const el = $('.egg.dinv'); if (!el) return; el.classList.remove('on'); setTimeout(() => el.remove(), 260); }
+const lobbyWanted = () => duelAllowed() && !!lbStore().joined; // invites only reach players with a profile, so guests don't hold a connection
+(function lobbyBoot(n){ duelGate(); if (lobbyWanted()){ if (!document.hidden) lobbyOn(); return; } if (n < 20) setTimeout(() => lobbyBoot(n + 1), 15000); })(0); // in the lobby while the app is open, so friends' invites reach you (waits for the profile to load)
+// Rich's personal moods: put in his My moods once (Spin works on both the Peak and the Proxy). Delete one and it stays gone
+const RICH_MOODS = [{ id:'rich-spin', name:'Rich Spin', tag:'pikaled2-spin-mood-light', meta:{ userColors:['#8a00ff', '#ffffff', '#8a00ff', '#ffffff'], tempoFrac:.62, dynamicInhale:0 } }];
+function richMoods(n){
+  if (!isRich()){ if (n < 40) setTimeout(() => richMoods(n + 1), 15000); return; } // waits for the profile to load
+  store.richMoods = store.richMoods || []; let added = 0;
+  RICH_MOODS.forEach(m => { if (store.richMoods.includes(m.id)) return; store.richMoods.push(m.id); if (!store.myMoods.some(x => x.id === m.id)){ store.myMoods.unshift(JSON.parse(JSON.stringify(m))); added++; } });
+  save(); if (added){ try { if (view === 'lights') drawMoods(); } catch(e){} toast('Rich Spin is in your moods'); }
+}
+setTimeout(() => richMoods(0), 3000);
+setTimeout(() => { try { if (view === 'set') drawTestTools(); } catch(e){} }, 0); // Settings can open before everything below it has loaded (Path): draw the test tools again once it has
+// links: ?vr opens the panel
+{ const q = new URLSearchParams(location.search);
+  if (q.has('vr')) setTimeout(() => vrOpen(), 300);
+  duelGate(); setTimeout(duelGate, 5000);
+  if (store.vrLink && store.vrLink.code && Date.now() - (store.vrLink.at || 0) < 12 * 36e5 && !q.has('vr')) setTimeout(() => vrLink(store.vrLink.code, true), 5000); // phone reloaded: keep the panel linked
+}

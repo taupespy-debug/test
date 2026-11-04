@@ -72,6 +72,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             guard let w = self?.web else { return done(false) }
             w.evaluateJavaScript(code) { r, _ in done((r as? Int) == 1) }
         }
+        multi.restore() // your other devices start connecting at launch, while the startup animation plays
         AppServices.tracker = tracker
         Notify.shared.setUp()
         MusicLights.shared.tracker = tracker

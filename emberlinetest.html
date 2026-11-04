@@ -16,6 +16,12 @@
 .spl-bar i{display:block;width:40%;height:100%;border-radius:2px;background:linear-gradient(90deg,transparent,#b06bff,#7300ff,transparent);animation:splSlide 1.1s ease-in-out infinite}
 .spl-note{min-height:18px;font:500 13px -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.55);opacity:0;transition:opacity .3s}
 .spl-note.on{opacity:1}
+.spl-devs{display:flex;gap:16px;justify-content:center;min-height:46px}
+.spl-devs i{display:block;width:26px;height:46px;opacity:.3;filter:grayscale(1);transition:opacity .4s,filter .4s;animation:splDevWait 1.2s ease-in-out infinite alternate}
+.spl-devs i img{width:100%;height:100%;object-fit:contain}
+.spl-devs i.on{opacity:1;filter:drop-shadow(0 0 10px #a46bff);animation:splDevOn .5s ease-out}
+@keyframes splDevWait{to{opacity:.55}}@keyframes splDevOn{0%{transform:scale(1.35)}100%{transform:none}}
+@media (prefers-reduced-motion:reduce){.spl-devs i{animation:none}}
 @keyframes splRise{from{transform:translateY(100%)}to{transform:none}}
 @keyframes splFlick{50%{transform:translateY(-.4px) scaleY(1.04)}}
 @keyframes splBreath{50%{transform:scale(1.08);opacity:.75}}
@@ -80,7 +86,7 @@
 </div>
 <script>(function(){var t0=Date.now(),done=false,loaded=false,ready=false,tick=0;
 function hide(){if(done)return;done=true;clearInterval(tick);var el=document.getElementById('spl');if(!el)return;el.classList.add('out');setTimeout(function(){el.remove()},600)}
-function check(){var t=Date.now()-t0;if(loaded&&t>=(window.emberSplashMin||1600)&&(ready||t>=3200))hide()}
+function check(){var t=Date.now()-t0;if(loaded&&t>=(window.emberSplashMin||1600)&&(ready||t>=(window.emberSplashCap||3200)))hide()}
 // the app starts Bluetooth while this screen is up and calls this once connected (or once it gives up)
 window.emberSplashReady=function(){ready=true;check()};
 window.emberSplashNote=function(txt){var n=document.getElementById('splNote');if(n){n.textContent=txt;n.classList.add('on')}};
@@ -4452,6 +4458,24 @@ function drawSide(){
 document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-sdsw]'); if (!b) return; const d = sideDev(b.dataset.sdsw); if (d) switchToDevice(d); });
 document.addEventListener('change', e => { const t = e.target.closest && e.target.closest('[data-multi]'); if (!t) return;
   store.multiDev = !!t.checked; save(); multiSync(true); drawSide(); toast(t.checked ? 'Your devices stay connected (up to 3)' : 'Only the device on screen stays connected'); });
+// the startup animation: with 2 or 3 devices, an icon for each that lights up as it connects (the app connects them all
+// at launch), and it waits a moment longer (up to 5 s) so they're all on when it opens
+if (IS_APP && multiOn()) (() => {
+  const spl = $('#spl'), ds = multiDevs(); if (!spl || ds.length < 2) return;
+  window.emberSplashCap = 5000;
+  const box = document.createElement('div'); box.className = 'spl-devs';
+  box.innerHTML = ds.map(d => `<i data-sid="${esc(d.id)}" title="${esc(d.label || d.name)}"><img alt="" src="${d.series === 'toad' ? DEV_IMG.proxy : DEV_IMG.peak}"></i>`).join('');
+  const note = $('#splNote'); note.parentNode.insertBefore(box, note);
+  window.emberSplashNote('Connecting ' + ds.map(d => d.label || d.name).join(' + ') + '…');
+  const orig = window.emberSplashReady; let pageReady = false;
+  const allOn = () => ds.every(d => (S.mode === 'live' && ble.dev && ble.dev.id === d.id) || (SIDE.st[d.id] && SIDE.st[d.id].conn));
+  const t = setInterval(() => {
+    if (!document.getElementById('spl')){ clearInterval(t); return; }
+    box.querySelectorAll('[data-sid]').forEach(el => { const id = el.dataset.sid; el.classList.toggle('on', (S.mode === 'live' && ble.dev && ble.dev.id === id) || !!(SIDE.st[id] && SIDE.st[id].conn)); });
+    if (pageReady && allOn()){ clearInterval(t); orig && orig(); }
+  }, 150);
+  window.emberSplashReady = () => { pageReady = true; if (allOn()){ clearInterval(t); orig && orig(); } };
+})();
 window.emberBgPause = () => {
   const c = appCtx(); BG.on = true; try { hitLoopStop(); } catch(e){} saveOpenSess();
   try { if (phRestore) phEnd(); } catch(e){} // the app plays these from here: put back anything showing so nothing gets stuck on the Peak

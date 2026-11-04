@@ -27,6 +27,8 @@ final class MultiDevices {
 
     func configure(_ b: [String: Any]) {
         if let k = b["keep"] as? String { keepNext = UUID(uuidString: k); return }
+        var saved = b; saved.removeValue(forKey: "op"); saved.removeValue(forKey: "id")
+        if JSONSerialization.isValidJSONObject(saved), let d = try? JSONSerialization.data(withJSONObject: saved) { UserDefaults.standard.set(d, forKey: "multiCfg") } // for the next launch
         let wasOn = on
         on = b["on"] as? Bool ?? false
         var list: [Dev] = []
@@ -52,6 +54,12 @@ final class MultiDevices {
         }
         if !on && wasOn { stopAll() }
         sync()
+    }
+
+    // the app just opened: connect your devices right away (the page catches up when it loads)
+    func restore() {
+        guard !on, let d = UserDefaults.standard.data(forKey: "multiCfg"), let b = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return }
+        configure(b)
     }
 
     // MARK: - for the bridge
@@ -93,7 +101,9 @@ final class MultiDevices {
 
     func sync() {
         guard on, let br = bridge else { return }
-        let active = br.activeId
+        // the one the page uses (at launch, before Bluetooth is up, the last one it used) is the page's, not ours
+        let active = br.activeId ?? UserDefaults.standard.string(forKey: "activeId").flatMap { UUID(uuidString: $0) }
+        if let a = active, let t = trackers.removeValue(forKey: a) { _ = t.release() }
         for d in devs where d.id != active {
             if trackers[d.id] == nil { start(d.id, fromPage: false) }
             br.standingConnect(d.id)
