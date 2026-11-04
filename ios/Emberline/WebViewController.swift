@@ -91,7 +91,32 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in if let s = self { UpdateCheck.run(from: s) } } // a newer build on GitHub?
     }
 
-    private func load() { web.load(URLRequest(url: WebViewController.startURL)) }
+    // GitHub Pages can be slow or down for a while. Never sit on a blank screen: show the page the moment it starts
+    // drawing (its own startup screen), give up after 20 s, then try the copy saved from last time, then the offline page
+    private var committed = false
+    private var triedCache = false
+    private var loadTimer: Timer?
+    private func load(cache: Bool = false) {
+        if !cache { triedCache = false }
+        committed = false
+        let wait: TimeInterval = cache ? 8 : 20
+        web.load(URLRequest(url: WebViewController.startURL, cachePolicy: cache ? .returnCacheDataDontLoad : .useProtocolCachePolicy, timeoutInterval: wait))
+        loadTimer?.invalidate()
+        loadTimer = Timer.scheduledTimer(withTimeInterval: wait, repeats: false) { [weak self] _ in
+            guard let self = self, !self.committed else { return }
+            self.web.stopLoading()
+            self.loadFailed(NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut))
+        }
+    }
+    private func loadFailed(_ e: Error) {
+        if !triedCache { triedCache = true; load(cache: true); return } // GitHub didn't answer: the last copy still works (Bluetooth doesn't need the internet)
+        loadTimer?.invalidate()
+        offline(e); web.alpha = 1
+    }
+    func webView(_ w: WKWebView, didCommit n: WKNavigation!) {
+        committed = true; loadTimer?.invalidate()
+        if w.alpha < 1 { UIView.animate(withDuration: 0.25) { w.alpha = 1 } } // the startup screen is the first thing on the page
+    }
 
     // MARK: - page messages
 
@@ -234,7 +259,10 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         decisionHandler(.allow)
     }
 
-    func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) { offline(e); w.alpha = 1 }
+    func webView(_ w: WKWebView, didFailProvisionalNavigation n: WKNavigation!, withError e: Error) {
+        if (e as NSError).code == NSURLErrorCancelled { return } // our own timeout stopped it: loadFailed already moved on
+        loadFailed(e)
+    }
     func webView(_ w: WKWebView, didFail n: WKNavigation!, withError e: Error) {
         if (e as NSError).code != NSURLErrorCancelled { offline(e) }
     }
