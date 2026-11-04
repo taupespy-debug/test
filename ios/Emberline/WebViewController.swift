@@ -4,13 +4,17 @@ import WebKit
 // The app is the Emberline site in a full-screen web view, with Bluetooth from the app (BLEBridge) instead of Path's.
 // Updates still come from GitHub Pages: push to the site and the app has it on the next open.
 final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
-    // the live app (the same page Path users get). Test build: https://taupespy-debug.github.io/test/emberlinetest.html
-    static let startURL = URL(string: "https://emberlineapp.github.io/emberline/")!
+    // the live app (the same page Path users get). The test build can be picked from the page (Rich's settings, or the
+    // test tools to go back), and the app remembers it
+    static let liveURL = URL(string: "https://emberlineapp.github.io/emberline/")!
+    static let testURL = URL(string: "https://taupespy-debug.github.io/test/emberlinetest.html")!
+    static var startURL: URL { UserDefaults.standard.string(forKey: "site") == "test" ? testURL : liveURL }
     static let hosts: Set<String> = ["taupespy-debug.github.io", "emberlineapp.github.io"]
 
     private var web: WKWebView!
     private let ble = BLEBridge()
     private let tracker = BackgroundTracker()
+    private let multi = MultiDevices()
     private let keepAlive = KeepAlive()
     private let bg = UIColor(red: 11 / 255, green: 10 / 255, blue: 16 / 255, alpha: 1)
 
@@ -62,6 +66,12 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         ble.tracker = tracker
         ble.onAwayConnect = { [weak self] in self?.keepAlive.start() } // the Peak came back while the app was closed
         tracker.bridge = ble
+        ble.multi = multi
+        multi.bridge = ble
+        multi.deliver = { [weak self] code, done in
+            guard let w = self?.web else { return done(false) }
+            w.evaluateJavaScript(code) { r, _ in done((r as? Int) == 1) }
+        }
         AppServices.tracker = tracker
         Notify.shared.setUp()
         MusicLights.shared.tracker = tracker
@@ -97,6 +107,10 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
             if let n = body["notes"] as? [String: Any] { NotesWatch.shared.configure(n) }
             UIApplication.shared.isIdleTimerDisabled = body["connected"] as? Bool == true && (st == 7 || st == 8)
         case "haptic": Haptics.play(body["kind"] as? String ?? "light")
+        case "multi": multi.configure(body)
+        case "site":
+            let want = body["test"] as? Bool == true ? "test" : "live"
+            if UserDefaults.standard.string(forKey: "site") != want { UserDefaults.standard.set(want, forKey: "site"); load() }
         case "live": LiveSession.shared.handle(body)
         case "notify": Notify.shared.send(body["title"] as? String ?? "Emberline", body["body"] as? String ?? "")
         case "http": http(body)
@@ -141,7 +155,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
     @objc private func wentAway() {
         NotesWatch.shared.startAway() // invites and followers, even with no Peak around
         if MusicLights.shared.on { keepAlive.start() }
-        guard hadDevice || ble.isConnected(ble.activeId) else { return }
+        guard hadDevice || ble.isConnected(ble.activeId) || multi.anyConnected else { return }
         keepAlive.start()
         awaySince = Date(); lastSeenAway = Date()
         // give it a few seconds: pulling down Control Center shouldn't hand over the link
@@ -150,7 +164,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         idleTimer?.invalidate()
         idleTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            if self.ble.isConnected(self.ble.activeId) { self.lastSeenAway = Date() }
+            if self.ble.isConnected(self.ble.activeId) || self.multi.anyConnected { self.lastSeenAway = Date() }
             else if Date().timeIntervalSince(self.lastSeenAway) > 7200 { self.keepAlive.stop() } // 2 hours with no Peak: let the phone rest
         }
     }
@@ -188,6 +202,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         }
         if needsReload { needsReload = false; pendingResume = arg; load(); return }
         resume(arg)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.multi.sync() } // sessions from your other devices
     }
 
     // hand the sessions to the page; if it isn't ready yet, try again shortly (they're never dropped)

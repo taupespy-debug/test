@@ -21,6 +21,7 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     weak var web: WKWebView?
     weak var host: UIViewController?
     weak var tracker: BackgroundTracker?
+    weak var multi: MultiDevices? // your other Puffcos (up to 3 in all), see MultiDevices.swift
 
     private var central: CBCentralManager!
     private var peripherals: [UUID: CBPeripheral] = [:]
@@ -76,6 +77,13 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         case "connect": whenReady { [weak self] in self?.connect(id, body["dev"] as? String) }
         case "disconnect":
             guard let u = uuid(body["dev"]), let p = peripherals[u] else { break }
+            // switching to another of your devices: this one stays connected and tracked here
+            if p.state == .connected, multi?.pageLetGo(u) == true {
+                if activeId == u { activeId = nil }
+                failPageWaits(u); linked.remove(u)
+                js("window.__emberBle&&window.__emberBle.gone(\(json([u.uuidString]).dropFirst().dropLast()))")
+                break
+            }
             // the page gave up on a connect that's still waiting for the Peak: keep waiting (it connects when the Peak wakes)
             if autoReconnect && u == activeId && p.state == .connecting {
                 (connectWaits.removeValue(forKey: u) ?? []).forEach { fail($0, "NetworkError", "Still waiting for your Puffco") }
@@ -221,6 +229,8 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         if p == nil, let r = central.retrievePeripherals(withIdentifiers: [u]).first { adopt(r); p = r }
         guard let per = p else { return fail(id, "NotFoundError", "Device not found") }
         manualClose.remove(u)
+        multi?.pageTakes(u) // one of your other devices, already connected: the page takes it from here
+        if per.state == .connected { linked.insert(u) }
         activeId = u
         UserDefaults.standard.set(u.uuidString, forKey: "activeId")
         autoReconnect = true
@@ -237,7 +247,7 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         adopt(p); remember(p)
         linked.insert(p.identifier)
         if away { onAwayConnect?() }
-        else if (connectWaits[p.identifier] ?? []).isEmpty { backPending.insert(p.identifier) } // our standing connect finished, not the page's
+        else if (connectWaits[p.identifier] ?? []).isEmpty && multi?.tracker(p.identifier) == nil { backPending.insert(p.identifier) } // our standing connect finished, not the page's
         p.discoverServices([LORAX_SVC, PIKACHU_SVC, PUP_SVC]) // never the firmware update service
     }
 
@@ -254,6 +264,26 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     private func dropped(_ p: CBPeripheral) {
         let u = p.identifier
         linked.remove(u); backPending.remove(u)
+        failPageWaits(u)
+        tracker?.linkDropped(u)
+        let manual = manualClose.remove(u) != nil
+        if let side = multi?.tracker(u) {
+            side.linkDropped(u)
+            if !manual && central.state == .poweredOn { central.connect(p, options: nil) } // wait for it to come back
+            return
+        }
+        // the Peak fell asleep or walked out of range: wait for it to come back. iOS keeps this connect pending
+        // and finishes it whenever the Peak shows up again (open or closed app)
+        if !manual && u == activeId && (away || autoReconnect) && central.state == .poweredOn { central.connect(p, options: nil) }
+        if away {
+            goneWhileAway.insert(u)
+        } else {
+            js("window.__emberBle&&window.__emberBle.gone(\(json([u.uuidString]).dropFirst().dropLast()))")
+        }
+    }
+
+    // everything the page was waiting on for this device fails (it's gone, or handed to the multi-device tracker)
+    private func failPageWaits(_ u: UUID) {
         (connectWaits.removeValue(forKey: u) ?? []).forEach { fail($0, "NetworkError", "Disconnected") }
         (serviceWaits.removeValue(forKey: u) ?? []).forEach { fail($0.id, "NetworkError", "Disconnected") }
         let pre = u.uuidString + "|"
@@ -263,16 +293,6 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         writeWaits = writeWaits.filter { !$0.key.hasPrefix(pre) }
         notifyWaits = notifyWaits.filter { !$0.key.hasPrefix(pre) }
         noResponseQueue.removeAll { $0.p.identifier == u }
-        tracker?.linkDropped(u)
-        let manual = manualClose.remove(u) != nil
-        // the Peak fell asleep or walked out of range: wait for it to come back. iOS keeps this connect pending
-        // and finishes it whenever the Peak shows up again (open or closed app)
-        if !manual && u == activeId && (away || autoReconnect) && central.state == .poweredOn { central.connect(p, options: nil) }
-        if away {
-            goneWhileAway.insert(u)
-        } else {
-            js("window.__emberBle&&window.__emberBle.gone(\(json([u.uuidString]).dropFirst().dropLast()))")
-        }
     }
 
     // MARK: - services and characteristics
@@ -301,6 +321,7 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
             }
         }
         tracker?.servicesReady(p)
+        multi?.tracker(u)?.servicesReady(p)
     }
 
     private func findService(_ p: CBPeripheral, _ s: CBUUID) -> CBService? { p.services?.first { $0.uuid == s } }
@@ -331,6 +352,7 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
             }
         }
         tracker?.characteristicsReady(p, svc)
+        multi?.tracker(p.identifier)?.characteristicsReady(p, svc)
     }
 
     private func charFor(_ id: Int, _ b: [String: Any]) -> (CBPeripheral, CBCharacteristic)? {
@@ -403,6 +425,8 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
             return
         }
         guard let v = ch.value else { return }
+        // one of your other devices: everything from it is for its own tracker
+        if let side = multi?.tracker(p.identifier) { if ch.uuid == LORAX_REPLY { _ = side.takeReply(v) }; return }
         // replies to the tracker's own requests (and anything at all while the app is in the background) stay here
         if ch.uuid == LORAX_REPLY, let t = tracker, t.takeReply(v) || away { return }
         if away { return }
@@ -433,11 +457,29 @@ final class BLEBridge: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
                 if let p = peripherals[u], p.state == .disconnected, !manualClose.contains(u) { c.connect(p, options: nil) }
             }
         }
+        if on { multi?.sync() }
     }
 
     // MARK: - for the background tracker
 
     func peripheral(_ u: UUID) -> CBPeripheral? { peripherals[u] }
+
+    // MARK: - for your other devices (MultiDevices)
+
+    // wait for it: iOS finishes the connect whenever it shows up (asleep, out of range, app closed)
+    func standingConnect(_ u: UUID) {
+        guard central.state == .poweredOn, u != activeId else { return }
+        if peripherals[u] == nil, let r = central.retrievePeripherals(withIdentifiers: [u]).first { adopt(r) }
+        guard let p = peripherals[u], p.state == .disconnected else { return }
+        manualClose.remove(u)
+        central.connect(p, options: nil)
+    }
+    // no longer one of yours to keep (turned off, forgotten): disconnect it unless the page is using it
+    func letGo(_ u: UUID) {
+        guard u != activeId, let p = peripherals[u], p.state != .disconnected else { return }
+        manualClose.insert(u)
+        central.cancelPeripheralConnection(p)
+    }
     func isConnected(_ u: UUID?) -> Bool { u.flatMap { peripherals[$0] }?.state == .connected }
 
     // back in the app: tell the page about anything that dropped while it was away, so it reconnects cleanly

@@ -336,6 +336,11 @@ section.view>*{min-width:0}
 .ish-me{display:flex;align-items:center;gap:22px;padding:18px;border-radius:10px;background:#0a1a5599}.ish-me b{display:block;font:900 italic 20px var(--f-round,system-ui)}.ish-me small{opacity:.8}
 .ish-note{margin:6px 0 0;font-size:12px;opacity:.75}
 html[data-app] #fsRow{display:none!important}
+.side-devs{display:grid;gap:6px;margin-top:10px}
+.sd-row{display:flex;align-items:center;gap:10px;width:100%;padding:8px 12px;border-radius:14px;border:1px solid var(--line,rgba(255,255,255,.1));background:var(--fill,rgba(255,255,255,.06));color:inherit;font:inherit;text-align:left;cursor:pointer}
+.sd-row img{width:22px;height:40px;object-fit:contain;flex:none}.sd-t{flex:1;min-width:0}.sd-t b{display:block;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sd-t small{color:var(--muted);font-size:12px}
+.sd-go{font-size:13px;font-weight:700;color:var(--accent);flex:none}.sd-row.hot{border-color:#ff8a3d;box-shadow:0 0 16px rgba(255,138,61,.25)}.sd-row.hot small{color:#ffb27a}
+.dm-multi{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 10px 2px;font-size:13px}.dm-multi small{display:block;color:var(--muted);font-size:12px}
 .mus-viz{position:relative;height:150px;display:grid;place-items:center;border-radius:18px;background:radial-gradient(circle at 50% 50%,color-mix(in srgb,var(--mc,#7300ff) 22%,transparent),transparent 70%);overflow:hidden}
 .mus-viz i{width:84px;height:84px;border-radius:50%;background:var(--mc,#7300ff);box-shadow:0 0 40px var(--mc,#7300ff),0 0 90px color-mix(in srgb,var(--mc,#7300ff) 50%,transparent);transform:scale(calc(.7 + var(--ml,0) * .5));transition:transform .07s linear,background .12s,box-shadow .12s}
 .mus-viz.pop i{animation:musPop .28s ease-out}
@@ -2151,6 +2156,7 @@ body.vr-on #dvFrame{display:none}
       <div class="spot" id="spot" hidden></div>
       <div class="chips" id="homeChips" style="margin-top:8px"></div>
       <div class="home-quick" id="homeQuick" hidden><button class="btn small" id="bLantern" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M12 3v2M7 9a5 5 0 0 1 10 0v7a3 3 0 0 1-3 3h-4a3 3 0 0 1-3-3z"/><path d="M10 12.5c0-1.2 1-2 2-3 1 1 2 1.8 2 3a2 2 0 0 1-4 0z"/></svg><span>Lantern</span></button></div>
+      <div class="side-devs" id="sideDevs" hidden></div>
       <div class="adjust" id="adjustRow" hidden>
         <button class="btn" data-adj="temp:-5">−5°</button><button class="btn" data-adj="temp:5">+5°</button>
         <button class="btn" data-adj="time:-10">−10s</button><button class="btn" data-adj="time:10">+10s</button>
@@ -3765,11 +3771,12 @@ function drawDevMenu(){
       const on = cur && (d.id === cur), busy = !on && (C.state === 'connecting' || C.state === 'reconnecting') && store.lastDeviceId === d.id;
       return `<div class="dm-row${on ? ' on' : ''}"><button class="dm-dev" data-dev="${i}">
         <span class="dm-ic dm-pic"><img alt="" src="${d.series === 'toad' ? DEV_IMG.proxy : DEV_IMG.peak}"></span>
-        <span class="dm-t"><b>${esc(d.label || d.name)}</b><small>${esc(devKind(d))}${on ? ' · Connected' : busy ? ' · Connecting…' : ''}</small></span>
+        <span class="dm-t"><b>${esc(d.label || d.name)}</b><small>${esc(devKind(d))}${on ? ' · Connected' : busy ? ' · Connecting…' : multiOn() && SIDE.st[d.id] ? ' · ' + esc(sideWord(SIDE.st[d.id])) : ''}</small></span>
         ${on ? '<i class="dm-dot"></i>' : ''}</button>
         <button class="dm-x" data-forget="${i}" aria-label="Forget ${esc(d.label || d.name)}">✕</button></div>`; }).join('') : '<p class="muted" style="margin:6px 10px">No devices yet.</p>'}
     <button class="dm-add" id="dmAdd"><span>+</span> Add a device<small>Peak Pro or Proxy</small></button>
     ${cur ? '<button class="dm-add dm-dis" id="dmDis">Disconnect</button>' : ''}
+    ${IS_APP ? `<label class="dm-multi"><span>Keep my devices connected<small>Up to 3. Each one still tracks and counts</small></span><input type="checkbox" class="switch" data-multi ${multiOn() ? 'checked' : ''}></label>` : ''}
   </div>`;
 }
 function toggleDevMenu(force){
@@ -3781,6 +3788,7 @@ async function switchToDevice(d){
   toggleDevMenu(false);
   if (currentDevId() === d.id) return;
   // let go of the current device quietly, then go straight to the chosen one
+  if (multiOn() && ble.dev && ble.dev.gatt && ble.dev.gatt.connected){ multiSync(true); window.EMBER_APP.post('multi', { keep: ble.dev.id }); } // iPhone app: it stays connected and tracked
   appAuto(false); if (S.mode === 'live' || ble.connected){ manualDisconnect = true; reconnectRun++; stopPolling(); try { ble.disconnect(true); } catch(e){} S.mode = 'off'; await sleep(250); }
   zoneLiveStop(true);
   store.lastDeviceId = d.id; store.lastDeviceName = d.name; save();
@@ -4362,6 +4370,88 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('change', e => { const r = e.target.closest && e.target.closest('[data-msens]'); if (r){ store.musicSens = +r.value; save(); drawAppLights(); if (IS_APP) window.EMBER_APP.post('music', { sens: store.musicSens }); } });
 setTimeout(() => { store.musicOn = false; drawAppLights(); }, 0); // a fresh start never has music sync running
+/* ===== iPhone app: up to 3 devices at once =====
+   Own a few Puffcos? The app keeps up to 3 of your saved devices connected (ios/Emberline/MultiDevices.swift). The one
+   on screen works like always. The others are tracked by the app itself: sessions, hits and blinkers count, the blinker
+   Disco and the end warning still play, and you get a notification when one is ready. Switching is instant, because the
+   device is already connected. Sessions from the others come here (window.emberSide) and are logged like any other. */
+const SIDE = { st:{}, open:null };
+function multiOn(){ return IS_APP && store.multiDev !== false; }
+// the light data for each kind of device (the app plays it on the Peaks and Proxies that aren't on screen)
+function multiFx(){
+  const k = [store.warnColor, store.warnOn, store.warnSecs, store.bigHit, MOODS.excl.length].join('|'); if (multiFx.k === k) return multiFx.v;
+  const b64 = u8 => { let x = ''; for (const c of u8) x += String.fromCharCode(c); return btoa(x); }, out = {}, sv = S.series, se = S.edition;
+  for (const [name, ser] of [['peak', 'peach'], ['proxy', 'toad']]){
+    const v = {}; S.series = ser; S.edition = null;
+    try { if (store.bigHit !== false){ const d = MOODS.excl.find(x => /disco/i.test(x.name)); if (d) v.disco = b64(moodPayload({ kind:'excl', id:d.id, name:d.name })); } } catch(e){}
+    try { if (store.warnOn !== false){ v.warn = b64(solidPayload(store.warnColor || '#ffffff')); v.warnSecs = clamp(+store.warnSecs || 15, 3, 110); } } catch(e){}
+    out[name] = v;
+  }
+  S.series = sv; S.edition = se;
+  multiFx.k = k; multiFx.v = out; return out;
+}
+function multiDevs(){ // the one on screen first, then the most recent: 3 in all
+  const list = devList(), cur = (S.mode === 'live' && ble.dev && ble.dev.id) || store.lastDeviceId;
+  if (S.mode === 'live' && ble.dev){ const d = list.find(x => x.id === ble.dev.id); if (d && S.api && d.api !== S.api){ d.api = S.api; save(); } } // the original Peak gets no light effects
+  return list.filter(d => d.id).slice().sort((a, b) => (b.id === cur) - (a.id === cur) || (b.last || 0) - (a.last || 0)).slice(0, 3);
+}
+function multiSync(force){
+  if (!IS_APP) return;
+  const msg = { on: multiOn(), devs: multiDevs().map(d => ({ id:d.id, name:d.label || d.name, proxy:d.series === 'toad', api:d.api || 3 })), fx: multiFx(), blk: +store.bigHitSecs || 8 };
+  const key = JSON.stringify(msg); if (!force && key === multiSync.key) return; multiSync.key = key;
+  window.EMBER_APP.post('multi', msg);
+}
+if (IS_APP){ setInterval(() => { if (!document.hidden){ multiSync(); sideCarry(); } }, 2500); setTimeout(() => multiSync(true), 1500); }
+const sideDev = id => devList().find(x => x.id === id);
+const sideTax = () => { try { return rankLock() ? 0 : (RANK_TAX[myRank().tier.n] || 0); } catch(e){ return 0; } };
+function sideLog(s){
+  if (!s || !s.t || !s.dev) return false;
+  if ((store.sessions || []).some(x => x.dev === s.dev && Math.abs(x.t - s.t) < 1500)) return false; // already have it
+  const d = sideDev(s.dev) || {}, run = typeof s.run === 'number' ? s.run : null, tax = sideTax();
+  logSession({ setF: s.setF || undefined, hitAt: s.hitAt, tax: tax && run >= RANK_TAX_SECS ? tax : undefined, blk: champBlink(), t: s.t, p: s.p || 0, name: d.label || d.name || 'Session',
+    target: s.setF || undefined, peak: s.setF || undefined, dur: Math.round(((s.end || Date.now()) - s.t) / 1000), hits: (s.hits || []).slice(0, 20), run, bg: true, side: true, dev: s.dev, series: d.series || 'peach' });
+  return true;
+}
+// switched to a device in the middle of its session: carry on with it here (the hits so far count)
+function sideCarry(){
+  const c = SIDE.open; if (!c) return;
+  if (Date.now() - c.at > 60000){ SIDE.open = null; return; }
+  if (S.mode !== 'live' || !ble.dev || ble.dev.id !== c.dev) return;
+  SIDE.open = null;
+  const o = c.o || {}; if (!o.t || !(S.state === 7 || S.state === 8)) return;
+  const near = (a, b) => a && b && Math.abs(a - b) < 1500;
+  if (!cur || !near(cur.t, o.t)){ const pr = S.profiles[o.p] || {}; cur = { t:o.t, p:o.p, name: pr.name || 'Session', target: pr.tempC ? Math.round(c2f(pr.tempC)) : null, peak: o.setF || 0, hit: !!o.readyAt, batt: S.battery };
+    if (o.readyAt){ cur.readyAt = o.readyAt; cur.tax = sideTax(); cur.blk = champBlink(); } }
+  if (o.readyAt && !cur.readyAt){ cur.readyAt = o.readyAt; cur.hit = true; }
+  if (o.setF) cur.setF = Math.max(cur.setF || 0, o.setF);
+  HIT.hits = (o.hits || []).slice(); HIT.ends = (o.ends || []).slice(); cur.hits = HIT.hits.slice(); saveOpenSess(); render();
+}
+window.emberSide = json => {
+  let m = {}; try { m = JSON.parse(json) || {}; } catch(e){ return; }
+  if (m.type === 'status'){ SIDE.st = {}; (m.devs || []).forEach(d => { if (d && d.id) SIDE.st[d.id] = d; }); drawSide(); const dm = $('#devMenu'); if (dm && !dm.hidden) drawDevMenu(); return; }
+  if (m.type === 'open'){ SIDE.open = { dev:m.dev, o:m.open, at:Date.now() }; return; }
+  if (m.type === 'sessions'){
+    let n = 0; (m.sessions || []).slice().sort((a, b) => a.t - b.t).forEach(s => { if (sideLog(s)) n++; });
+    if (n){ render(); try { drawRank(); } catch(e){} const s = m.sessions[m.sessions.length - 1], d = sideDev(s.dev) || {}, h = s.hits || [];
+      toast(`${d.label || d.name || 'Your other device'}: session tracked${h.length ? ` · ${h.length} hit${h.length > 1 ? 's' : ''}, best ${Math.max(...h).toFixed(1)}s` : ''}`); }
+  }
+};
+function sideWord(x){
+  if (!x || !x.conn) return 'Waiting for it';
+  if (x.st === 7) return 'Heating';
+  if (x.st === 8){ const left = x.endsAt ? Math.max(0, Math.round((x.endsAt - Date.now()) / 1000)) : 0; return `Ready${x.hits ? ` · ${x.hits} hit${x.hits > 1 ? 's' : ''}` : ''}${left ? ` · ${left}s left` : ''}`; }
+  return 'Connected';
+}
+function drawSide(){
+  const el = $('#sideDevs'); if (!el) return;
+  const rows = multiOn() ? Object.values(SIDE.st).filter(x => x.conn && x.id !== currentDevId()) : [];
+  el.hidden = !rows.length; if (!rows.length){ el.innerHTML = ''; return; }
+  el.innerHTML = rows.map(x => { const d = sideDev(x.id) || {}, hot = x.st === 7 || x.st === 8;
+    return `<button class="sd-row${hot ? ' hot' : ''}" data-sdsw="${esc(x.id)}"><img alt="" src="${d.series === 'toad' ? DEV_IMG.proxy : DEV_IMG.peak}"><span class="sd-t"><b>${esc(d.label || d.name || 'Device')}</b><small>${esc(sideWord(x))}</small></span><span class="sd-go">Switch</span></button>`; }).join('');
+}
+document.addEventListener('click', e => { const b = e.target.closest && e.target.closest('[data-sdsw]'); if (!b) return; const d = sideDev(b.dataset.sdsw); if (d) switchToDevice(d); });
+document.addEventListener('change', e => { const t = e.target.closest && e.target.closest('[data-multi]'); if (!t) return;
+  store.multiDev = !!t.checked; save(); multiSync(true); drawSide(); toast(t.checked ? 'Your devices stay connected (up to 3)' : 'Only the device on screen stays connected'); });
 window.emberBgPause = () => {
   const c = appCtx(); BG.on = true; try { hitLoopStop(); } catch(e){} saveOpenSess();
   try { if (phRestore) phEnd(); } catch(e){} // the app plays these from here: put back anything showing so nothing gets stuck on the Peak
@@ -4426,7 +4516,7 @@ function claimPrompt(){
   el.querySelector('#clNo').onclick = () => { store.claimAsked[id] = true; save(); done(); };
 }
 function logSession(s){
-  if (ble.dev && S.mode === 'live'){ s.dev = ble.dev.id; s.series = S.series || 'peach'; }
+  if (!s.side && ble.dev && S.mode === 'live'){ s.dev = ble.dev.id; s.series = S.series || 'peach'; } // side: from another of your devices (iPhone app)
   if (!demo && acctId()) s.acct = acctId();
   const d = data();
   let rankBefore = null; try { rankBefore = myRank(); } catch(e){}
@@ -9145,7 +9235,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="pathnotiftry">Notifications test (details)</button><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="premthanks">Premium thank-you popup</button><button class="btn small" data-tt="supnudge">Support Emberline popup (non-Premium)</button><button class="btn small" data-tt="stripe">Premium popup as a non-subscriber (Stripe checkout)</button><button class="btn small" data-tt="sesscard">Session share card</button><button class="btn small" data-tt="appcam">iPhone app: camera color</button><button class="btn small" data-tt="appmusic">iPhone app: music sync</button><button class="btn small" data-tt="appfps">Frame rate (120 Hz check)</button><button class="btn small" data-tt="applive">iPhone app: Live Activity demo</button><button class="btn small" data-tt="appnotif">iPhone app: test notification</button><button class="btn small" data-tt="apphaptic">iPhone app: haptics</button><button class="btn small" data-tt="appbg">iPhone app: fake closed-app session</button><button class="btn small" data-tt="hwsplash">Halloween startup</button><button class="btn small" data-tt="torch">Torch dab (Rich)</button><button class="btn small" data-tt="torchsim">Torch dab curve demo</button><button class="btn small" data-tt="premmoods">Premium moods (Lights tab)</button><button class="btn small" data-tt="gifpfp">GIF profile picture</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="seshnote">Group sesh Premium notification</button><button class="btn small" data-tt="ednote">Special edition moods Premium notification</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${(() => { try { return Object.keys(DFX_FX); } catch(e){ return []; } })().map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="pathnotiftry">Notifications test (details)</button><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="premthanks">Premium thank-you popup</button><button class="btn small" data-tt="supnudge">Support Emberline popup (non-Premium)</button><button class="btn small" data-tt="stripe">Premium popup as a non-subscriber (Stripe checkout)</button><button class="btn small" data-tt="sesscard">Session share card</button><button class="btn small" data-tt="appcam">iPhone app: camera color</button><button class="btn small" data-tt="appmusic">iPhone app: music sync</button><button class="btn small" data-tt="appfps">Frame rate (120 Hz check)</button><button class="btn small" data-tt="applive">iPhone app: Live Activity demo</button><button class="btn small" data-tt="appnotif">iPhone app: test notification</button><button class="btn small" data-tt="apphaptic">iPhone app: haptics</button><button class="btn small" data-tt="appbg">iPhone app: fake closed-app session</button><button class="btn small" data-tt="appmulti">iPhone app: 3 devices (demo)</button><button class="btn small" data-tt="appmultisess">iPhone app: fake session from another device</button><button class="btn small" data-tt="appsite">iPhone app: go back to the live app</button><button class="btn small" data-tt="hwsplash">Halloween startup</button><button class="btn small" data-tt="torch">Torch dab (Rich)</button><button class="btn small" data-tt="torchsim">Torch dab curve demo</button><button class="btn small" data-tt="premmoods">Premium moods (Lights tab)</button><button class="btn small" data-tt="gifpfp">GIF profile picture</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="seshnote">Group sesh Premium notification</button><button class="btn small" data-tt="ednote">Special edition moods Premium notification</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${(() => { try { return Object.keys(DFX_FX); } catch(e){ return []; } })().map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -9360,6 +9450,15 @@ $('#testTools').addEventListener('click', e => {
   if (k === 'stripe'){ premInfo(true); return; } // as someone without Premium, with the card checkout
   if (k === 'sesscard'){ sessionCardPng().then(png => { if (!png) return toast('No session yet'); const el = document.createElement('div'); el.className = 'egg on'; el.style.zIndex = 300; el.innerHTML = `<div class="egg-card" style="gap:10px"><img src="${png}" style="width:100%;border-radius:16px"><div class="row" style="gap:8px"><button class="btn primary" data-sesshare>Share</button><button class="btn" data-x>Close</button></div></div>`; el.addEventListener('click', ev => { if (ev.target === el || ev.target.closest('[data-x]') || ev.target.closest('[data-sesshare]')) el.remove(); }); document.body.appendChild(el); }); return; }
   if (k === 'appcam'){ if (!IS_APP) return toast('Only in the iPhone app'); window.EMBER_APP.post('camera', {}); return; }
+  if (k === 'appmulti'){ // what the Session screen and the device menu show with 2 more devices connected
+    const now = Date.now(), ds = devList(); const fake = [{ id: (ds[1] && ds[1].id) || 'demo-2', name:'Peak 2', series:'peach' }, { id: (ds[2] && ds[2].id) || 'demo-3', name:'Proxy', series:'toad' }];
+    fake.forEach(f => { if (!sideDev(f.id)) ds.push({ id:f.id, name:f.name, label:f.name, series:f.series, last:0 }); });
+    window.emberSide(JSON.stringify({ type:'status', devs:[{ id:fake[0].id, conn:true, st:8, hits:2, best:6.1, readyAt:now - 20000, endsAt:now + 45000 }, { id:fake[1].id, conn:true, st:5, hits:0 }] }));
+    if (!IS_APP){ const el = $('#sideDevs'); if (el){ el.hidden = false; el.innerHTML = Object.values(SIDE.st).map(x => { const d = sideDev(x.id) || {}; return `<button class="sd-row${x.st === 8 ? ' hot' : ''}" data-sdsw="${esc(x.id)}"><img alt="" src="${d.series === 'toad' ? DEV_IMG.proxy : DEV_IMG.peak}"><span class="sd-t"><b>${esc(d.label || d.name)}</b><small>${esc(sideWord(x))}</small></span><span class="sd-go">Switch</span></button>`; }).join(''); } }
+    show('home'); toast('Demo: 2 more devices on the Session screen'); return; }
+  if (k === 'appmultisess'){ const t = Date.now() - 90000, ds = devList(); let d = ds.find(x => x.id !== currentDevId()); if (!d){ d = { id:'demo-2', name:'Peak 2', label:'Peak 2', series:'peach', last:0 }; ds.push(d); save(); }
+    window.emberSide(JSON.stringify({ type:'sessions', sessions:[{ dev:d.id, t, p:0, readyAt:t + 25000, end:t + 85000, run:60, setF:520, hits:[9.4, 3.2], hitAt:[6, 30] }] })); return; }
+  if (k === 'appsite'){ if (!IS_APP) return toast('Only in the iPhone app'); window.EMBER_APP.post('site', { test:false }); return; }
   if (k === 'appmusic'){ if (!IS_APP) return toast('Only in the iPhone app'); musicToggle(); return; }
   if (k === 'appfps'){ let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 1000) requestAnimationFrame(f); else toast(`${n} fps${n > 100 ? ' · 120 Hz is on' : n > 70 ? '' : ' · 60 Hz'}`); }; requestAnimationFrame(f); return; }
   if (k === 'applive' || k === 'appnotif' || k === 'apphaptic'){

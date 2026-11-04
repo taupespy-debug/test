@@ -11,6 +11,13 @@ import QuartzCore
 // data the page gave it (Ctx.fx), so the Peak acts the same with the app closed.
 final class BackgroundTracker {
     weak var bridge: BLEBridge?
+    // a second or third device (MultiDevices.swift): this tracker always follows that one device, app open or closed,
+    // while the page uses another. nil = the main tracker, which follows the device the page is using
+    var devId: UUID?
+    var side: Bool { devId != nil }
+    var onFinished: (([String: Any]) -> Void)? // side trackers: a finished session goes straight here
+    private var target: UUID? { devId ?? bridge?.activeId }
+    private var liveShown = false
 
     // what the page told us before it froze (window.emberBgPause / the heartbeat)
     struct Ctx {
@@ -69,10 +76,10 @@ final class BackgroundTracker {
 
     // MARK: - taking over and handing back
 
-    func takeOver(_ c: Ctx) {
+    func takeOver(_ c: Ctx, authed fromPage: Bool? = nil) {
         guard !owning else { return }
-        ctx = c; owning = true; busy = false
-        authed = bridge?.isConnected(bridge?.activeId) ?? false // a link the page made is already unlocked
+        ctx = c; owning = true; busy = false; liveShown = false
+        authed = fromPage ?? (bridge?.isConnected(target) ?? false) // a link the page made is already unlocked
         lastState = -1; lastStateRead = 0; hitOK = c.api != 2 // the original Peak times hits from the heater: sessions still count, hits don't
         finished = []; hit = HitCounter(); cur = nil; shownHits = 0; endsAt = nil
         ledJobs = []; discoOn = false; preheatSaved = nil; warnDone = false; torchTe = c.torch?.te ?? 0; torchSent = -1; torchAt = 0; torchLast = 0
@@ -111,7 +118,7 @@ final class BackgroundTracker {
     // MARK: - link events from the bridge
 
     func linkDropped(_ u: UUID) {
-        guard u == bridge?.activeId else { return }
+        guard u == target else { return }
         authed = false
         for (_, done) in pending { done(.failure(TrackErr.down)) }
         pending = [:]; busy = false
@@ -121,12 +128,12 @@ final class BackgroundTracker {
 
     // a link we reconnected while the app was closed: find the LoRaX service, then listen for replies
     func servicesReady(_ p: CBPeripheral) {
-        guard owning, p.identifier == bridge?.activeId, let svc = p.services?.first(where: { $0.uuid == LORAX_SVC }) else { return }
+        guard owning, p.identifier == target, let svc = p.services?.first(where: { $0.uuid == LORAX_SVC }) else { return }
         if svc.characteristics == nil { p.discoverCharacteristics([LORAX_CMD, LORAX_REPLY], for: svc) }
         else { characteristicsReady(p, svc) }
     }
     func characteristicsReady(_ p: CBPeripheral, _ svc: CBService) {
-        guard owning, svc.uuid == LORAX_SVC, p.identifier == bridge?.activeId,
+        guard owning, svc.uuid == LORAX_SVC, p.identifier == target,
               let rep = svc.characteristics?.first(where: { $0.uuid == LORAX_REPLY }) else { return }
         if !rep.isNotifying { p.setNotifyValue(true, for: rep) }
     }
@@ -278,6 +285,14 @@ final class BackgroundTracker {
     // MARK: - music lights (MusicLights.swift): the next color on each beat, on the preview channel
 
     var currentState: Int { lastState }
+    var status: [String: Any] {
+        var d: [String: Any] = ["id": target?.uuidString ?? "", "conn": bridge?.isConnected(target) == true && linkChars() != nil, "st": lastState,
+                                "hits": hit.hits.count, "best": hit.hits.max() ?? 0, "last": hit.hits.last ?? 0, "on": hit.on]
+        if let r = cur?.readyAt { d["readyAt"] = r.timeIntervalSince1970 * 1000 }
+        if let e = endsAt { d["endsAt"] = e.timeIntervalSince1970 * 1000 }
+        if let c = cur, c.setF > 0 { d["setF"] = c.setF }
+        return d
+    }
     private var musicBusy = false
     private var musicNext: [UInt8]?
     func musicLight(_ blob: [UInt8], api2: Bool) {
@@ -343,7 +358,7 @@ final class BackgroundTracker {
     // MARK: - LoRaX (same as the page's Lorax class)
 
     private func linkChars() -> (CBPeripheral, CBCharacteristic)? {
-        guard let br = bridge, let u = br.activeId, let p = br.peripheral(u), p.state == .connected,
+        guard let br = bridge, let u = target, let p = br.peripheral(u), p.state == .connected,
               let cmd = br.findChar(p, LORAX_SVC, LORAX_CMD), let rep = br.findChar(p, LORAX_SVC, LORAX_REPLY), rep.isNotifying else { return nil }
         return (p, cmd)
     }
@@ -392,7 +407,7 @@ final class BackgroundTracker {
 
     private func tick() {
         guard owning, !busy else { return }
-        guard bridge?.isConnected(bridge?.activeId) == true, linkChars() != nil else { return }
+        guard bridge?.isConnected(target) == true, linkChars() != nil else { return }
         if !authed {
             busy = true
             unlock { [weak self] ok in self?.authed = ok; self?.busy = false }
@@ -446,7 +461,7 @@ final class BackgroundTracker {
             else if !warnDone && left > 0 {
                 warnDone = true
                 warnFlash()
-                if owning { Notify.shared.send("\(Int(ctx.warnSecs.rounded())) seconds left", "Finish your hit 🔥", id: "warn") }
+                if owning { note("\(Int(ctx.warnSecs.rounded())) seconds left", "Finish your hit 🔥", id: "warn") }
             }
         }
         if torchStep(now) { return }
@@ -516,7 +531,7 @@ final class BackgroundTracker {
         if prev == 7 && st != 7 { preheatRestore() }
         if st == 8 && prev != 8 {
             endsAt = nil; lastTimerRead = 0; timerStep = 0; warnDone = false
-            if owning { Notify.shared.send("Ready to dab", "\(ctx.name)\(ctx.targetF > 0 ? " at \(ctx.targetF)°F" : "") is ready.", id: "ready") }
+            if owning { note("Ready to dab", "\(ctx.name)\(ctx.targetF > 0 ? " at \(ctx.targetF)°F" : "") is ready.", id: "ready") }
         }
         if st == 9 || st <= 6 { endSession(now) }
         if st != prev { emitLive() }
@@ -527,7 +542,7 @@ final class BackgroundTracker {
         guard hit.hits.count != shownHits else { return }
         if hit.hits.count > shownHits, let h = hit.hits.last, h >= ctx.blk, owning {
             discoBlinker()
-            Notify.shared.send("Blinker! 🔥", String(format: "%.1f second hit. It counts when you open Emberline.", h), id: "blinker")
+            note("Blinker! 🔥", String(format: side ? "%.1f second hit." : "%.1f second hit. It counts when you open Emberline.", h), id: "blinker")
         }
         shownHits = hit.hits.count
         emitLive()
@@ -538,6 +553,9 @@ final class BackgroundTracker {
         guard owning else { return }
         let st = lastState
         let phase = st == 7 ? "heat" : st == 8 ? "ready" : (cur == nil && st >= 0 ? "done" : "idle")
+        if side { // only while this device is heating, and once more to clear it
+            if phase == "heat" || phase == "ready" { liveShown = true } else if liveShown { liveShown = false } else { return }
+        }
         var d: [String: Any] = ["phase": phase, "name": ctx.name, "color": ctx.color, "tempF": cur?.setF ?? ctx.targetF, "targetF": max(ctx.targetF, cur?.setF ?? 0),
                                 "hits": hit.hits.count, "lastHit": hit.hits.last ?? 0, "best": hit.hits.max() ?? 0, "blinker": (hit.hits.last ?? 0) >= ctx.blk]
         if let r = cur?.readyAt { d["readyAt"] = r.timeIntervalSince1970 * 1000 }
@@ -553,13 +571,21 @@ final class BackgroundTracker {
         let ranFor = c.readyAt.map { now.timeIntervalSince($0) } ?? 0
         let gotHit = hit.hits.contains { $0 >= 1 }
         if c.readyAt != nil && (ranFor >= 20 || gotHit) {
-            finished.append(sessDict(c, end: now))
+            let d = sessDict(c, end: now)
+            if let f = onFinished { f(d) } else { finished.append(d) }
             if owning {
                 let n = hit.hits.count, best = hit.hits.max() ?? 0
-                Notify.shared.send("Session tracked", n == 0 ? "No hits this time. It counts when you open Emberline." : "\(n) hit\(n == 1 ? "" : "s"), best \(String(format: "%.1f", best))s. It counts when you open Emberline.", id: "sess-\(Int(c.t.timeIntervalSince1970))")
+                let more = side ? "" : " It counts when you open Emberline."
+                note("Session tracked", n == 0 ? "No hits this time.\(more)" : "\(n) hit\(n == 1 ? "" : "s"), best \(String(format: "%.1f", best))s.\(more)", id: "sess-\(Int(c.t.timeIntervalSince1970))")
             }
         }
         hit = HitCounter(); shownHits = 0; endsAt = nil
+    }
+
+    // a side device says which one it is, so you know which Peak is ready
+    private func note(_ title: String, _ body: String, id: String) {
+        if side { Notify.shared.send("\(ctx.name): \(title)", body, id: "\(id)-\(devId?.uuidString.prefix(8) ?? "")") }
+        else { Notify.shared.send(title, body, id: id) }
     }
 
     private func sessDict(_ c: Sess, end: Date?) -> [String: Any] {
