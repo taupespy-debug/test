@@ -5441,7 +5441,7 @@ function celShow({ kind, tier, from }){
 }
 // end of a session: show what it earned inside the gauge ring
 // rank tax: big red "-3 RP" drops onto the gauge when preheat finishes (charged if the session runs 30s+)
-function champBlink(){ try { return !rankLock() && /^(Champion|Legend)$/.test(myRank().tier.n) ? CHAMP_BLINK : undefined; } catch(e){ return undefined; } }
+function champBlink(){ return undefined; } // blinkers are 8s for everyone again (Nov 2026). Champion and Legend used to need CHAMP_BLINK; older sessions keep the blk they saved
 const bigHitAt = () => Math.max(+store.bigHitSecs || 8, (cur && cur.blk) || 0); // the celebration waits for a blinker that counts
 function taxPop(force){
   let tier = force; if (!tier){ try { if (rankLock()) return 0; tier = myRank().tier.n; } catch(e){ return 0; } }
@@ -5487,7 +5487,7 @@ function afterSessionLogged(s, before){
 const RANK_TIERS = [ { n:'Ember', min:0, c:'#ff6a3d' }, { n:'Flame', min:50, c:'#ff9f0a' }, { n:'Blaze', min:150, c:'#ffd60a' }, { n:'Inferno', min:300, c:'#ff2d55' }, { n:'Champion', min:500, c:'#e9bb4f' }, { n:'Legend', min:5000, c:'#b46bff' } ];
 const RANK_DIRTY = 120, RANK_DAY_SESS = Infinity; // every session after the first earns its point
 const RANK_TAX = { Blaze:3, Inferno:5, Champion:8, Legend:10 }, RANK_TAX_SECS = 30; // rank tax: high tiers pay RP for every session that runs 30s+
-const CHAMP_BLINK = 11; // Champions and Legends need an 11s hit for a blinker to count (everyone else 8s)
+const CHAMP_BLINK = 11; // no longer used for new sessions: blinkers are 8s for everyone (sessions from before keep what they saved)
 const blinkOf = s => (s && s.blk) || 8; // the blinker length a session was played under
 const RANK_MIN_F = 450, RANK_TEMP_FROM = Date.parse('2026-10-07T21:00:00Z'); // from this update on, a session only counts if its profile was set to 450°F or hotter
 const lowTemp = s => { const f = typeof s.setF === 'number' ? s.setF : s.target; return s.t >= RANK_TEMP_FROM && typeof f === 'number' && f < RANK_MIN_F; }; // the device's real target wins over the profile we think was picked
@@ -5592,7 +5592,7 @@ function drawRankInner(){
         return `<div class="rb-shelf-wrap"><span class="label">Your badges</span><div class="rb-shelf">${dev ? `<div class="rb-item" data-bv="dev">${devBadge(54)}<span>Developer</span></div>` : ''}${h.map(b => `<div class="rb-item" data-bv="${b.y}-${String(b.m + 1).padStart(2, '0')}:${b.t}">${rankBadge(b.m, b.t, 58, b.y)}<span>${RB_MONTHS[b.m].slice(0, 3)} · ${RB_TIERS[b.t].n}</span></div>`).join('')}</div></div>`; })()}
     <details class="rank-how"><summary>How points work</summary>
       <div class="how-list">
-        <div><span>Blinker <small>a single hit of 8s or longer (11s in Champion and Legend)</small></span><b class="pos">+5</b></div>
+        <div><span>Blinker <small>a single hit of 8s or longer</small></span><b class="pos">+5</b></div>
         <div><span>First dab of the day</span><b class="pos">+3</b></div>
         <div><span>Every other session</span><b class="pos">+1</b></div>
         <div><span>On Extreme vapor <small>added to each of the above</small></span><b class="pos">+1</b></div>
@@ -10719,7 +10719,7 @@ function duelArena(){
 const DV_C = 2 * Math.PI * 42;
 // what the arena is built from; when this changes it's rebuilt, otherwise only the numbers update (so animations keep running)
 const duelArenaKey = () => { const op = DUEL.op || {}; return JSON.stringify([duelPal(), op.n, op.a, op.p, op.c]); };
-const duelBlinkAt = () => champBlink() || 8; // a blinker: 8s, or 11s in Champion and Legend
+const duelBlinkAt = () => champBlink() || 8; // a blinker: 8s
 function duelArenaUpdate(ar){
   const D = DUEL, r = D.rules, me = D.me, op = D.op || {}, sc = duelScore(me, op), anyOut = me.out || op.out;
   const tag = ar.querySelector('.dv-tag'); if (tag) tag.hidden = !!anyOut;
@@ -11069,7 +11069,7 @@ function duelDraw(){
         <div><b>+10 points per second</b><span>Every hit of 1 second or longer scores 10 points for each second you pull. A 4.2s hit is +42, a 9s blinker is +90.</span></div>
         <div><b>2-minute match</b><span>The clock starts when both Puffcos are Ready and runs for one 2-minute session. Hits after time’s up don’t count.</span></div>
         <div><b>Most points wins</b><span>Tied on points? The longest single hit wins. Still tied, it’s a draw.</span></div>
-        <div><b>Blinkers</b><span>8s+ (11s+ in Champion and Legend). No bonus, they just score big and set your side on fire.</span></div>
+        <div><b>Blinkers</b><span>8s+. No bonus, they just score big and set your side on fire.</span></div>
         <div><b>Fair play</b><span>Both players get the same profile: 505°F, 120s, Bold, Boost +1°F / +15s. Hits only count on it (P1).</span></div></div></details>
       <a class="ddisc" href="${DISCORD_URL}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.3 5.3A17 17 0 0 0 15.1 4l-.5 1a15.7 15.7 0 0 0-5.2 0l-.5-1a17 17 0 0 0-4.2 1.3C2 9.2 1.3 13 1.6 16.7a17 17 0 0 0 5.2 2.6l1.1-1.8c-.6-.2-1.2-.5-1.8-.9l.4-.3a12 12 0 0 0 11 0l.4.3c-.6.4-1.2.7-1.8.9l1.1 1.8a17 17 0 0 0 5.2-2.6c.4-4.3-.7-8-3.1-11.4ZM8.7 14.5c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Zm6.6 0c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1Z"/></svg><span><b>Looking for players?</b><small>Join the Emberline Discord and find someone to 1v1</small></span><em>Join</em></a>
       <div id="dSecR" class="dpanel" hidden><span class="label">Random match</span>
