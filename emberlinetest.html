@@ -4589,7 +4589,9 @@ function logSession(s){
   else { if (d.sessions.length > 5000) d.sessions.splice(0, d.sessions.length - 5000); store.localSince++; save(); }
   if (S.mode === 'demo') S.odo++;
   checkClean(true);
+  store.rpDirty = true; // cleared once the leaderboard has it
   lbPush(true);
+  if (s.bg || s.side) setTimeout(() => { if (store.rpDirty) lbPush(true).catch(() => {}); }, 5000); // the app just woke up: the first try often has no connection yet
   rankLockCheck(rankBefore);
   if (rankBefore) afterSessionLogged(s, rankBefore);
   setTimeout(() => { try { passRefresh(true); } catch(e){} }, 4500); // Ember Pass challenges
@@ -5726,13 +5728,18 @@ function lbPayload(){
   return { stats: myStats(), rp, base: me ? me.rp || 0 : undefined, tier: rp > r.rp && me ? me.tier : r.tier.n, blinkers: bl, month: m, gear: myGear() }; // base: the leaderboard RP this built on, so the server lets the rank tax lower it
 }
 async function lbPush(force){
-  const L = lbStore(); if (!L.joined || !lbUsesPuffco()) return;
+  const L = lbStore(); if (!L.joined || !lbUsesPuffco()) return false;
   // never push before we know what the server has (a new phone or computer would send 0 RP)
-  if (!LB.me){ try { await lbRestore(); } catch(e){} if (!LB.me) return; }
-  if (!force && Date.now() - LB.lastPush < 60000) return;
+  if (!LB.me){ try { await lbRestore(); } catch(e){} if (!LB.me) return false; }
+  if (!force && Date.now() - LB.lastPush < 60000) return false;
   LB.lastPush = Date.now();
-  try { const pl = lbPayload(), r = await lbCall(pl); store.rpSent = { month: pl.month, id: acctId() || 'local', rp: pl.rp }; if (r && r.player){ LB.me = r.player; lbStore().meCache = r.player; save(); } } catch(e){}
+  try { const pl = lbPayload(), r = await lbCall(pl); store.rpSent = { month: pl.month, id: acctId() || 'local', rp: pl.rp }; store.rpDirty = false; if (r && r.player){ LB.me = r.player; lbStore().meCache = r.player; } save(); return true; }
+  catch(e){ store.rpDirty = true; save(); return false; }
 }
+// a session that didn't reach the leaderboard (no signal, or the phone had just woken the app up) is sent again until it does
+setInterval(() => { if (store.rpDirty && !document.hidden && navigator.onLine !== false) lbPush(true).catch(() => {}); }, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && store.rpDirty) setTimeout(() => { lbPush(true).catch(() => {}); }, 4000); });
+window.addEventListener('online', () => { if (store.rpDirty) setTimeout(() => { lbPush(true).catch(() => {}); }, 2000); });
 async function lbLoad(force){
   if (!force && LB.rows && Date.now() - (LB.loadedAt || 0) < 60000) return drawLeaderboard(); // switching tabs: use the list from under a minute ago (every request is a Supabase log line)
   LB.loadedAt = Date.now();
