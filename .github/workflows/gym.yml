@@ -1,0 +1,65 @@
+# Builds the Gym Pass iPhone app (gym/) into an unsigned GymPass.ipa on every push that changes it.
+# Download it from Releases (tag "gym-latest") and install it with Sideloadly, which signs it with your Apple ID.
+# The build log goes to the "gym-log" branch so problems can be read without signing in to GitHub.
+name: Gym Pass app
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths: ["gym/**", ".github/workflows/gym.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Make the Xcode project
+        working-directory: gym
+        run: xcodegen generate
+      - name: Build
+        working-directory: gym
+        run: |
+          set -o pipefail
+          xcodebuild -project GymPass.xcodeproj -scheme GymPass -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} build 2>&1 | tee build.log
+      - name: Package GymPass.ipa
+        working-directory: gym
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/GymPass.app Payload/
+          # ad-hoc signature, like most sideload .ipa files: Sideloadly re-signs it with your Apple ID on install
+          codesign --force --sign - --timestamp=none --generate-entitlement-der Payload/GymPass.app
+          zip -qry GymPass.ipa Payload
+          ls -la GymPass.ipa
+      - name: Publish to Releases (gym-latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for n in 1 2 3 4 5; do
+            gh release delete gym-latest --yes --cleanup-tag || true
+            if gh release create gym-latest gym/GymPass.ipa --target "$GITHUB_SHA" --title "Gym Pass iPhone app" \
+              --notes "Built from ${GITHUB_SHA::7}. Install with Sideloadly. See gym/README.md." --prerelease; then exit 0; fi
+            echo "release failed (try $n), waiting"; sleep $((n * 15))
+          done
+          exit 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GymPass-ipa
+          path: gym/GymPass.ipa
+      - name: Save the build log to the gym-log branch
+        if: always()
+        run: |
+          cd gym
+          { echo "result: ${{ job.status }} ($GITHUB_SHA)"; echo; grep -E "error:|BUILD (SUCCEEDED|FAILED)" build.log | head -200; echo; echo "---- last 120 lines ----"; tail -120 build.log; } > ../build-summary.txt 2>/dev/null || echo "no build log" > ../build-summary.txt
+          cd ..
+          git config user.name "github-actions"; git config user.email "actions@users.noreply.github.com"
+          git switch --orphan gym-log-tmp
+          git rm -rfq --cached . || true
+          git add -f build-summary.txt
+          git commit -qm "Gym Pass build log $GITHUB_SHA"
+          git push -f origin HEAD:gym-log
