@@ -352,6 +352,7 @@ html[data-app] #fsRow{display:none!important}
 .mus-viz.pop i{animation:musPop .28s ease-out}
 .mus-viz span{position:absolute;bottom:10px;font:700 13px var(--f-body,system-ui);letter-spacing:.06em;color:rgba(255,255,255,.75)}
 @keyframes musPop{0%{filter:brightness(1.8);transform:scale(1.25)}100%{filter:none}}
+.hm-bar{height:14px;border-radius:7px;box-shadow:inset 0 0 0 1px #fff2}.hm-cols{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.hm-c{position:relative;width:36px;height:36px;border-radius:50%;overflow:hidden;box-shadow:inset 0 0 0 2px #fff4;cursor:pointer}.hm-c input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
 .mus-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .mus-head b{display:block;font-size:17px}.mus-head small{color:var(--muted);font-size:13px}
 .mus-row{display:grid;grid-template-columns:86px 1fr;align-items:center;gap:10px;font-size:14px}.mus-row span{color:var(--muted)}
@@ -2212,6 +2213,7 @@ body.vr-on #dvFrame{display:none}
       <div id="moodLib" style="display:grid;gap:16px"></div>
     </div>
     <div class="card" id="moodEditor" hidden style="display:grid;gap:12px"></div>
+    <div class="card" id="hitMeterCard" style="display:grid;gap:10px"></div>
     <div class="card" id="appLights" hidden style="display:grid;gap:10px"></div>
     <div class="card" style="display:grid;gap:10px">
       <div class="row between"><span class="label">LED brightness</span><span class="muted" style="font-size:13px">for <b id="brightFor" style="color:var(--fg)">this profile</b></span></div>
@@ -3531,6 +3533,7 @@ const DISCO_MS = 10000;
 function bigHit(){
   blinker(bigHitAt());
   if (S.mode !== 'live') return;
+  if (HM.active) return; // the hit meter owns the light (and it's already on its last color)
   const disco = MOODS.excl.find(x => /disco/i.test(x.name));
   let blob = null; try { blob = S.api === 2 ? '#ff00ff' : disco ? moodPayload({ kind:'excl', id: disco.id, name: disco.name }) : null; } catch(e){}
   if (!blob) return;
@@ -4124,7 +4127,8 @@ function trackSession(prev, st){
   const midSess = !!(cur && cur.readyAt); // already reached Ready: Boost and other in-between states are the same session
   if (st === 7 && prev !== 7){ if (!midSess) hitReset(); hitLoopStart(); if (!midSess) phStart(); }
   if (prev === 7 && st !== 7) phEnd(); // start listening during preheat so hits count the moment it's Ready
-  if (st === 8 && prev !== 8){ if (prev !== 9 && prev !== 7 && !midSess) hitReset(); hitLoopStart(); }
+  if (st === 8 && prev !== 8){ if (prev !== 9 && prev !== 7 && !midSess) hitReset(); hitLoopStart(); hmStart(); }
+  if (st === 9 || st <= 6) hmEnd(); // session over: the session light goes back
   if (prev === 8 && st !== 8 && S.mode === 'live' && !zoneLive.on){ clearTimeout(previewTimer); setTimeout(() => { ledJob(previewClear); if (LT.on) ltShowCurrent(); }, 900); }
   const tF = c2f(S.tempC);
   if (st === 7 && prev !== 7 && !cur){
@@ -5827,6 +5831,97 @@ function lockedPeek(ref){
     if (b || e.target === el) shut();
   });
 }
+/* ===== Hit meter light (test build) =====
+   Pick a gradient (2 to 4 colors) and how many seconds until the last color (8 = a blinker). At Ready the Peak shows the
+   first color; while you pull it fades toward the last one, so the light shows how long your hit is. After each hit it
+   goes back to the first color.
+   The app can't change the light mid-pull (a light write then upsets the inhale reading and ends hits early), so the
+   whole fade is written once at Ready as one light the Peak plays itself, set to move only while you inhale (dynamic
+   inhale: diFrac 1, nearly still at rest, full speed while pulling). It's rewritten between hits to start over. */
+const HM_DEF = { on:false, cols:['#00ff6a', '#ffe600', '#ff2a00'], secs:8 };
+const hmCfg = () => { const c = Object.assign({}, HM_DEF, store.hitMeter || {}); c.cols = (Array.isArray(c.cols) ? c.cols : HM_DEF.cols).filter(h => /^#[0-9a-f]{6}$/i.test(h)).slice(0, 4); if (c.cols.length < 2) c.cols = HM_DEF.cols.slice(); c.secs = clamp(Math.round(+c.secs || 8), 3, 20); return c; };
+const HM = { saved:null, active:false, resetT:0, wasOn:false, demoT:0 };
+// the light: the fade is the first quarter of one slow cycle, then it holds the last color (for hits up to ~4x as long)
+function hmLamp(c, demo){
+  const cols = c.cols.map(h => h.toLowerCase()), FADE = 24, HOLD = 72, arr = [];
+  for (let i = 0; i < FADE; i++){ const x = i / (FADE - 1) * (cols.length - 1), k = Math.min(Math.floor(x), cols.length - 2); arr.push(mixL(cols[k], cols[k + 1], x - k)); }
+  for (let i = 0; i < HOLD; i++) arr.push(cols[cols.length - 1]);
+  const sp = Math.round(5 / c.secs * 16) / 16; // one cycle takes 20/speed seconds, so the fade (a quarter) takes c.secs
+  return { name:'pikaled2', param:{ bright:255, speed: sp, speedDi0: demo ? sp : 1 / 16, speedDi1: sp, anim:1, plNum:0, plDenom:0,
+    offset: Array(ledCount()).fill(0), color: MoodEngine.packRgb(arr), colorLen: arr.length, diFrac: demo ? 0 : 1 } };
+}
+function hmBlob(c, demo){ const lamp = hmLamp(c, demo), meta = { version:1, moodName:'Hit meter' }; return isProxy() ? lampBlob(lamp, meta) : cbor({ lamp, meta }); }
+async function hmWrite(blob){ if (isProxy()) await proxyColr('/p/app/thc/colr', blob); else await ble.writeBlob('/p/app/thc/colr', blob); }
+function hmStart(){ // Ready: keep the session light to put back, then show the meter's first color
+  if (!hmCfg().on || S.mode !== 'live' || S.api === 2 || HM.active) return;
+  HM.active = true;
+  ledJob(async () => {
+    try {
+      let saved = null;
+      try { const r = await ble.readAll('/p/app/thc/colr'); if (r && r.length > 8) saved = r; } catch(e){}
+      if (!saved){ try { const r = await ble.readAll(`/u/app/hc/${S.active}/colr`); if (r && r.length > 8) saved = r; } catch(e){} }
+      if (!saved || HIT.on){ HM.active = false; return; } // can't put it back (or a pull already started), so leave it alone
+      HM.saved = saved; await hmWrite(hmBlob(hmCfg()));
+    } catch(e){ HM.active = false; }
+  });
+}
+function hmReset(){ // between hits: start the fade over (never mid-pull)
+  if (!HM.active || !HM.saved || HIT.on) return;
+  ledJob(async () => { if (HIT.on || !HM.active || S.mode !== 'live') return; try { await hmWrite(hmBlob(hmCfg())); } catch(e){} });
+}
+function hmEnd(){
+  clearTimeout(HM.resetT); if (!HM.active) return;
+  HM.active = false; const s = HM.saved; HM.saved = null;
+  if (s) ledJob(async () => { if (S.mode === 'live'){ try { await hmWrite(s); } catch(e){} } });
+}
+setInterval(() => {
+  if (HM.active && S.mode !== 'live'){ HM.active = false; HM.saved = null; } // disconnected: the Peak drops it on its own
+  const on = !!HIT.on;
+  if (HM.wasOn && !on && HM.active){ clearTimeout(HM.resetT); HM.resetT = setTimeout(() => { if (!HIT.on) hmReset(); }, 1500); } // a short dip that turns back into the same hit doesn't reset it
+  HM.wasOn = on;
+}, 200);
+function hmDemo(){ // the fade at normal speed on the preview channel, then back to normal
+  if (!needLive('preview the hit meter')) return;
+  if (S.state >= 7 && S.state <= 9) return toast('Try it after this session, or just take a hit: it’s on during Ready');
+  if (S.api === 2) return toast('The hit meter isn’t on the original Peak yet');
+  const c = hmCfg(); clearTimeout(HM.demoT); clearTimeout(previewTimer);
+  try { if (zoneLive.on) zoneLiveStop(true); } catch(e){}
+  ledJob(() => previewWrite(hmBlob(c, true)).catch(() => {}));
+  toast(`Watch your ${devWord()}: full at ${c.secs}s`);
+  HM.demoT = setTimeout(() => ledJob(previewClear), (c.secs + 3) * 1000);
+}
+function hmSave(c){ store.hitMeter = { on: !!c.on, cols: c.cols.slice(0, 4), secs: c.secs }; save(); }
+function drawHitMeter(){
+  const el = $('#hitMeterCard'); if (!el) return;
+  const c = hmCfg(), grad = `linear-gradient(90deg,${c.cols.join(',')})`;
+  el.innerHTML = `<div class="mus-head"><div><b>⏱️ Hit meter light</b><small>Your ${devWord()} fades from the first color to the last while you pull</small></div>
+      <label class="toggle" style="margin:0"><input type="checkbox" class="switch" data-hm="on" ${c.on ? 'checked' : ''} aria-label="Hit meter light"></label></div>
+    <div class="hm-bar" style="background:${grad}"></div>
+    <div class="hm-cols">${c.cols.map((h, i) => `<label class="hm-c" style="background:${h}" title="Color ${i + 1}"><input type="color" value="${h}" data-hmc="${i}" aria-label="Color ${i + 1}"></label>`).join('')}
+      ${c.cols.length < 4 ? '<button class="btn small" data-hm="add" aria-label="Add a color">+</button>' : ''}${c.cols.length > 2 ? '<button class="btn small" data-hm="del" aria-label="Remove a color">−</button>' : ''}</div>
+    <div class="mus-row"><span>Last color at</span><span class="row" style="gap:8px"><input type="range" min="3" max="20" step="1" value="${c.secs}" data-hm="secs" aria-label="Seconds to the last color" style="flex:1"><b id="hmSecs" style="min-width:34px">${c.secs}s</b></span></div>
+    <button class="btn small" data-hm="demo" style="justify-self:start">Preview on my ${devWord()}</button>
+    <p class="muted" style="margin:0;font-size:12px">On during Ready, and it starts over after each hit. ${c.secs === 8 ? 'At 8s the last color means a blinker. ' : ''}${S.api === 2 ? 'Not on the original Peak yet.' : ''}</p>`;
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('#hitMeterCard [data-hm]'); if (!b || b.type === 'checkbox' || b.type === 'range') return;
+  const c = hmCfg(), k = b.dataset.hm;
+  if (k === 'add' && c.cols.length < 4){ c.cols.push(c.cols[c.cols.length - 1]); hmSave(c); drawHitMeter(); }
+  if (k === 'del' && c.cols.length > 2){ c.cols.pop(); hmSave(c); drawHitMeter(); }
+  if (k === 'demo') hmDemo();
+});
+document.addEventListener('input', e => {
+  const t = e.target; if (!t.closest || !t.closest('#hitMeterCard')) return;
+  const c = hmCfg();
+  if (t.dataset.hmc != null){ c.cols[+t.dataset.hmc] = t.value; t.parentElement.style.background = t.value; const bar = $('#hitMeterCard .hm-bar'); if (bar) bar.style.background = `linear-gradient(90deg,${c.cols.join(',')})`; hmSave(c); }
+  if (t.dataset.hm === 'secs'){ c.secs = +t.value; const v = $('#hmSecs'); if (v) v.textContent = c.secs + 's'; hmSave(c); }
+});
+document.addEventListener('change', e => {
+  const t = e.target; if (!t.closest || !t.closest('#hitMeterCard')) return;
+  if (t.dataset.hm === 'on'){ const c = hmCfg(); c.on = t.checked; hmSave(c); toast(c.on ? 'Hit meter on. It shows during Ready' : 'Hit meter off');
+    if (c.on && S.mode === 'live' && S.state === 8 && !HIT.on) hmStart(); if (!c.on) hmEnd(); }
+  if (t.dataset.hmc != null || t.dataset.hm === 'secs'){ drawHitMeter(); if (HM.active && !HIT.on) hmReset(); } // a change during Ready shows on the next reset
+});
 function supportNudge(force){
   const st = store.support || {}, now = Date.now();
   if (!force){
@@ -8537,6 +8632,7 @@ function drawMoods(){
     `<div class="sgroup"><div class="row between"><span class="label">Your moods</span><span class="row" style="gap:6px"><button class="btn small" id="bNewMood">New mood</button></span></div><div class="moods">${mine.map((r, i) => moodTile(r, i, 'm')).join('') || '<p class="muted">No saved moods yet.</p>'}</div></div>`;
   $('#bNewMood').onclick = () => openMoodEditor();
   rndWire();
+  try { drawHitMeter(); } catch(e){}
   { const t = moodTarget ?? S.active, on = $('#shufOn'), pk = $('#shufPick');
     if (on) on.onchange = e => { const c = shufCfg(t); c.on = e.target.checked; save(); if (c.on && shufPool(t).length < 1) shufSheet(t); else if (c.on) shuffleNext(t, 'Shuffle on'); drawMoods(); };
     if (pk) pk.onclick = () => shufSheet(t); }
@@ -9335,7 +9431,7 @@ function drawTestTools(){
     <p class="muted" style="margin:0;font-size:13px">Ranked rules (fake sessions, nothing goes to the leaderboard)${store.testRankLock > Date.now() ? ' · fake lock on' : ''}</p>
     <div class="shop-actions"><button class="btn small" data-tt="lock">Try 1000 RP lock</button><button class="btn small" data-tt="unlock">Clear lock</button><button class="btn small" data-tt="b2b">Try back-to-back</button></div>
     <div class="shop-actions"><button class="btn small" data-tt="tax:Blaze">Tax pop −3</button><button class="btn small" data-tt="tax:Inferno">−5</button><button class="btn small" data-tt="tax:Champion">−8</button><button class="btn small" data-tt="taxmath">Try rank tax</button><button class="btn small" data-tt="champbl">Champion blinkers</button><button class="btn small" data-tt="pstats">Profile stats</button><button class="btn small" data-tt="frlb">Friends leaderboard</button><button class="btn small" data-tt="lowtemp">450°F rule</button><button class="btn small" data-tt="hothead">Hot Head challenge</button><button class="btn small" data-tt="ishop">Item Shop</button><button class="btn small" data-tt="pass">Ember Pass</button><button class="btn small" data-tt="passxp">+3,000 pass XP</button><button class="btn small" data-tt="sparks">+1,000 Sparks</button><button class="btn small" data-tt="ownall">Own everything on/off</button><button class="btn small" data-tt="passreset">Reset pass + Sparks</button><button class="btn small" data-tt="locker">Locker (frames)</button><button class="btn small" data-tt="spotfake">Spotify bar (fake song)</button><button class="btn small" data-tt="squad">Squad Up (fake 2 of 3)</button><button class="btn small" data-tt="squadref">Invite link check</button><button class="btn small" data-tt="hhmath">Hot Head check</button><button class="btn small" data-tt="newmood">New exclusive mood</button><button class="btn small" data-tt="taxnote">Rank changes popup</button></div>
-    <div class="shop-actions"><button class="btn small" data-tt="pathnotiftry">Notifications test (details)</button><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="premthanks">Premium thank-you popup</button><button class="btn small" data-tt="supnudge">Support Emberline popup (non-Premium)</button><button class="btn small" data-tt="stripe">Premium popup as a non-subscriber (Stripe checkout)</button><button class="btn small" data-tt="sesscard">Session share card</button><button class="btn small" data-tt="appcam">iPhone app: camera color</button><button class="btn small" data-tt="appmusic">iPhone app: music sync</button><button class="btn small" data-tt="appfps">Frame rate (120 Hz check)</button><button class="btn small" data-tt="applive">iPhone app: Live Activity demo</button><button class="btn small" data-tt="appnotif">iPhone app: test notification</button><button class="btn small" data-tt="apphaptic">iPhone app: haptics</button><button class="btn small" data-tt="appbg">iPhone app: fake closed-app session</button><button class="btn small" data-tt="appmulti">iPhone app: 3 devices (demo)</button><button class="btn small" data-tt="appheatboth">iPhone app: Heat both</button><button class="btn small" data-tt="appmultisess">iPhone app: fake session from another device</button><button class="btn small" data-tt="appsite">iPhone app: go back to the live app</button><button class="btn small" data-tt="hwsplash">Halloween startup</button><button class="btn small" data-tt="torch">Torch dab (Rich)</button><button class="btn small" data-tt="torchsim">Torch dab curve demo</button><button class="btn small" data-tt="lockpeek">Locked colorway preview (as a free user)</button><button class="btn small" data-tt="premmoods">Premium moods (Lights tab)</button><button class="btn small" data-tt="gifpfp">GIF profile picture</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="seshnote">Group sesh Premium notification</button><button class="btn small" data-tt="ednote">Special edition moods Premium notification</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${(() => { try { return Object.keys(DFX_FX); } catch(e){ return []; } })().map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
+    <div class="shop-actions"><button class="btn small" data-tt="pathnotiftry">Notifications test (details)</button><button class="btn small" data-tt="patherr">Path Bluetooth error</button><button class="btn small" data-tt="lbmoves">Fake leaderboard moves</button><button class="btn small" data-tt="fstoggle">Rich's full screen toggle</button><button class="btn small" data-tt="vr">VR panel</button><button class="btn small" data-tt="vrdemo">VR panel (demo numbers)</button><button class="btn small" data-tt="vrsim">VR simulator page</button><button class="btn small" data-tt="vr3d">VR room (3D, walk around)</button><button class="btn small" data-tt="ptmode">Passthrough mode (Quest)</button><button class="btn small" data-tt="duelbot">1v1 vs bot</button><button class="btn small" data-tt="dblpop">Double RP popup</button><button class="btn small" data-tt="dblnote">Double RP notification</button><button class="btn small" data-tt="premme">${store.testPrem ? 'Stop acting as Premium' : 'Act as Premium (this phone)'}</button><button class="btn small" data-tt="preminfo">Premium popup</button><button class="btn small" data-tt="premthanks">Premium thank-you popup</button><button class="btn small" data-tt="supnudge">Support Emberline popup (non-Premium)</button><button class="btn small" data-tt="stripe">Premium popup as a non-subscriber (Stripe checkout)</button><button class="btn small" data-tt="sesscard">Session share card</button><button class="btn small" data-tt="appcam">iPhone app: camera color</button><button class="btn small" data-tt="appmusic">iPhone app: music sync</button><button class="btn small" data-tt="appfps">Frame rate (120 Hz check)</button><button class="btn small" data-tt="applive">iPhone app: Live Activity demo</button><button class="btn small" data-tt="appnotif">iPhone app: test notification</button><button class="btn small" data-tt="apphaptic">iPhone app: haptics</button><button class="btn small" data-tt="appbg">iPhone app: fake closed-app session</button><button class="btn small" data-tt="appmulti">iPhone app: 3 devices (demo)</button><button class="btn small" data-tt="appheatboth">iPhone app: Heat both</button><button class="btn small" data-tt="appmultisess">iPhone app: fake session from another device</button><button class="btn small" data-tt="appsite">iPhone app: go back to the live app</button><button class="btn small" data-tt="hwsplash">Halloween startup</button><button class="btn small" data-tt="torch">Torch dab (Rich)</button><button class="btn small" data-tt="torchsim">Torch dab curve demo</button><button class="btn small" data-tt="hitmeter">Hit meter light</button><button class="btn small" data-tt="hmdemo">Hit meter preview</button><button class="btn small" data-tt="lockpeek">Locked colorway preview (as a free user)</button><button class="btn small" data-tt="premmoods">Premium moods (Lights tab)</button><button class="btn small" data-tt="gifpfp">GIF profile picture</button><button class="btn small" data-tt="notesnow">Load notifications now</button><button class="btn small" data-tt="notesfake">Fake invite notification (inbox)</button><button class="btn small" data-tt="sesh">Group sesh</button><button class="btn small" data-tt="seshdemo">Group sesh demo (fake friends)</button><button class="btn small" data-tt="seshnote">Group sesh Premium notification</button><button class="btn small" data-tt="ednote">Special edition moods Premium notification</button><button class="btn small" data-tt="micchk">Mic check (voice chat)</button><button class="btn small" data-tt="dfxall">Try all 1v1 Puffco effects</button>${(() => { try { return Object.keys(DFX_FX); } catch(e){ return []; } })().map(k => `<button class="btn small" data-tt="dfx:${k}">Effect: ${esc(DFX_FX[k].n)}</button>`).join('')}<button class="btn small" data-tt="dfxstop">Stop effect</button><button class="btn small" data-tt="dfxpv">1v1 effects while heating: ${store.dfxPv ? 'preview channel' : 'live heat light'}</button><button class="btn small" data-tt="dcap">1v1 daily limit popup</button><button class="btn small" data-tt="dcapfill">Fill today's 1v1 limit</button><button class="btn small" data-tt="dueldemo">1v1 demo match (for videos)</button><button class="btn small" data-tt="duelfast">1v1 vs bot (fast: 1s hits, 1 min clock)</button><button class="btn small" data-tt="rtcheck">Relay check</button><button class="btn small" data-tt="dinvite">Fake 1v1 invite</button><button class="btn small" data-tt="dqbot">Queue finds a bot</button><button class="btn small" data-tt="dfriends">Fake friends in 1v1 list</button><button class="btn small" data-tt="dprof">Load the 505°F 1v1 profile</button><button class="btn small" data-tt="dprofback">Put Profile 1 back (1v1)</button><button class="btn small" data-tt="asrich">${store.testRich ? 'Stop acting as rich' : 'Act as rich'}</button></div>`;
 }
 function drawAccountStats(){
   const el = $('#acctStats'); if (!el) return;
@@ -9556,6 +9652,8 @@ $('#testTools').addEventListener('click', e => {
     window.emberSide(JSON.stringify({ type:'status', devs:[{ id:fake[0].id, conn:true, st:8, hits:2, best:6.1, readyAt:now - 20000, endsAt:now + 45000 }, { id:fake[1].id, conn:true, st:5, hits:0 }] }));
     if (!IS_APP){ const el = $('#sideDevs'); if (el){ el.hidden = false; el.innerHTML = Object.values(SIDE.st).map(x => { const d = sideDev(x.id) || {}; return `<button class="sd-row${x.st === 8 ? ' hot' : ''}" data-sdsw="${esc(x.id)}"><img alt="" src="${d.series === 'toad' ? DEV_IMG.proxy : DEV_IMG.peak}"><span class="sd-t"><b>${esc(d.label || d.name)}</b><small>${esc(sideWord(x))}</small></span><span class="sd-go">Switch</span></button>`; }).join(''); } }
     show('home'); toast('Demo: 2 more devices on the Session screen'); return; }
+  if (k === 'hitmeter'){ show('lights'); setTimeout(() => { const el = $('#hitMeterCard'); if (el) el.scrollIntoView({ block:'center', behavior:'smooth' }); }, 300); return; }
+  if (k === 'hmdemo'){ hmDemo(); return; }
   if (k === 'lockpeek'){ const x = edAll()[0] || EDITION_MOODS[0]; if (!x) return toast('No limited editions here'); lockedPeek({ kind:'ed', id:x.id, name:x.name }); return; }
   if (k === 'appheatboth'){ show('home'); heatBoth(); return; }
   if (k === 'appmultisess'){ const t = Date.now() - 90000, ds = devList(); let d = ds.find(x => x.id !== currentDevId()); if (!d){ d = { id:'demo-2', name:'Peak 2', label:'Peak 2', series:'peach', last:0 }; ds.push(d); save(); }
