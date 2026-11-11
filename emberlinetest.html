@@ -6422,7 +6422,7 @@ const I = {
   squad: c => [[-14, 5, .78], [14, 5, .78], [0, 0, 1]].map(([dx, dy, k]) => `<g transform="translate(${30 + dx} ${32 + dy}) scale(${k})"><circle cy="-9" r="7.5" fill="${c}" stroke="#120e19" stroke-width="${k === 1 ? 3 : 0}"/><path d="M-13 16c0-9 5.5-13.5 13-13.5S13 7 13 16z" fill="${c}" stroke="#120e19" stroke-width="${k === 1 ? 3 : 0}"/></g>`).join(''),
   cloud9: c => `<path d="M17 42a9 9 0 0 1-1-17.9A12 12 0 0 1 39 20a9.5 9.5 0 0 1 5 18.6V42z" fill="${c}"/><text x="30" y="40" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="900" font-size="17" fill="#120e19">9</text>`,
   nugget: c => `<path d="M12 40l6-14 10-5 12 3 8 10-4 9-14 3z" fill="${c}"/><path d="M18 26l10-5 2 9-12 10z" fill="#ffffff55"/><path d="M42 16l2 4 4 1-4 1-2 4-2-4-4-1 4-1z" fill="${c}"/>`,
-  stopwatch: c => `<circle cx="30" cy="34" r="16" fill="none" stroke="${c}" stroke-width="5"/><rect x="26" y="10" width="8" height="6" rx="2" fill="${c}"/><path d="M30 34V24" stroke="${c}" stroke-width="4" stroke-linecap="round"/><path d="M30 34l7 4" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/><text x="30" y="57" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="900" font-size="9" fill="${c}">15s</text>`,
+  stopwatch: c => `<circle cx="30" cy="34" r="16" fill="none" stroke="${c}" stroke-width="5"/><rect x="26" y="10" width="8" height="6" rx="2" fill="${c}"/><path d="M30 34V24" stroke="${c}" stroke-width="4" stroke-linecap="round"/><path d="M30 34l7 4" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/><text x="30" y="57" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="900" font-size="9" fill="${c}">20s</text>`,
   star: c => `<path d="M30 8l6.4 13.2 14.6 2-10.6 10.2 2.6 14.4L30 40.9 17 47.8l2.6-14.4L9 23.2l14.6-2z" fill="${c}"/>`,
   secret: c => `<text x="30" y="41" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="900" font-size="32" fill="${c}">???</text>`
 };
@@ -6455,9 +6455,9 @@ const CATS = [
   { n:'Weekly', c:'#26c0e0', badges:[
     { id:'wk-spotless', name:'Spotless', week:'2026-11-02', req:'Clean your device twice this week (Nov 2–8), both before the clean meter turns red. Only during this week.', icon:'droplet', col:['#e6fbff','#3fd4f5','#065a73'], rar:'epic' },
     { id:'wk-midas', name:'Midas Touch', week:'2026-11-02', prem:true, req:'Premium members only: land 10 blinkers this week (Nov 2–8). Only during this week.', icon:'crowns', col:['#fff4c9','#ffd23f','#8a6115'], rar:'legendary' },
-    { id:'wk-cloud9', name:'Cloud Nine', week:'2026-11-09', req:'Have 9 sessions this week (Nov 9–15). Only during this week.', icon:'cloud9', col:['#eef4ff','#8fb8ff','#2a4a8a'], rar:'epic' },
-    { id:'wk-goldrush', name:'Gold Rush', week:'2026-11-09', prem:true, req:'Premium members only: 3 sessions this week (Nov 9–15) with 2 or more blinkers each. Only during this week.', icon:'nugget', col:['#fff4c9','#ffc53d','#8a5a00'], rar:'legendary' },
-    { id:'wk-longhaul', name:'Long Haul', week:'2026-11-09', prem:true, req:'Premium members only: take a single hit of 15 seconds or longer this week (Nov 9–15). Only during this week.', icon:'stopwatch', col:['#ffe1f4','#ff5fb4','#7a0a4a'], rar:'legendary' } ]},
+    { id:'wk-cloud9', name:'Cloud Nine', week:'2026-11-09', req:'Have 9 sessions this week (Nov 9–15) with at least one blinker in each. Only during this week.', icon:'cloud9', col:['#eef4ff','#8fb8ff','#2a4a8a'], rar:'epic' },
+    { id:'wk-goldrush', name:'Gold Rush', week:'2026-11-09', prem:true, req:'Premium members only: 5 sessions this week (Nov 9–15) with 3 or more blinkers each. Only during this week.', icon:'nugget', col:['#fff4c9','#ffc53d','#8a5a00'], rar:'legendary' },
+    { id:'wk-longhaul', name:'Long Haul', week:'2026-11-09', prem:true, req:'Premium members only: take a single hit of 20 seconds or longer this week (Nov 9–15). Only during this week.', icon:'stopwatch', col:['#ffe1f4','#ff5fb4','#7a0a4a'], rar:'legendary' } ]},
   { n:'Limited', c:'#c06bff', badges:[
     { id:'founder', name:'Founder', req:'Joined Emberline in its first month. Can never be earned again.', icon:'founder', col:['#f0d9ff','#a24bff','#3a0070'], rar:'legendary' },
     { id:'420', name:'4/20', req:'Have a session on April 20th.', icon:'leaf', col:['#d8ffc9','#4cd964','#145c1c'], rar:'rare' },
@@ -6563,9 +6563,9 @@ function spbStatus(){
     let n = 0, goal = 1;
     if (b.id === 'wk-spotless'){ goal = 2; n = (store.cleanLog || []).filter(c => inWk(c.t) && c.onTime).length; }
     if (b.id === 'wk-midas'){ goal = 10; n = ss.filter(x => inWk(x.t)).reduce((a, x) => a + hitsOf(x).filter(h => h >= blinkOf(x)).length, 0); }
-    if (b.id === 'wk-cloud9'){ goal = 9; n = ss.filter(x => inWk(x.t)).length; }
-    if (b.id === 'wk-goldrush'){ goal = 3; n = ss.filter(x => inWk(x.t) && hitsOf(x).filter(h => h >= blinkOf(x)).length >= 2).length; }
-    if (b.id === 'wk-longhaul'){ goal = 1; n = ss.some(x => inWk(x.t) && hitsOf(x).some(h => h >= 15)) ? 1 : 0; }
+    if (b.id === 'wk-cloud9'){ goal = 9; n = ss.filter(x => inWk(x.t) && hitsOf(x).some(h => h >= blinkOf(x))).length; }
+    if (b.id === 'wk-goldrush'){ goal = 5; n = ss.filter(x => inWk(x.t) && hitsOf(x).filter(h => h >= blinkOf(x)).length >= 3).length; }
+    if (b.id === 'wk-longhaul'){ goal = 1; n = ss.some(x => inWk(x.t) && hitsOf(x).some(h => h >= 20)) ? 1 : 0; }
     const ok = n >= goal && (!b.prem || isPremium());
     out[b.id] = { got: ok, prog: b.prem && !isPremium() ? 'Premium only · ' + when : `${Math.min(n, goal)} / ${goal} · ${when}` };
   });
