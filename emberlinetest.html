@@ -1234,6 +1234,7 @@ html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:non
 .bb-lock svg{width:13px;height:13px;fill:none;stroke:#fff;stroke-width:2.2;stroke-linecap:round;filter:none!important;opacity:1!important}
 .bb-name{font:600 10.5px var(--f-round);color:var(--muted);text-align:center;line-height:1.2;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bb-item.got .bb-name{color:var(--fg)}
+.bb-prem{font:700 9.5px var(--f-round,system-ui);color:#ffd23f;white-space:nowrap}.bb-item.premlock .bb-art{filter:grayscale(.35)}
 .bv-locked svg{filter:grayscale(1) brightness(.6)}
 .bv-how{margin:8px 0 0;max-width:300px;color:#ddd5ea;font-size:15px;line-height:1.4;opacity:0;transition:opacity .4s ease .25s}
 .bv.on .bv-how{opacity:1}
@@ -6227,7 +6228,9 @@ addEventListener('scroll', () => { tapTrack.moved = 99; }, { capture: true, pass
 document.addEventListener('click', e => {
   const b = e.target.closest && e.target.closest('[data-bv]'); if (!b || e.target.closest('.sc-pick, .sc-slots')) return;
   if (tapTrack.moved > 10){ e.preventDefault(); e.stopPropagation(); return; } // was a scroll
-  e.stopPropagation(); openBadge(b.dataset.bv, !!b.closest('#lbProfile'));
+  e.stopPropagation();
+  if (b.classList.contains('premlock')){ premInfo(); return; } // a Premium badge you can't earn yet: show Premium
+  openBadge(b.dataset.bv, !!b.closest('#lbProfile'));
 }, true);
 
 /* ===== round photo cropper: drag with momentum, pinch around your fingers, rubber-band edges, double-tap to zoom ===== */
@@ -6417,6 +6420,9 @@ const I = {
   discord: c => `<path d="M14 18c4-3 8-4 12-4l1 2c-3 0-6 1-9 3 8-4 16-4 24 0-3-2-6-3-9-3l1-2c4 0 8 1 12 4 4 6 6 13 5 21-4 3-8 5-12 5l-2-4c2-1 4-2 5-3-7 3-15 3-22 0 1 1 3 2 5 3l-2 4c-4 0-8-2-12-5-1-8 1-15 5-21z" fill="${c}"/><ellipse cx="23" cy="31" rx="3.4" ry="3.8" fill="#120e19"/><ellipse cx="37" cy="31" rx="3.4" ry="3.8" fill="#120e19"/>`,
   bug: c => `<ellipse cx="30" cy="34" rx="11" ry="14" fill="${c}"/><circle cx="30" cy="17" r="6" fill="${c}"/><path d="M30 21v26" stroke="#120e19" stroke-width="2"/><path d="M19 28l-8-4M19 36H9M20 43l-8 5M41 28l8-4M41 36h10M40 43l8 5M27 12l-4-5M33 12l4-5" stroke="${c}" stroke-width="3" stroke-linecap="round"/>`,
   squad: c => [[-14, 5, .78], [14, 5, .78], [0, 0, 1]].map(([dx, dy, k]) => `<g transform="translate(${30 + dx} ${32 + dy}) scale(${k})"><circle cy="-9" r="7.5" fill="${c}" stroke="#120e19" stroke-width="${k === 1 ? 3 : 0}"/><path d="M-13 16c0-9 5.5-13.5 13-13.5S13 7 13 16z" fill="${c}" stroke="#120e19" stroke-width="${k === 1 ? 3 : 0}"/></g>`).join(''),
+  cloud9: c => `<path d="M17 42a9 9 0 0 1-1-17.9A12 12 0 0 1 39 20a9.5 9.5 0 0 1 5 18.6V42z" fill="${c}"/><text x="30" y="40" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="900" font-size="17" fill="#120e19">9</text>`,
+  nugget: c => `<path d="M12 40l6-14 10-5 12 3 8 10-4 9-14 3z" fill="${c}"/><path d="M18 26l10-5 2 9-12 10z" fill="#ffffff55"/><path d="M42 16l2 4 4 1-4 1-2 4-2-4-4-1 4-1z" fill="${c}"/>`,
+  stopwatch: c => `<circle cx="30" cy="34" r="16" fill="none" stroke="${c}" stroke-width="5"/><rect x="26" y="10" width="8" height="6" rx="2" fill="${c}"/><path d="M30 34V24" stroke="${c}" stroke-width="4" stroke-linecap="round"/><path d="M30 34l7 4" stroke="${c}" stroke-width="3.5" stroke-linecap="round"/><text x="30" y="57" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="900" font-size="9" fill="${c}">15s</text>`,
   star: c => `<path d="M30 8l6.4 13.2 14.6 2-10.6 10.2 2.6 14.4L30 40.9 17 47.8l2.6-14.4L9 23.2l14.6-2z" fill="${c}"/>`,
   secret: c => `<text x="30" y="41" text-anchor="middle" font-family="ui-rounded,system-ui,sans-serif" font-weight="900" font-size="32" fill="${c}">???</text>`
 };
@@ -6448,7 +6454,10 @@ const CATS = [
     { id:'squad', name:'Squad Up', req:'Get 3 friends to join Emberline with your invite link or invite code (your username). A friend counts once they make a ranked profile and do 3 sessions.', icon:'squad', col:['#d6ffe6','#3ddc84','#0e5a2e'], rar:'epic' } ]},
   { n:'Weekly', c:'#26c0e0', badges:[
     { id:'wk-spotless', name:'Spotless', week:'2026-11-02', req:'Clean your device twice this week (Nov 2–8), both before the clean meter turns red. Only during this week.', icon:'droplet', col:['#e6fbff','#3fd4f5','#065a73'], rar:'epic' },
-    { id:'wk-midas', name:'Midas Touch', week:'2026-11-02', prem:true, req:'Premium members only: land 10 blinkers this week (Nov 2–8). Only during this week.', icon:'crowns', col:['#fff4c9','#ffd23f','#8a6115'], rar:'legendary' } ]},
+    { id:'wk-midas', name:'Midas Touch', week:'2026-11-02', prem:true, req:'Premium members only: land 10 blinkers this week (Nov 2–8). Only during this week.', icon:'crowns', col:['#fff4c9','#ffd23f','#8a6115'], rar:'legendary' },
+    { id:'wk-cloud9', name:'Cloud Nine', week:'2026-11-09', req:'Have 9 sessions this week (Nov 9–15). Only during this week.', icon:'cloud9', col:['#eef4ff','#8fb8ff','#2a4a8a'], rar:'epic' },
+    { id:'wk-goldrush', name:'Gold Rush', week:'2026-11-09', prem:true, req:'Premium members only: 3 sessions this week (Nov 9–15) with 2 or more blinkers each. Only during this week.', icon:'nugget', col:['#fff4c9','#ffc53d','#8a5a00'], rar:'legendary' },
+    { id:'wk-longhaul', name:'Long Haul', week:'2026-11-09', prem:true, req:'Premium members only: take a single hit of 15 seconds or longer this week (Nov 9–15). Only during this week.', icon:'stopwatch', col:['#ffe1f4','#ff5fb4','#7a0a4a'], rar:'legendary' } ]},
   { n:'Limited', c:'#c06bff', badges:[
     { id:'founder', name:'Founder', req:'Joined Emberline in its first month. Can never be earned again.', icon:'founder', col:['#f0d9ff','#a24bff','#3a0070'], rar:'legendary' },
     { id:'420', name:'4/20', req:'Have a session on April 20th.', icon:'leaf', col:['#d8ffc9','#4cd964','#145c1c'], rar:'rare' },
@@ -6554,6 +6563,9 @@ function spbStatus(){
     let n = 0, goal = 1;
     if (b.id === 'wk-spotless'){ goal = 2; n = (store.cleanLog || []).filter(c => inWk(c.t) && c.onTime).length; }
     if (b.id === 'wk-midas'){ goal = 10; n = ss.filter(x => inWk(x.t)).reduce((a, x) => a + hitsOf(x).filter(h => h >= blinkOf(x)).length, 0); }
+    if (b.id === 'wk-cloud9'){ goal = 9; n = ss.filter(x => inWk(x.t)).length; }
+    if (b.id === 'wk-goldrush'){ goal = 3; n = ss.filter(x => inWk(x.t) && hitsOf(x).filter(h => h >= blinkOf(x)).length >= 2).length; }
+    if (b.id === 'wk-longhaul'){ goal = 1; n = ss.some(x => inWk(x.t) && hitsOf(x).some(h => h >= 15)) ? 1 : 0; }
     const ok = n >= goal && (!b.prem || isPremium());
     out[b.id] = { got: ok, prog: b.prem && !isPremium() ? 'Premium only · ' + when : `${Math.min(n, goal)} / ${goal} · ${when}` };
   });
@@ -7064,7 +7076,8 @@ function drawBadgeBook(){
   const RAR = { mythic:6, mystery:5, legendary:4, epic:3, rare:2, common:1 }, sec = id => Math.floor((store.spbUnlocked[id] || 0) / 1000);
   const recent = got.slice().sort((a, b) => (sec(b.id) - sec(a.id)) || (RAR[b.rar] - RAR[a.rar])).slice(0, 3); // newest first; same moment: rarest first
   const item = (b, big) => { const ok = st[b.id] && st[b.id].got;
-    return `<button class="bb-item ${ok ? 'got' : 'locked'}${big ? ' big' : ''}" data-bv="sp:${b.id}"><span class="bb-art">${SPB.badge(b)}${ok ? '' : '<span class="bb-lock"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span>'}</span><span class="bb-name">${b.secret && !ok ? '???' : b.name}</span></button>`; };
+    const pl = !ok && b.prem && !isPremium();
+    return `<button class="bb-item ${ok ? 'got' : 'locked'}${pl ? ' premlock' : ''}${big ? ' big' : ''}" data-bv="sp:${b.id}"><span class="bb-art">${SPB.badge(b)}${ok ? '' : '<span class="bb-lock"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span>'}</span><span class="bb-name">${b.secret && !ok ? '???' : b.name}</span>${pl ? '<span class="bb-prem">⭐ For Premium</span>' : ''}</button>`; };
   const open = el.querySelector('details') && el.querySelector('details').open;
   setHTML(el, `<span class="label">Badges</span>
     ${recent.length ? `<div class="bb-recent">${recent.map(b => item(b, true)).join('')}</div>` : '<p class="muted" style="margin:0;font-size:14px">No badges yet. Open the list to see what you can earn.</p>'}
