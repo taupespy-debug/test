@@ -40,6 +40,11 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         if let url = Bundle.main.url(forResource: "bridge", withExtension: "js"), let src = try? String(contentsOf: url, encoding: .utf8) {
             uc.addUserScript(WKUserScript(source: src, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
+        // the app's version for Settings ("Emberline for iPhone · Beta · version 1.6 (24)")
+        let info = Bundle.main.infoDictionary ?? [:]
+        let ver = "\(info["CFBundleShortVersionString"] as? String ?? "") (\(info["CFBundleVersion"] as? String ?? ""))"
+        let quoted = (try? JSONSerialization.data(withJSONObject: [ver])).flatMap { String(data: $0, encoding: .utf8) }.map { String($0.dropFirst().dropLast()) } ?? "\"\""
+        uc.addUserScript(WKUserScript(source: "window.EMBER_APP && (window.EMBER_APP.version = " + quoted + ");", injectionTime: .atDocumentStart, forMainFrameOnly: true))
         uc.add(WeakHandler(self), name: "ble")
         uc.add(WeakHandler(self), name: "app")
         cfg.userContentController = uc
@@ -55,7 +60,7 @@ final class WebViewController: UIViewController, WKNavigationDelegate, WKUIDeleg
         web.navigationDelegate = self
         web.uiDelegate = self
         web.alpha = 0 // fades in once the page has drawn: no white or blank flash at launch
-        if #available(iOS 16.4, *) { web.isInspectable = true } // Safari > Develop works for debugging
+        if #available(iOS 16.4, *) { web.isInspectable = false } // the released app: nobody can open the page in Safari's inspector and run their own code in it
         view = web
     }
 

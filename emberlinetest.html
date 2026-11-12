@@ -10,6 +10,7 @@
 .spl-mark .fill{animation:splRise 1.3s cubic-bezier(.55,0,.25,1) .15s both}
 .spl-mark .tip{animation:splFlick 1.6s ease-in-out 1.4s infinite}
 .spl-word{font:700 26px/1 'Chakra Petch',system-ui,sans-serif;letter-spacing:.32em;margin-right:-.32em;text-transform:uppercase;
+.spl-beta{margin-top:-6px;padding:3px 10px;border-radius:99px;font:800 11px/1 'Chakra Petch',system-ui,sans-serif;letter-spacing:.24em;text-transform:uppercase;color:#e9d8ff;background:#7300ff55;box-shadow:inset 0 0 0 1px #b46bff88}.spl-beta[hidden]{display:none}
   background:linear-gradient(180deg,#fff,#d9d3e6);-webkit-background-clip:text;background-clip:text;color:transparent;
   opacity:0;animation:splUp .6s ease-out .55s forwards}
 .spl-bar{width:120px;height:3px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden;opacity:0;animation:splUp .5s ease-out .8s forwards}
@@ -80,11 +81,13 @@
       <path d="M12 9.8c.9 1.5 2 2.6 2 4.4a2 2 0 0 1-4 0c0-1 .5-1.7 1-2.2.2.6.5 1 .9 1.1-.1-1.2 0-2.3.1-3.3z" fill="#f1e6ff" opacity=".55" class="fill" style="animation-delay:.5s"/>
     </svg>
     <span class="spl-word">Emberline</span>
+    <span class="spl-beta" id="splBeta" hidden>Beta</span>
     <span class="spl-bar"><i></i></span>
     <span class="spl-note" id="splNote"></span>
   </div>
 </div>
-<script>(function(){var t0=Date.now(),done=false,loaded=false,ready=false,tick=0;
+<script>if(window.EMBER_APP&&window.EMBER_APP.native){var sb=document.getElementById('splBeta');if(sb)sb.hidden=false}
+(function(){var t0=Date.now(),done=false,loaded=false,ready=false,tick=0;
 function hide(){if(done)return;done=true;clearInterval(tick);var el=document.getElementById('spl');if(!el)return;el.classList.add('out');setTimeout(function(){el.remove()},600)}
 function check(){var t=Date.now()-t0;if(loaded&&t>=(window.emberSplashMin||1600)&&(ready||t>=(window.emberSplashCap||3200)))hide()}
 // the app starts Bluetooth while this screen is up and calls this once connected (or once it gives up)
@@ -2324,6 +2327,7 @@ body.vr-on #dvFrame{display:none}
     <div class="card" style="display:grid;gap:10px">
       <span class="label">Display</span>
       <label class="toggle" id="fsRow"><span>Full screen<br><span class="muted" style="font-size:13px" id="fsNote">Hides the browser bars</span></span><input type="checkbox" class="switch" id="tFull"></label>
+      <p class="muted" id="appVer" hidden style="margin:0;font-size:12px"></p>
       <span class="label" style="margin-top:6px">Connection</span>
       <label class="toggle"><span>Connect automatically<br><span class="muted" style="font-size:13px">Reconnects to your last Peak when you open Emberline</span></span><input type="checkbox" class="switch" id="tAuto"></label>
       <label class="toggle"><span>Show all Bluetooth devices when pairing<br><span class="muted" style="font-size:13px">Use if your Peak has a custom name and won't show up</span></span><input type="checkbox" class="switch" id="tAll"></label>
@@ -3067,7 +3071,8 @@ function armFullscreen(){
 const RICH_ID = 'a1ca5a326c89dd177960d792e64d0e82';
 // rich only: a wallpaper behind the glass (the Lines one, or any photo from his phone, kept on that phone)
 const WALL_LINES = 'bg/rich-wallpaper.jpg';
-function isRich(){ if (IS_TEST && store.testRich) return true; const me = LB.me || lbStore().meCache; return !!(me && me.id === RICH_ID); }
+function realRich(){ const me = LB.me || lbStore().meCache; return !!(me && me.id === RICH_ID); } // the developer's own ranked profile, checked by id
+function isRich(){ if (IS_TEST && store.testRich && realRich()) return true; const me = LB.me || lbStore().meCache; return !!(me && me.id === RICH_ID); }
 function wallPhoto(){ try { return localStorage.getItem('emberWall') || ''; } catch(e){ return ''; } }
 function applyWall(){
   const k = isRich() ? store.wall : '', src = k === 'lines' ? WALL_LINES : k === 'photo' ? wallPhoto() : '';
@@ -5256,7 +5261,14 @@ document.addEventListener('click', e => {
   if (k === 'aurum'){ celebrate({ kind:'aurum', tier:4 }); return; }
   const t = +k; celebrate({ kind: t >= RANK_TIERS.findIndex(x => x.n === 'Champion') ? 'champion' : 'rank', tier: t, from: t - 1 });
 });
+// the iPhone app on the test build, but not the developer: back to the live app (checked once the profile is known)
+function appTestGuard(n){ if (!IS_APP) return; const me = LB.me || lbStore().meCache;
+  if (n > 40 && !(me && me.id)){ try { window.EMBER_APP.post('site', { test:false }); } catch(e){} return; } // never signed in: no way to know it's the developer
+  if (me && me.id){ if (me.id !== RICH_ID){ try { window.EMBER_APP.post('site', { test:false }); } catch(e){} } return; }
+  setTimeout(() => appTestGuard(n + 1), 3000); }
+setTimeout(() => appTestGuard(0), 3000); // after the page has finished loading
 function drawSettings(){
+  try { const av = $('#appVer'); av.hidden = !IS_APP; if (IS_APP) av.textContent = `Emberline for iPhone · Beta${window.EMBER_APP.version ? ' · version ' + window.EMBER_APP.version : ''}`; } catch(e){}
   try { drawCelDev(); } catch(e){}
   $('#themeList').innerHTML = THEMES.map(t => {
     if (t.gold){
@@ -5774,7 +5786,7 @@ const PREM_BANNERS = {
 // awards: 'premium' (no end) or 'premium:YYYY-MM-DD' (Premium through that day)
 const premAward = aw => Array.isArray(aw) && aw.some(a => a === 'premium' || (/^premium:\d{4}-\d{2}-\d{2}$/.test(a) && a.slice(8) >= new Date().toISOString().slice(0, 10)));
 const premEnds = r => { const a = r && Array.isArray(r.awards) ? r.awards.filter(x => /^premium:\d{4}-\d{2}-\d{2}$/.test(x)).sort().pop() : null; return a && !r.awards.includes('premium') ? a.slice(8) : null; };
-const isPremRow = r => !!r && (premAward(r.awards) || (IS_TEST && store.testPrem && LB.me && r.id === LB.me.id));
+const isPremRow = r => !!r && (premAward(r.awards) || (IS_TEST && store.testPrem && realRich() && LB.me && r.id === LB.me.id));
 const isPremium = () => isPremRow(LB.me || lbStore().meCache);
 const bnrIsImg = b => typeof b === 'string' && (b.startsWith(SB_URL + '/storage/') || /^data:image\/(jpeg|gif);base64,/.test(b)); // an uploaded picture or GIF
 const premBannerOf = r => isPremRow(r) ? (PREM_BANNERS[r.banner] || bnrIsImg(r.banner) ? r.banner : 'aurora') : null;
@@ -7042,7 +7054,7 @@ document.addEventListener('click', e => {
 
 /* ===== Rich's dev frame + banner =====
    Tied to his account id, so everyone sees them on his profile with no server change. Animates only on profiles */
-const isRichId = id => !!id && (id === RICH_ID || (IS_TEST && store.testRich && LB.me && id === LB.me.id));
+const isRichId = id => !!id && (id === RICH_ID || (IS_TEST && store.testRich && realRich() && LB.me && id === LB.me.id));
 const RICH_BANNER = 'bg/rich-banner.gif';
 let dvUid = 0;
 function devFramed(avatar, px, live){
@@ -9438,6 +9450,7 @@ function rankTest(k){
 function drawTestTools(){
   const el = $('#testTools'); if (!el) return;
   if (!IS_TEST){ el.hidden = true; return; }
+  if (!realRich()){ el.hidden = false; el.innerHTML = '<span class="label">Test site tools</span><p class="muted" style="margin:0;font-size:13px">For the developer only. Sign in to the developer’s ranked profile to use them.</p>'; return; } // nobody else gets the dev tools
   el.hidden = false;
   el.innerHTML = `<span class="label">Test site tools</span>
     <p class="muted" style="margin:0;font-size:13px">Only on the test link. Blinkers: <b>${blinkerCount()}</b>${goldUnlockedNow() ? ' · Aurum unlocked' : ''}</p>
@@ -9635,6 +9648,7 @@ $('#goldSheet').addEventListener('click', e => {
 });
 $('#testTools').addEventListener('click', e => {
   const b = e.target.closest('[data-tt]'); if (!b) return; const k = b.dataset.tt;
+  if (!realRich()) return toast('Test tools are for the developer only');
   if (k === 'taxnote'){ rankTaxNotice(true); return; }
   if (k === 'vr'){ vrOpen(); return; }
   if (k === 'dprof'){ if (!needLive('load the 1v1 profile')) return; duelLoadProf(DUEL_PUBLIC, true).then(() => toast('1v1 profile on P1: ' + profTxt(DUEL_PUBLIC))); return; }
