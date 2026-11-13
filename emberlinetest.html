@@ -6141,7 +6141,7 @@ function earnedBadges(){
   const now = new Date(), cur = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
   out.push(cur + ':now');
   badgeHistory().forEach(b => out.push(b.y + '-' + String(b.m + 1).padStart(2, '0') + ':' + b.t));
-  const st = spbStatus(); SPB_ALL.forEach(b => { if (st[b.id] && st[b.id].got) out.push('sp:' + b.id); });
+  const st = spbStatus(); SPB_ALL.forEach(b => { if (st[b.id] && st[b.id].got) out.push(spKey(b.id)); });
   return out;
 }
 function showcaseEditor(){
@@ -6518,7 +6518,8 @@ function lum(hex){ const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 1
   return { CATS, badge };
 })();
 const SPB_ALL = SPB.CATS.flatMap(c => c.badges.map(b => Object.assign({ cat: c.n, catColor: c.c }, b)));
-const spbById = id => SPB_ALL.find(b => b.id === id);
+const spbById = id => SPB_ALL.find(b => b.id === id || b.id.replace(/-/g, '') === id); // showcases store weekly badges without the dash (the server only takes letters and numbers)
+const spKey = id => 'sp:' + id.replace(/-/g, '');
 // which special badges you've earned, worked out from your own history (plus server awards for the hand-given ones)
 function spbStatus(){
   const ss = rankSessions().slice().sort((a, b) => a.t - b.t), out = {};
