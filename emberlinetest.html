@@ -5883,10 +5883,11 @@ async function emberRoll(force){
   } catch(e){ if (force) toast('Roll failed: ' + (e.message || e)); }
   finally { TOKEN.rolling = false; }
 }
-// Stats: how many players have found an Ember Token (everyone sees it; the developer also sees who)
+// Stats: how many players have found an Ember Token, and who. Only the developer sees it
 const TOKSTAT = { at:0, n:null, names:[] };
 async function drawTokenStat(force){
   const el = $('#tokenStat'); if (!el) return;
+  if (!realRich()){ el.hidden = true; return; } // the developer's own count, nobody else's
   if (force || Date.now() - TOKSTAT.at > 300000){
     TOKSTAT.at = Date.now();
     try { const rows = await sbRows('/rest/v1/players?select=id,username&awards=cs.%7Bembertoken%7D&limit=500'); TOKSTAT.n = rows.length; TOKSTAT.names = rows.map(r => r.username).filter(Boolean); }
@@ -5894,8 +5895,8 @@ async function drawTokenStat(force){
   }
   const n = TOKSTAT.n, mine = (((LB.me || lbStore().meCache) || {}).awards || []).includes('embertoken');
   el.hidden = n == null;
-  el.innerHTML = `${tokenCoin().replace(/id="tk/g, 'id="tks').replace(/url\(#tk/g, 'url(#tks')}<div class="grow"><b>Ember Token</b><small>1 in 20,000 per session. Comes with a year of Premium.${mine ? ' <span style="color:#ffd23f">You have one 🪙</span>' : ''}</small>
-    ${realRich() && TOKSTAT.names.length ? `<small style="display:block;margin-top:4px">Found by: ${TOKSTAT.names.map(esc).join(', ')}</small>` : ''}</div>
+  el.innerHTML = `${tokenCoin().replace(/id="tk/g, 'id="tks').replace(/url\(#tk/g, 'url(#tks')}<div class="grow"><b>Ember Token <span style="font-size:11px;color:var(--muted);font-weight:700">· only you see this</span></b><small>1 in 20,000 per session. Comes with a year of Premium.${mine ? ' <span style="color:#ffd23f">You have one 🪙</span>' : ''}</small>
+    ${TOKSTAT.names.length ? `<small style="display:block;margin-top:4px">Found by: ${TOKSTAT.names.map(esc).join(', ')}</small>` : ''}</div>
     <div style="text-align:right"><div class="tok-n">${n == null ? '—' : n}</div><small>${n === 1 ? 'player has it' : 'players have it'}</small></div>`;
 }
 function tokenCoin(){ return `<svg viewBox="0 0 200 200" aria-hidden="true"><defs><radialGradient id="tkG" cx="38%" cy="32%" r="75%"><stop offset="0" stop-color="#fffbe0"/><stop offset=".35" stop-color="#ffd23f"/><stop offset=".75" stop-color="#e08a00"/><stop offset="1" stop-color="#8a4a00"/></radialGradient>
