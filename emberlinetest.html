@@ -5867,7 +5867,7 @@ function lockedPeek(ref){
   });
 }
 /* ===== Ember Token (test build): a 1 in 20,000 drop when a session reaches Ready =====
-   The server rolls (action ember_roll), so nobody can fake a win: it gives a month of Premium on top of any you have,
+   The server rolls (action ember_roll), so nobody can fake a win: it gives a year of Premium on top of any you have,
    plus the Ember Token badge, and allows at most 12 rolls a day, 2 minutes apart. A win takes over the screen, and your
    Puffco plays a gold light for the rest of the session (the session's own light comes back after) */
 const TOKEN = { active:false, saved:null, rolling:false };
@@ -5893,7 +5893,7 @@ function emberTokenWin(until, isDemo){
   const el = document.createElement('div'); el.className = 'tok-ov'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Ember Token');
   el.innerHTML = `<div class="tok-rays"></div><div class="tok-flash"></div>
     <div class="tok-in"><div class="tok-coin">${tokenCoin()}</div><h1>EMBER TOKEN</h1><p class="tok-odds">1 in 20,000</p>
-      <p class="tok-msg">You found it. Premium is yours for a month${when ? ` (through ${esc(when)})` : ''} ⭐</p>
+      <p class="tok-msg">You found it. Premium is yours for a year${when ? ` (through ${esc(when)})` : ''} ⭐</p>
       <p class="tok-sub">${S.mode === 'live' && S.state >= 7 && S.state <= 9 ? `Your ${devWord()} is gold for the rest of this session.` : 'Your Ember Token badge is in your badges.'}${isDemo ? ' (demo)' : ''}</p>
       <button class="tok-go">Let’s go 🔥</button></div>`;
   document.body.appendChild(el);
@@ -5903,7 +5903,7 @@ function emberTokenWin(until, isDemo){
       sp.style.setProperty('--dx', Math.cos(a) * d + 'px'); sp.style.setProperty('--dy', Math.sin(a) * d + 'px'); sp.style.animationDelay = (Math.random() * .4) + 's';
       if (Math.random() < .35) sp.style.background = '#fff'; el.appendChild(sp); setTimeout(() => sp.remove(), 2600); } };
   setTimeout(() => burst(70), 1100); setTimeout(() => burst(40), 2200); const more = setInterval(() => { if (!document.body.contains(el)) return clearInterval(more); burst(14); }, 1600);
-  try { if (IS_APP) window.EMBER_APP.post('notify', { title:'EMBER TOKEN 🪙', body:'1 in 20,000. You got a month of Premium!' }); } catch(e){}
+  try { if (IS_APP) window.EMBER_APP.post('notify', { title:'EMBER TOKEN 🪙', body:'1 in 20,000. You got a year of Premium!' }); } catch(e){}
   const close = () => { el.classList.add('out'); setTimeout(() => el.remove(), 450); try { drawBadgeBook(); drawSocial(); drawRank(); } catch(e){} };
   el.querySelector('.tok-go').onclick = close;
   tokenGold();
@@ -6561,7 +6561,7 @@ const CATS = [
     { id:'founder', name:'Founder', req:'Joined Emberline in its first month. Can never be earned again.', icon:'founder', col:['#f0d9ff','#a24bff','#3a0070'], rar:'legendary' },
     { id:'420', name:'4/20', req:'Have a session on April 20th.', icon:'leaf', col:['#d8ffc9','#4cd964','#145c1c'], rar:'rare' },
     { id:'discord', name:'Discord Member', req:'Join the Emberline Discord and ask a mod for it.', icon:'discord', col:['#dfe3ff','#5865f2','#232a8a'], rar:'common' },
-    { id:'embertoken', name:'Ember Token', req:'1 in 20,000. Any session that reaches Ready can drop it, and it comes with a month of Premium.', icon:'token', col:['#fff6c8','#ffc53d','#8a4a00'], rar:'mythic' },
+    { id:'embertoken', name:'Ember Token', req:'1 in 20,000. Any session that reaches Ready can drop it, and it comes with a year of Premium.', icon:'token', col:['#fff6c8','#ffc53d','#8a4a00'], rar:'mythic' },
     { id:'bughunter', name:'Bug Hunter', req:'Handed out by the dev for reporting real bugs.', icon:'bug', col:['#ffe9b8','#ffb020','#7a4a00'], rar:'epic' },
     { id:'premium', name:'Premium', req:'Emberline Premium supporter. Not required, but it helps keep the servers running. Get it from the Premium popup (tap any gold star).', icon:'star', col:['#fff4c9','#ffd23f','#8a6115'], rar:'legendary' } ]},
   { n:'Secret', c:'#ff6f91', badges:[
@@ -9768,7 +9768,7 @@ $('#testTools').addEventListener('click', e => {
     window.emberSide(JSON.stringify({ type:'status', devs:[{ id:fake[0].id, conn:true, st:8, hits:2, best:6.1, readyAt:now - 20000, endsAt:now + 45000 }, { id:fake[1].id, conn:true, st:5, hits:0 }] }));
     if (!IS_APP){ const el = $('#sideDevs'); if (el){ el.hidden = false; el.innerHTML = Object.values(SIDE.st).map(x => { const d = sideDev(x.id) || {}; return `<button class="sd-row${x.st === 8 ? ' hot' : ''}" data-sdsw="${esc(x.id)}"><img alt="" src="${d.series === 'toad' ? DEV_IMG.proxy : DEV_IMG.peak}"><span class="sd-t"><b>${esc(d.label || d.name)}</b><small>${esc(sideWord(x))}</small></span><span class="sd-go">Switch</span></button>`; }).join(''); } }
     show('home'); toast('Demo: 2 more devices on the Session screen'); return; }
-  if (k === 'tokdemo'){ emberTokenWin(new Date(Date.now() + 31 * 864e5).toISOString().slice(0, 10), true); return; }
+  if (k === 'tokdemo'){ emberTokenWin(new Date(Date.now() + 365 * 864e5).toISOString().slice(0, 10), true); return; }
   if (k === 'tokforce'){ if (S.mode !== 'live') return toast('Connect first (the gold light needs a session)'); emberRoll(true); return; }
   if (k === 'hitmeter'){ show('lights'); setTimeout(() => { const el = $('#hitMeterCard'); if (el) el.scrollIntoView({ block:'center', behavior:'smooth' }); }, 300); return; }
   if (k === 'hmdemo'){ hmDemo(); return; }
