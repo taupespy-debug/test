@@ -355,6 +355,7 @@ html[data-app] #fsRow{display:none!important}
 .mus-viz.pop i{animation:musPop .28s ease-out}
 .mus-viz span{position:absolute;bottom:10px;font:700 13px var(--f-body,system-ui);letter-spacing:.06em;color:rgba(255,255,255,.75)}
 @keyframes musPop{0%{filter:brightness(1.8);transform:scale(1.25)}100%{filter:none}}
+.tok-stat{display:flex!important;align-items:center;gap:14px;background:radial-gradient(120% 140% at 0% 0%,#ffd23f26,transparent 60%),var(--card,#16131f)}.tok-stat[hidden]{display:none!important}.tok-stat svg{width:52px;height:52px;flex:none;filter:drop-shadow(0 0 10px #ffb30088)}.tok-stat b{display:block;font:800 16px var(--f-round,system-ui)}.tok-stat .tok-n{font:900 26px 'Chakra Petch',system-ui;color:#ffd23f;line-height:1}.tok-stat small{color:var(--muted);font-size:12.5px}.tok-stat .grow{flex:1;min-width:0}
 .tok-ov{position:fixed;inset:0;z-index:400;display:grid;place-items:center;overflow:hidden;background:radial-gradient(circle at 50% 42%,#4a2a00 0%,#120800 55%,#000 100%);color:#fff;text-align:center;animation:tokIn .35s ease-out}
 .tok-ov.out{animation:tokOut .45s ease-in forwards}
 .tok-flash{position:absolute;inset:0;background:#fff;animation:tokFlash .9s ease-out forwards;pointer-events:none}
@@ -2252,6 +2253,7 @@ body.vr-on #dvFrame{display:none}
   <section class="view" id="v-stats" hidden>
     <div class="row between"><h1 class="largetitle">Stats</h1><span class="tag" id="sampleTag">Sample data</span></div>
     <div class="card rank" id="rankCard"></div>
+    <div class="card tok-stat" id="tokenStat" hidden></div>
     <div class="card bb" id="badgeBook"></div>
     <div class="card" id="duelHist" style="display:none;gap:10px"></div>
     <div class="tiles" id="statTiles"></div>
@@ -5881,6 +5883,21 @@ async function emberRoll(force){
   } catch(e){ if (force) toast('Roll failed: ' + (e.message || e)); }
   finally { TOKEN.rolling = false; }
 }
+// Stats: how many players have found an Ember Token (everyone sees it; the developer also sees who)
+const TOKSTAT = { at:0, n:null, names:[] };
+async function drawTokenStat(force){
+  const el = $('#tokenStat'); if (!el) return;
+  if (force || Date.now() - TOKSTAT.at > 300000){
+    TOKSTAT.at = Date.now();
+    try { const rows = await sbRows('/rest/v1/players?select=id,username&awards=cs.%7Bembertoken%7D&limit=500'); TOKSTAT.n = rows.length; TOKSTAT.names = rows.map(r => r.username).filter(Boolean); }
+    catch(e){ if (TOKSTAT.n == null){ el.hidden = true; return; } }
+  }
+  const n = TOKSTAT.n, mine = (((LB.me || lbStore().meCache) || {}).awards || []).includes('embertoken');
+  el.hidden = n == null;
+  el.innerHTML = `${tokenCoin().replace(/id="tk/g, 'id="tks').replace(/url\(#tk/g, 'url(#tks')}<div class="grow"><b>Ember Token</b><small>1 in 20,000 per session. Comes with a year of Premium.${mine ? ' <span style="color:#ffd23f">You have one 🪙</span>' : ''}</small>
+    ${realRich() && TOKSTAT.names.length ? `<small style="display:block;margin-top:4px">Found by: ${TOKSTAT.names.map(esc).join(', ')}</small>` : ''}</div>
+    <div style="text-align:right"><div class="tok-n">${n == null ? '—' : n}</div><small>${n === 1 ? 'player has it' : 'players have it'}</small></div>`;
+}
 function tokenCoin(){ return `<svg viewBox="0 0 200 200" aria-hidden="true"><defs><radialGradient id="tkG" cx="38%" cy="32%" r="75%"><stop offset="0" stop-color="#fffbe0"/><stop offset=".35" stop-color="#ffd23f"/><stop offset=".75" stop-color="#e08a00"/><stop offset="1" stop-color="#8a4a00"/></radialGradient>
   <linearGradient id="tkF" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#7a2a00"/><stop offset="1" stop-color="#3a1200"/></linearGradient></defs>
   <circle cx="100" cy="100" r="92" fill="url(#tkG)"/><circle cx="100" cy="100" r="78" fill="none" stroke="#8a4a0099" stroke-width="5"/>
@@ -7166,6 +7183,7 @@ function devFramed(avatar, px, live){
 const richBannerHtml = () => `<span class="bnr bnr-img" aria-hidden="true"><img src="${RICH_BANNER}" alt="" loading="lazy"></span>`;
 
 function drawBadgeBook(){
+  try { drawTokenStat(); } catch(e){}
   const el = $('#badgeBook'); if (!el) return;
   const st = spbStatus(), first = !store.spbUnlocked; store.spbUnlocked = store.spbUnlocked || {};
   // remember when each badge was first earned, so we can show your newest ones
