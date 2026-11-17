@@ -75,6 +75,13 @@ final class NotesWatch {
         }.resume()
     }
 
+    private func fresh(_ n: [String: Any]) -> Bool {
+        guard let s = n["created_at"] as? String else { return true }
+        // Supabase sends "2026-11-17T20:01:02.123456+00:00": the first 19 characters are the UTC time to the second
+        guard s.count >= 19, let d = ISO8601DateFormatter().date(from: String(s.prefix(19)) + "Z") else { return true }
+        return Date().timeIntervalSince(d) < 600
+    }
+
     private func show(_ n: [String: Any]) {
         let who = (n["from_name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Someone"
         let data = n["data"] as? [String: Any] ?? [:]
@@ -85,6 +92,9 @@ final class NotesWatch {
             let bet = (data["bet"] as? Int).map { " for \($0) RP" } ?? ""
             Notify.shared.send("🔥 \(who) wants to 1v1\(bet)", "Open Emberline to join. Invites last 15 minutes.")
         case "follow": Notify.shared.send("👋 \(who) followed you", "Open Emberline to see their profile.")
+        // Premium alerts: only while they still matter (a queue or "just came online" is old news after 10 minutes)
+        case "online" where fresh(n): Notify.shared.send("🟢 \(who) is online", "Open Emberline to 1v1 or start a sesh with them.", id: "online-\(n["from_id"] ?? "")")
+        case "queue" where fresh(n): Notify.shared.send("⚔️ \(who) is in the 1v1 queue", "Open Emberline and queue up to match them.", id: "queue")
         default: break
         }
     }
